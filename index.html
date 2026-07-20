@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <style>
+        body { margin: 0; display: flex; justify-content: center; align-items: center; height: 100vh; background-color: #e0e0e0; }
+        .seal { width: 500px; height: 500px; }
+        svg { width: 100%; height: 100%; }
+    </style>
+</head>
+<body>
+
+<div class="seal">
+    <svg viewBox="0 0 500 500" xmlns="http://www.w3.org/2000/svg">
+        <circle cx="250" cy="250" r="247" fill="black" stroke="#0056b3" stroke-width="6"/>
+        
+        <g id="layer1"></g>
+        <g id="layer2"></g>
+        <g id="layer3"></g>
+        
+        <image href="logo_anor_master.png" x="175" y="175" width="150" height="150" />
+    </svg>
+</div>
+
+<script>
+    const layers = [100, 160, 215]; 
+    const shapes = ['rect', 'circle', 'diamond', 'plus'];
+
+    layers.forEach((radius, layerIndex) => {
+        const group = document.getElementById(`layer${layerIndex + 1}`);
+        // Réduction du nombre d'éléments sur la couche 1 (index 0) pour aérer
+        const numElements = (layerIndex === 0) ? 12 : 24; 
+
+        for (let i = 0; i < numElements; i++) {
+            const angle = (i / numElements) * Math.PI * 2;
+            const x = 250 + Math.cos(angle) * radius;
+            const y = 250 + Math.sin(angle) * radius;
+            
+            const shapeType = shapes[Math.floor(Math.random() * shapes.length)];
+            const isFilled = Math.random() > 0.5;
+            const style = isFilled ? `fill="#0056b3"` : `fill="none" stroke="#0056b3" stroke-width="2.5"`;
+            
+            let el;
+            if (shapeType === 'rect') {
+                const w = Math.random() * 20 + 15;
+                el = `<rect x="${x-w/2}" y="${y-3}" width="${w}" height="6" transform="rotate(${(angle * 180 / Math.PI)}, ${x}, ${y})" ${style}/>`;
+            } else if (shapeType === 'circle') {
+                el = `<circle cx="${x}" cy="${y}" r="5" ${style}/>`;
+            } else if (shapeType === 'diamond') {
+                el = `<rect x="${x-5}" y="${y-5}" width="10" height="10" transform="rotate(45, ${x}, ${y})" ${style}/>`;
+            } else {
+                el = `<text x="${x}" y="${y+6}" fill="#0056b3" font-size="20" text-anchor="middle" font-weight="bold">+</text>`;
+            }
+            group.innerHTML += el;
+        }
+    });
+</script>
+</body>
+</html>

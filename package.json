@@ -1,0 +1,19 @@
+{
+  "name": "anor-v14-production",
+  "version": "14.0.0",
+  "description": "Système de certification et de lecture géométrique de sceaux sécurisés ANOR V14",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.39.8",
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.5",
+    "express": "^4.19.2",
+    "multer": "^1.4.5-lts.1"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}
