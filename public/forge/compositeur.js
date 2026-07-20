@@ -7,16 +7,17 @@ class Compositeur {
         const glyphes = [];
         const nbFormes = 64; // Densité des glyphes sur les orbites concentriques
         
-        // Point de départ de lecture (Ancrage) positionné tout près du médaillon central
+        // RÈGLE VALIDÉE : Point de repère unique sous forme de TRIANGLE positionné strictement à 12H 
+        // dans le premier cercle concentrique (Rayon 110 pour correspondre à l'orbite interne)
         glyphes.push({
-            forme: 'anchor_start',
-            rayon: 95, // Proche du centre (médaillon rayon ~75-85)
-            angle: 0,
+            forme: 'triangle_top',
+            rayon: 110, 
+            angle: -Math.PI / 2, // Position exacte à 12H (Haut du cercle)
             plein: true,
-            taille: 'small'
+            taille: 'fixed'
         });
 
-        // Utilisation de la signature pour générer des variations déterministes
+        // Utilisation de la signature pour générer des variations déterministes (en partant de i = 1)
         for (let i = 1; i < nbFormes; i++) {
             const hexPair = signatureHex.substring((i * 2) % (signatureHex.length - 2), ((i * 2) % (signatureHex.length - 2)) + 2);
             const val = parseInt(hexPair, 16);
@@ -29,7 +30,7 @@ class Compositeur {
             // Angle réparti circulairement avec une dérive pseudo-aléatoire
             const angle = (i / nbFormes) * 2 * Math.PI + (val * 0.01);
 
-            // Alternance stricte formes pleines / vides et types de formes variées
+            // Alternance stricte formes pleines / vides et types de formes variées (excluant le triangle réservé à 12H)
             const types = ['rect_long', 'rect_court', 'circle', 'diamond', 'plus', 'square'];
             const typeIndex = val % types.length;
             const formeType = types[typeIndex];

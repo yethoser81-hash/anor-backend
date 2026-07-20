@@ -244,6 +244,16 @@ app.post('/api/forge', upload.fields([
 
         db.insert(nouveauDossier);
 
+        // Intégration proactive de la génération automatique du kit via KitGeneratorService si disponible
+        let kit_path = null;
+        try {
+            if (typeof KitGeneratorService.generateKit === 'function') {
+                kit_path = await KitGeneratorService.generateKit(nouveauDossier);
+            }
+        } catch (kitErr) {
+            console.warn("Avertissement génération du kit :", kitErr.message);
+        }
+
         return res.status(200).json({
             success: true,
             message: "Sceau forgé avec succès via le compositeur géométrique.",
@@ -251,6 +261,7 @@ app.post('/api/forge', upload.fields([
             empreinte_geometrique,
             signature_maitre,
             pdf_url,
+            kit_path,
             svg,
             version: "ANOR-V16"
         });
@@ -280,7 +291,7 @@ app.get('/api/forge/png/:identifiant', (req, res) => {
 });
 
 // Endpoint pour la génération et récupération du kit de certification complet
-app.get('/api/forge/kit/:identifiant', (req, res) => {
+app.get('/api/forge/kit/:identifiant', async (req, res) => {
     const { identifiant } = req.params;
     const record = db.findByIdentifiant(identifiant);
 
@@ -288,18 +299,28 @@ app.get('/api/forge/kit/:identifiant', (req, res) => {
         return res.status(404).json({ success: false, message: "Kit introuvable." });
     }
 
+    let kitData = {
+        identifiant: record.identifiant,
+        produit: record.nom_produit,
+        producteur: record.nom_producteur,
+        lot: record.lot,
+        empreinte_geometrique: record.empreinte_geometrique,
+        signature_maitre: record.signature_maitre,
+        svg_source: record.svg
+    };
+
+    try {
+        if (typeof KitGeneratorService.getKitData === 'function') {
+            kitData = await KitGeneratorService.getKitData(record);
+        }
+    } catch (e) {
+        console.warn("Utilisation du kit par défaut :", e.message);
+    }
+
     return res.status(200).json({
         success: true,
         message: "Kit de certification récupéré avec succès.",
-        kit: {
-            identifiant: record.identifiant,
-            produit: record.nom_produit,
-            producteur: record.nom_producteur,
-            lot: record.lot,
-            empreinte_geometrique: record.empreinte_geometrique,
-            signature_maitre: record.signature_maitre,
-            svg_source: record.svg
-        }
+        kit: kitData
     });
 });
 
