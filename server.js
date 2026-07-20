@@ -7,6 +7,7 @@ const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
 const crypto = require('crypto');
+const svgToImg = require('svg-to-img'); // Conversion raster haute fidélité
 
 // Importation de vos modules architecturaux validés
 const Compositeur = require('./public/forge/compositeur');
@@ -20,8 +21,9 @@ const PORT = process.env.PORT || 10000;
 const UPLOAD_DIR = path.join(__dirname, 'uploads');
 const CERT_DIR = path.join(UPLOAD_DIR, 'certificates');
 const VISUAL_DIR = path.join(UPLOAD_DIR, 'visuals');
+const KITS_DIR = path.join(UPLOAD_DIR, 'kits');
 
-[UPLOAD_DIR, CERT_DIR, VISUAL_DIR].forEach(dir => {
+[UPLOAD_DIR, CERT_DIR, VISUAL_DIR, KITS_DIR].forEach(dir => {
     if (!fs.existsSync(dir)) {
         fs.mkdirSync(dir, { recursive: true });
     }
@@ -54,6 +56,7 @@ const upload = multer({
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 app.use(express.static(path.join(__dirname, 'public')));
+app.use('/uploads', express.static(UPLOAD_DIR));
 
 // Gestion CORS basique
 app.use((req, res, next) => {
@@ -142,7 +145,7 @@ app.get('/health', (req, res) => {
     });
 });
 
-// Endpoint principal de la Forge : Utilise Compositeur et GeometryIndex
+// Endpoint principal de la Forge : Capture intégrale des données de forge.html
 app.post('/api/forge', upload.fields([
     { name: 'certificat_pdf', maxCount: 1 },
     { name: 'visuel', maxCount: 1 }
@@ -185,7 +188,7 @@ app.post('/api/forge', upload.fields([
             .update(`${identifiant}|${lot}|${pays_origine}`)
             .digest('hex');
 
-        // 2. Appel du Compositeur officiel pour générer les glyphes de la structure géométrique
+        // 2. Appel du Compositeur officiel structuré sur grille
         const glyphes = Compositeur.composer(signature_maitre, { zoneSerie: true });
 
         // 3. Appel du GeometryIndex pour normaliser et calculer l'empreinte SHA-256 déterministe
@@ -195,7 +198,7 @@ app.post('/api/forge', upload.fields([
         // Optimisation compacte des notations
         const lotCompact = lot.replace(/mille/gi, 'M').replace(/III/g, '3').toUpperCase();
 
-        // 4. Construction dynamique du rendu SVG (Zone basse isolée et protégée pour éviter tout chevauchement)
+        // 4. Construction dynamique du rendu SVG fidèle aux spécifications géométriques
         const svg = `
         <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 500 500" width="100%" height="100%">
             <defs>
@@ -203,13 +206,14 @@ app.post('/api/forge', upload.fields([
                     <stop offset="0%" stop-color="#0066FF" />
                     <stop offset="100%" stop-color="#003399" />
                 </linearGradient>
+                <path id="textPath" d="M -60,0 A 60,60 0 1,1 60,0 A 60,60 0 1,1 -60,0" fill="none"/>
             </defs>
 
-            <!-- Anneau principal du sceau (Fond totalement vide / transparent) -->
+            <!-- Anneau principal du sceau (Fond totalement transparent) -->
             <circle cx="250" cy="250" r="245" fill="none" stroke="url(#blueRing)" stroke-width="6"/>
             <circle cx="250" cy="250" r="230" fill="none" stroke="#0066FF" stroke-width="1.2" stroke-dasharray="4,6" opacity="0.5"/>
 
-            <!-- Rendu dynamique des glyphes géométriques (alternance pleins/vides) -->
+            <!-- Rendu structuré des glyphes géométriques -->
             <g id="glyphes-layer">
                 ${glyphes.map(g => {
                     const x = 250 + g.rayon * Math.cos(g.angle);
@@ -219,8 +223,8 @@ app.post('/api/forge', upload.fields([
                     const fillColor = g.plein ? "#0066FF" : "none";
                     const strokeWidth = g.plein ? 1 : 1.8;
 
-                    if (g.forme === 'anchor_start') {
-                        return `<circle cx="${x}" cy="${y}" r="5" fill="#0066FF" stroke="#FFFFFF" stroke-width="1.5"/>`;
+                    if (g.forme === 'anchor_top') {
+                        return `<polygon points="${x},${y-7} ${x-6},${y+5} ${x+6},${y+5}" fill="#0066FF" stroke="#FFFFFF" stroke-width="1"/>`;
                     } else if (g.forme === 'rect_long') {
                         return `<rect x="${x - 18}" y="${y - 4}" width="36" height="8" rx="2" fill="${fillColor}" stroke="${strokeColor}" stroke-width="${strokeWidth}" transform="rotate(${rot} ${x} ${y})" />`;
                     } else if (g.forme === 'rect_court') {
@@ -237,15 +241,19 @@ app.post('/api/forge', upload.fields([
                 }).join('')}
             </g>
 
-            <!-- Médaillon Central officiel intégrant le logo maître -->
+            <!-- Médaillon Central officiel avec texte circulaire -->
             <g transform="translate(250, 250)">
-                <circle cx="0" cy="0" r="75" fill="#FFFFFF" fill-opacity="0.05" stroke="#0066FF" stroke-width="3"/>
-                <image href="/assets/logo_anor_master.png" x="-55" y="-55" width="110" height="110" preserveAspectRatio="xMidYMid meet" />
+                <circle cx="0" cy="0" r="78" fill="#000000" stroke="#0066FF" stroke-width="3"/>
+                <text font-size="8" font-family="monospace" fill="#0066FF" font-weight="bold" letter-spacing="1.5">
+                    <textPath href="#textPath" startOffset="50%" text-anchor="middle">ANOR CERTIFIED • OFFICIAL SEAL •</textPath>
+                </text>
+                <circle cx="0" cy="0" r="42" fill="#FFFFFF" fill-opacity="0.08" stroke="#0066FF" stroke-width="2"/>
+                <text x="0" y="6" font-size="24" font-family="monospace" fill="#FFFFFF" font-weight="bold" text-anchor="middle">NC</text>
             </g>
 
-            <!-- Zone d'identification réglementaire strictement encapsulée (dans la zone neutre sud réservée) -->
+            <!-- Zone d'identification réglementaire sud -->
             <g transform="translate(250, 395)">
-                <rect x="-130" y="0" width="260" height="34" rx="6" fill="#000000" fill-opacity="0.75" stroke="#0066FF" stroke-width="1.5"/>
+                <rect x="-130" y="0" width="260" height="34" rx="6" fill="#000000" fill-opacity="0.85" stroke="#0066FF" stroke-width="1.5"/>
                 <text x="0" y="13" fill="#0066FF" font-size="9.5" font-family="monospace" font-weight="bold" text-anchor="middle">LOT : ${lotCompact} | ${pays_origine.toUpperCase()}</text>
                 <text x="0" y="26" fill="#FFFFFF" font-size="8.5" font-family="monospace" text-anchor="middle">ID: ${identifiant} • SHA: ${empreinte_geometrique.substring(0, 12)}</text>
             </g>
@@ -276,7 +284,7 @@ app.post('/api/forge', upload.fields([
 
         db.insert(nouveauDossier);
 
-        // Intégration proactive de la génération automatique du kit via KitGeneratorService si disponible
+        // Génération automatique du Kit de certification complet
         let kit_path = null;
         try {
             if (typeof KitGeneratorService.generateKit === 'function') {
@@ -288,11 +296,12 @@ app.post('/api/forge', upload.fields([
 
         return res.status(200).json({
             success: true,
-            message: "Sceau forgé avec succès via le compositeur géométrique.",
+            message: "Sceau forgé et enregistré avec succès en base de données.",
             identifiant,
             empreinte_geometrique,
             signature_maitre,
             pdf_url,
+            visuel_url,
             kit_path,
             svg,
             version: "ANOR-V16"
@@ -308,8 +317,8 @@ app.post('/api/forge', upload.fields([
     }
 });
 
-// Endpoint pour le téléchargement direct de l'image SVG / Sceau
-app.get('/api/forge/png/:identifiant', (req, res) => {
+// Endpoint pour le téléchargement direct du Sceau en PNG Haute Définition (HD)
+app.get('/api/forge/png/:identifiant', async (req, res) => {
     const { identifiant } = req.params;
     const record = db.findByIdentifiant(identifiant);
 
@@ -317,43 +326,49 @@ app.get('/api/forge/png/:identifiant', (req, res) => {
         return res.status(404).send("Sceau introuvable ou non généré.");
     }
 
-    res.setHeader('Content-Type', 'image/svg+xml');
-    res.setHeader('Content-Disposition', `attachment; filename="SCEAU_${identifiant}.svg"`);
-    return res.send(record.svg);
+    try {
+        const pngBuffer = await svgToImg.from(record.svg).toPng({ scale: 2 });
+        res.setHeader('Content-Type', 'image/png');
+        res.setHeader('Content-Disposition', `attachment; filename="SCEAU_${identifiant}_HD.png"`);
+        return res.send(pngBuffer);
+    } catch (conversionError) {
+        console.warn("Erreur conversion raster HD, repli SVG :", conversionError.message);
+        res.setHeader('Content-Type', 'image/svg+xml');
+        res.setHeader('Content-Disposition', `attachment; filename="SCEAU_${identifiant}.svg"`);
+        return res.send(record.svg);
+    }
 });
 
-// Endpoint pour la génération et récupération du kit de certification complet
-app.get('/api/forge/kit/:identifiant', async (req, res) => {
+// Endpoint pour télécharger le Kit de certification complet (ZIP ou dossier structuré)
+app.get('/api/forge/kit/download/:identifiant', async (req, res) => {
     const { identifiant } = req.params;
     const record = db.findByIdentifiant(identifiant);
 
     if (!record) {
-        return res.status(404).json({ success: false, message: "Kit introuvable." });
+        return res.status(404).json({ success: false, message: "Enregistrement introuvable pour ce kit." });
     }
 
-    let kitData = {
-        identifiant: record.identifiant,
-        produit: record.nom_produit,
-        producteur: record.nom_producteur,
-        lot: record.lot,
-        empreinte_geometrique: record.empreinte_geometrique,
-        signature_maitre: record.signature_maitre,
-        svg_source: record.svg
-    };
-
     try {
+        // Génération ou récupération des données du kit enrichies
+        let kitData = record;
         if (typeof KitGeneratorService.getKitData === 'function') {
             kitData = await KitGeneratorService.getKitData(record);
         }
-    } catch (e) {
-        console.warn("Utilisation du kit par défaut :", e.message);
-    }
 
-    return res.status(200).json({
-        success: true,
-        message: "Kit de certification récupéré avec succès.",
-        kit: kitData
-    });
+        // Si un fichier ZIP de kit a été généré par le service
+        if (record.kit_path && fs.existsSync(record.kit_path)) {
+            return res.download(record.kit_path);
+        }
+
+        // Fallback propre : création dynamique d'un fichier JSON complet du kit téléchargeable
+        const kitFilePath = path.join(KITS_DIR, `KIT_${identifiant}.json`);
+        fs.writeFileSync(kitFilePath, JSON.stringify(kitData, null, 2), 'utf8');
+
+        return res.download(kitFilePath, `KIT_CERTIFICATION_${identifiant}.json`);
+    } catch (e) {
+        console.error("Erreur téléchargement kit :", e.message);
+        return res.status(500).json({ success: false, message: "Erreur lors de la préparation du kit.", error: e.message });
+    }
 });
 
 app.get('/api/registry/:identifiant', (req, res) => {
@@ -368,5 +383,5 @@ app.get('/api/registry/:identifiant', (req, res) => {
 });
 
 app.listen(PORT, () => {
-    console.log(`[ANOR-V16] Serveur opérationnel sur le port ${PORT} avec le Compositeur géométrique actif.`);
+    console.log(`[ANOR-V16] Serveur opérationnel sur le port ${PORT} avec le Compositeur géométrique structuré.`);
 });

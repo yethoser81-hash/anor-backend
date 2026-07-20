@@ -1,37 +1,51 @@
 // ==========================================
-// ANOR V16 • Compositeur Géométrique Maîtrisé
+// ANOR V16 • Compositeur Géométrique Structuré
 // ==========================================
 
 const Compositeur = {
     composer(signatureMaitre, options = {}) {
         const glyphes = [];
-        const rayons = [160, 130, 100]; // Rayons resserrés et propres hors zone cartouche
-        
-        // Triangle de repérage positionné exactement sur le premier cercle interne au-dessus (12H)
+        // Rayons des orbites circulaires concentriques
+        const rayons = [160, 135, 110]; 
+
+        let sigIndex = 0;
+        function getNextSeed() {
+            if (!signatureMaitre) return Math.random();
+            const charCode = signatureMaitre.charCodeAt(sigIndex % signatureMaitre.length);
+            sigIndex++;
+            return charCode / 255;
+        }
+
+        // Triangle de repérage haut (12H)
         glyphes.push({
             forme: 'anchor_top',
-            rayon: 100,
+            rayon: 110,
             angle: -Math.PI / 2,
             plein: true
         });
 
         rayons.forEach((rayon, ringIdx) => {
-            const count = 18 + ringIdx * 4;
+            // Nombre de glyphes par anneau pour un espacement régulier et dense
+            const count = 24 + ringIdx * 6; 
+            
             for (let i = 0; i < count; i++) {
                 const angle = (i / count) * Math.PI * 2 - Math.PI / 2;
 
-                // ZONE D'EXCLUSION ABSOLUE DU CARTOUCHE BAS (entre 35° et 145° en partant du bas, soit angles bas)
-                // On filtre pour interdire tout glyphe dans la zone sud (approximativement entre 0.6 rad et 2.5 rad)
+                // Zone d'exclusion stricte pour le cartouche bas (laisser la place nette en bas)
                 const normalizedAngle = (angle + Math.PI * 2) % (Math.PI * 2);
-                const isBottomExclusionZone = (normalizedAngle > 0.8 && normalizedAngle < 2.34);
+                const isBottomExclusionZone = (normalizedAngle > 0.7 && normalizedAngle < 2.44);
 
-                if (isBottomExclusionZone && rayon >= 130) {
-                    continue; // On saute les glyphes pour laisser un espace vide propre pour le cartouche
+                if (isBottomExclusionZone && rayon >= 135) {
+                    continue; 
                 }
 
-                const types = ['rect_long', 'rect_court', 'circle', 'diamond', 'square'];
-                const forme = types[i % types.length];
-                const plein = (i % 2 === 0);
+                // Choix déterministe de la forme sur la grille
+                const seedForme = getNextSeed();
+                const types = ['rect_long', 'rect_court', 'circle', 'diamond', 'square', 'plus'];
+                const forme = types[Math.floor(seedForme * types.length)];
+                
+                // Alternance propre pilotée
+                const plein = getNextSeed() > 0.4;
 
                 glyphes.push({
                     forme,
