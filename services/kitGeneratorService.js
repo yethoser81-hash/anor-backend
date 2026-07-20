@@ -6,6 +6,9 @@
  * ==========================================================
  */
 
+const puppeteer = require('puppeteer-core');
+const chromium = require('@sparticuz/chromium');
+
 class KitGeneratorService {
 
     /**
@@ -13,31 +16,42 @@ class KitGeneratorService {
      * @param {Object} donneesLot - Informations du produit et de la quantité
      * @returns {Object} Kit complet avec sérialisation
      */
-    static genererKit(donneesLot) {
-        const { nom_produit, nom_producteur, lot, pays_origine, quantite } = donneesLot;
-        const qte = parseInt(quantite || 1, 10);
+    static async genererKit(donneesLot) {
+        const browser = await puppeteer.launch({
+            args: chromium.args,
+            defaultViewport: chromium.defaultViewport,
+            executablePath: await chromium.executablePath(),
+            headless: true
+        });
 
-        const elementsSerie = [];
+        try {
+            const { nom_produit, nom_producteur, lot, pays_origine, quantite } = donneesLot;
+            const qte = parseInt(quantite || 1, 10);
 
-        for (let i = 1; i <= qte; i++) {
-            elementsSerie.push({
-                numeroSerie: i,
-                totalSerie: qte,
-                referenceEtiquette: `${lot}-SERIE-${i.toString().padStart(4, '0')}`
-            });
+            const elementsSerie = [];
+
+            for (let i = 1; i <= qte; i++) {
+                elementsSerie.push({
+                    numeroSerie: i,
+                    totalSerie: qte,
+                    referenceEtiquette: `${lot}-SERIE-${i.toString().padStart(4, '0')}`
+                });
+            }
+
+            return {
+                produit: nom_produit,
+                producteur: nom_producteur,
+                lot: lot,
+                pays: pays_origine,
+                quantiteTotale: qte,
+                guideUtilisation: "Apposer le sceau numéroté sur chaque étiquette produit conformément au repère angulaire statique.",
+                tailleMinimaleRequise: "50mm x 50mm",
+                guideJuridique: "Certification officielle ANOR V14 - Toute reproduction non autorisée est passible de poursuites.",
+                elementsSerie: elementsSerie
+            };
+        } finally {
+            await browser.close();
         }
-
-        return {
-            produit: nom_produit,
-            producteur: nom_producteur,
-            lot: lot,
-            pays: pays_origine,
-            quantiteTotale: qte,
-            guideUtilisation: "Apposer le sceau numéroté sur chaque étiquette produit conformément au repère angulaire statique.",
-            tailleMinimaleRequise: "50mm x 50mm",
-            guideJuridique: "Certification officielle ANOR V14 - Toute reproduction non autorisée est passible de poursuites.",
-            elementsSerie: elementsSerie
-        };
     }
 }
 

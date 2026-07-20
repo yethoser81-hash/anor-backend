@@ -390,69 +390,19 @@ ${glyphes.map(g => {
         // ==========================================================
         let kit_path = null;
         try {
-            const kitFolder = path.join(KITS_DIR, `KIT_${identifiant}`);
-            if (!fs.existsSync(kitFolder)) {
-                fs.mkdirSync(kitFolder, { recursive: true });
-            }
 
-            // SVG officiel
-            const svgPath = path.join(kitFolder, `SCEAU_${identifiant}.svg`);
-            fs.writeFileSync(svgPath, svg, 'utf8');
+            kit_path =
+            await KitGeneratorService.generateKit(nouveauDossier);
 
-            // PNG HD
-            const pngPath = path.join(kitFolder, `SCEAU_${identifiant}_HD.png`);
-            try {
-                const pngBuffer = await svgToImg.from(svg).toPng({
-                    width: 3000,
-                    height: 3000
-                });
-                fs.writeFileSync(pngPath, pngBuffer);
-            } catch (pngError) {
-                console.warn("PNG kit non généré:", pngError.message);
-            }
+        }catch(kitErr){
 
-            // Metadata
-            const kitMetadata = {
-                identifiant,
-                nom_produit,
-                nom_producteur,
-                lot: lotCompact,
-                pays_origine,
-                quantite,
-                empreinte_geometrique,
-                signature_maitre,
-                version: "ANOR-V16.5",
-                created_at: new Date().toISOString()
-            };
-
-            fs.writeFileSync(
-                path.join(kitFolder, "metadata.json"),
-                JSON.stringify(kitMetadata, null, 2),
-                "utf8"
+            console.error(
+                "KIT ERROR:",
+                kitErr.message
             );
 
-            // Signature
-            fs.writeFileSync(
-                path.join(kitFolder, "signature.sha256"),
-                empreinte_geometrique,
-                "utf8"
-            );
+            kit_path = null;
 
-            // ZIP
-            const zipPath = path.join(KITS_DIR, `KIT_CERTIFICATION_${identifiant}.zip`);
-            const output = fs.createWriteStream(zipPath);
-            const archive = require('archiver')('zip', {
-                zlib: { level: 9 }
-            });
-
-            archive.pipe(output);
-            archive.directory(kitFolder, false);
-            await archive.finalize();
-
-            kit_path = zipPath;
-
-        } catch (kitError) {
-            console.warn("Erreur génération kit:", kitError.message);
         }
 
         const nouveauDossier = {
@@ -473,7 +423,7 @@ ${glyphes.map(g => {
             empreinte_geometrique,
             signature_maitre,
             index_geometrique: indexGeo,
-            svg,          
+            svg,      
             kit_path,
             numero_serie: serialNumber,
             version: "ANOR-V16.5",
@@ -491,10 +441,10 @@ ${glyphes.map(g => {
             pdf_url,
             visuel_url,
             svg,
-            version: "ANOR-V16.5",
-            numero_serie: serialNumber,
-            kit_download: `/api/forge/kit/download/${identifiant}`,
-            png_download: `/api/forge/png/${identifiant}`
+            version:"ANOR-V16.5",
+            numero_serie:serialNumber,
+            kit_download:`/api/forge/kit/download/${identifiant}`,
+            png_download:`/api/forge/png/${identifiant}`
         });
 
     } catch (error) {
