@@ -1,0 +1,466 @@
+<!DOCTYPE html>
+<html lang="fr">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ANOR V16 • Forge Nationale</title>
+    <link rel="stylesheet" href="./forge.css">
+    <link rel="icon" href="/assets/logo_anor.png">
+</head>
+
+<body>
+
+<header class="topbar">
+    <div class="brand">
+        <img src="./assets/logo_anor.png" class="logo" alt="ANOR">
+        <div>
+            <h1>FORGE ANOR</h1>
+            <p>Plateforme Nationale de Certification</p>
+        </div>
+    </div>
+    <nav>
+        <a href="../dashboard/index.html">🏠 Dashboard</a>
+        <a href="../registry/index.html">📦 Registry</a>
+        <a class="active" href="#">🏭 Forge</a>
+        <a href="../verification/index.html">✔ Vérification</a>
+        <a href="../product_audit/index.html">📋 Product Audit</a>
+        <a href="../map_surveillance/index.html">🗺 Surveillance</a>
+        <a href="../intelligence/index.html">🧠 Intelligence</a>
+        <a href="../analytics/index.html">📊 Analytics</a>
+    </nav>
+    <div class="serverState">
+        <div id="serverLed" class="led"></div>
+        <span id="serverLabel">Connexion serveur...</span>
+    </div>
+</header>
+
+<main class="workspace">
+<section class="leftPanel">
+<div class="panel">
+<h2>Informations du produit</h2>
+
+<form id="forgeForm" autocomplete="off">
+    <div class="row">
+        <div class="field">
+            <label>Nom du produit *</label>
+            <input id="nom_produit" name="nom_produit" type="text" required>
+        </div>
+        <div class="field">
+            <label>Nom du producteur *</label>
+            <input id="nom_producteur" name="nom_producteur" type="text" required>
+        </div>
+    </div>
+
+    <div class="row">
+        <div class="field">
+            <label>Composition</label>
+            <textarea id="composition" name="composition"></textarea>
+        </div>
+        <div class="field">
+            <label>Lot *</label>
+            <input id="lot" name="lot" type="text" required>
+        </div>
+    </div>
+
+    <div class="row">
+        <div class="field">
+            <label>Quantité</label>
+            <input id="quantite" name="quantite" type="number" value="1" min="1">
+        </div>
+        <div class="field">
+            <label>Type d'emballage</label>
+            <input id="type_emballage" name="type_emballage" type="text">
+        </div>
+    </div>
+
+    <div class="row">
+        <div class="field">
+            <label>Pays d'origine *</label>
+            <input id="pays_origine" name="pays_origine" list="listePays" autocomplete="off" placeholder="Sélectionner un pays" required>
+            <datalist id="listePays"></datalist>
+        </div>
+        <div class="field">
+            <label>Email entreprise</label>
+            <input id="email" name="email_entreprise" type="email">
+        </div>
+    </div>
+
+    <!-- Champs conditionnels spécifiques au Cameroun (épuré sans saisie manuelle de référence) -->
+    <div id="cameroonFields" style="display:none;">
+        <div class="row">
+            <div class="field" style="grid-column: span 2;">
+                <label>Date du certificat de conformité</label>
+                <input id="date_certificat_conformite" name="date_certificat_conformite" type="date">
+            </div>
+        </div>
+    </div>
+
+    <!-- Champs conditionnels pour l'international -->
+    <div id="internationalFields" style="display:none;">
+        <div class="row">
+            <div class="field">
+                <label>Date de fabrication</label>
+                <input id="date_fabrication" name="date_fabrication" type="date">
+            </div>
+            <div class="field">
+                <label>Date de péremption</label>
+                <input id="date_peremption" name="date_peremption" type="date">
+            </div>
+        </div>
+    </div>
+
+    <div class="row">
+        <div class="field">
+            <label>Certificat PDF</label>
+            <input id="certificat_pdf" name="certificat_pdf" type="file" accept=".pdf">
+        </div>
+        <div class="field">
+            <label>Visuel du produit</label>
+            <input id="visuel" name="visuel" type="file" accept="image/*">
+        </div>
+    </div>
+
+    <div class="actions">
+        <button type="button" id="btnForge">⚙ FORGER</button>
+        <button type="button" id="btnReset">↺ RESET</button>
+        <button type="button" id="btnPNG" disabled>🖼 PNG HD</button>
+        <button type="button" id="btnKit" disabled>📦 KIT COMPLET</button>
+    </div>
+</form>
+</div>
+</section>
+
+<section class="rightPanel">
+    <div class="previewCard">
+        <h2>Prévisualisation</h2>
+        <div class="previewGrid">
+            <div class="previewBox">
+                <div class="previewTitle">IMAGE DU PRODUIT</div>
+                <div class="imageFrame">
+                    <img id="previewImg" src="" alt="Produit" style="display:none;">
+                    <div id="imagePlaceholder" class="placeholder">Aucune image sélectionnée</div>
+                </div>
+            </div>
+            <div class="previewBox">
+                <div class="previewTitle">SCEAU NUMÉRIQUE ANOR</div>
+                <div id="seal-container" class="sealFrame"></div>
+            </div>
+        </div>
+    </div>
+
+    <div class="generationCard">
+        <div class="generationHeader">
+            <div class="generationLed"></div>
+            <span>Génération du sceau</span>
+        </div>
+        <div class="progressCard">
+            <div class="progressLabels">
+                <span>Progression</span>
+                <span id="progressLabel">0%</span>
+            </div>
+            <div class="progressBar">
+                <div id="progressFill" class="progressFill"></div>
+            </div>
+        </div>
+        <div class="generationBody">
+            <div class="generationStatus">
+                <span>Statut</span>
+                <strong id="status">PRÊT</strong>
+            </div>
+            <div class="generationStatus">
+                <span>Pipeline</span>
+                <strong id="pipelineState">En attente</strong>
+            </div>
+        </div>
+    </div>
+
+    <div class="generationCard">
+        <div class="generationHeader">
+            <div class="generationLed"></div>
+            <span>Résultat de la forge</span>
+        </div>
+        <div class="generationBody">
+            <div class="generationStatus">
+                <span>Identifiant ANOR</span>
+                <code id="identifiant">-</code>
+            </div>
+            <div class="generationStatus">
+                <span>SHA256</span>
+                <code id="sha256">-</code>
+            </div>
+            <div class="generationStatus">
+                <span>Signature</span>
+                <code id="debug">-</code>
+            </div>
+            <div class="generationStatus">
+                <span>Version</span>
+                <code id="version">ANOR-V16</code>
+            </div>
+        </div>
+    </div>
+
+    <div class="generationCard">
+        <div class="generationHeader">
+            <div class="generationLed"></div>
+            <span>Pipeline V16</span>
+        </div>
+        <div class="pipelineGrid">
+            <div class="pipelineStep" id="stepCompositeur">Compositeur</div>
+            <div class="pipelineStep" id="stepGeometry">GeometryIndex</div>
+            <div class="pipelineStep" id="stepRenderer">Renderer</div>
+            <div class="pipelineStep" id="stepDecoder">VisionDecoder</div>
+            <div class="pipelineStep" id="stepVerification">VerificationService</div>
+        </div>
+    </div>
+
+    <div class="generationCard">
+        <div class="generationHeader">
+            <div class="generationLed"></div>
+            <span>Journal de génération</span>
+        </div>
+        <div id="journal" class="journal">En attente...</div>
+    </div>
+</section>
+</main>
+
+<!-- SCRIPT LOGIQUE V16 -->
+<script>
+window.API = (location.hostname === "localhost" || location.hostname === "127.0.0.1")
+    ? "http://localhost:10000"
+    : "https://anor-api.onrender.com";
+
+const PAYS_MONDE = [
+    "Afghanistan", "Afrique du Sud", "Albanie", "Algérie", "Allemagne", "Angola", "Arabie Saoudite", "Argentine", "Australie", "Autriche",
+    "Belgique", "Bénin", "Bolivie", "Brésil", "Bulgarie", "Burkina Faso", "Burundi", "Cameroun", "Canada", "Cap-Vert",
+    "Chili", "Chine", "Colombie", "Comores", "Congo", "Côte d'Ivoire", "Croatie", "Danemark", "Égypte", "Émirats arabes unis",
+    "Espagne", "États-Unis", "Éthiopie", "Finlande", "France", "Gabon", "Ghana", "Grèce", "Guinée", "Guinée équatoriale",
+    "Haïti", "Hongrie", "Inde", "Indonésie", "Irlande", "Italie", "Japon", "Kenya", "Liban", "Madagascar",
+    "Malaisie", "Mali", "Maroc", "Maurice", "Mexique", "Mozambique", "Namibie", "Niger", "Nigeria", "Norvège",
+    "Nouvelle-Zélande", "Ouganda", "Pakistan", "Pays-Bas", "Pérou", "Philippines", "Pologne", "Portugal", "Qatar",
+    "République centrafricaine", "République démocratique du Congo", "Roumanie", "Royaume-Uni", "Rwanda", "Sénégal", "Serbie",
+    "Singapour", "Suisse", "Suède", "Tanzanie", "Tchad", "Thaïlande", "Tunisie", "Turquie", "Ukraine", "Venezuela",
+    "Vietnam", "Zambie", "Zimbabwe"
+];
+
+document.addEventListener("DOMContentLoaded", () => {
+    chargerPays();
+    initialiserPays();
+    initialiserPreviewImage();
+    ForgeUI.init();
+});
+
+function chargerPays() {
+    const liste = document.getElementById("listePays");
+    if(!liste) return;
+    PAYS_MONDE.forEach(pays => {
+        const option = document.createElement("option");
+        option.value = pays;
+        liste.appendChild(option);
+    });
+}
+
+function initialiserPays() {
+    const pays = document.getElementById("pays_origine");
+    const cameroun = document.getElementById("cameroonFields");
+    const international = document.getElementById("internationalFields");
+
+    if(!pays) return;
+
+    function actualiser() {
+        const valeur = pays.value.trim().toLowerCase();
+        if(valeur === "cameroun") {
+            cameroun.style.display = "block";
+            international.style.display = "none";
+        } else if(valeur !== "") {
+            cameroun.style.display = "none";
+            international.style.display = "block";
+        } else {
+            cameroun.style.display = "none";
+            international.style.display = "none";
+        }
+    }
+
+    pays.addEventListener("input", actualiser);
+    pays.addEventListener("change", actualiser);
+    actualiser();
+}
+
+function initialiserPreviewImage() {
+    const input = document.getElementById("visuel");
+    const preview = document.getElementById("previewImg");
+    const placeholder = document.getElementById("imagePlaceholder");
+
+    if(!input) return;
+
+    input.addEventListener("change", e => {
+        const file = e.target.files[0];
+        if(!file) return;
+        const reader = new FileReader();
+        reader.onload = event => {
+            preview.src = event.target.result;
+            preview.style.display = "block";
+            placeholder.style.display = "none";
+        };
+        reader.readAsDataURL(file);
+    });
+}
+
+const ForgeUI = {
+    resultat: null,
+
+    init() {
+        this.brancherEvenements();
+        this.reset();
+    },
+
+    brancherEvenements() {
+        document.getElementById("btnForge").addEventListener("click", () => this.forge());
+        document.getElementById("btnReset").addEventListener("click", () => this.reset());
+        
+        document.getElementById("btnPNG").addEventListener("click", () => {
+            if (this.resultat && this.resultat.identifiant) {
+                window.open(`${window.API}/api/forge/png/${this.resultat.identifiant}`, '_blank');
+            }
+        });
+
+        document.getElementById("btnKit").addEventListener("click", () => {
+            if (this.resultat && this.resultat.identifiant) {
+                window.open(`${window.API}/api/forge/kit/${this.resultat.identifiant}`, '_blank');
+            }
+        });
+    },
+
+    log(message) {
+        const journal = document.getElementById("journal");
+        if(journal) {
+            const time = new Date().toLocaleTimeString();
+            journal.innerHTML += `[${time}] ${message}<br>`;
+            journal.scrollTop = journal.scrollHeight;
+        }
+    },
+
+    setStep(stepId, state) {
+        const el = document.getElementById(stepId);
+        if(el) {
+            el.className = `pipelineStep ${state}`;
+        }
+    },
+
+    setProgress(val) {
+        const fill = document.getElementById("progressFill");
+        const label = document.getElementById("progressLabel");
+        if(fill) fill.style.width = `${val}%`;
+        if(label) label.textContent = `${val}%`;
+    },
+
+    setStatus(status, pipelineMsg) {
+        const st = document.getElementById("status");
+        const pipe = document.getElementById("pipelineState");
+        if(st) st.textContent = status;
+        if(pipe) pipe.textContent = pipelineMsg;
+    },
+
+    async forge() {
+        try {
+            this.setStatus("EN COURS", "Initialisation de la forge...");
+            this.setProgress(10);
+            this.log("Début de la séquence de forgeage...");
+
+            this.setStep("stepCompositeur", "en-cours");
+            const form = document.getElementById("forgeForm");
+            const data = new FormData(form);
+
+            this.setProgress(30);
+            this.log("Envoi des flux de données vers le serveur principal...");
+
+            const reponse = await fetch(`${window.API}/api/forge`, {
+                method: "POST",
+                body: data
+            });
+
+            const resultat = await reponse.json();
+
+            if(!reponse.ok || !resultat.success) {
+                throw new Error(resultat.message || "Erreur critique lors de la génération du sceau.");
+            }
+
+            this.resultat = resultat;
+            this.setProgress(60);
+            this.setStep("stepCompositeur", "succes");
+            this.setStep("stepGeometry", "succes");
+            this.log("Sceau généré et index géométrique validé.");
+
+            this.setProgress(85);
+            this.setStep("stepRenderer", "succes");
+            this.setStep("stepDecoder", "succes");
+            this.setStep("stepVerification", "succes");
+
+            this.afficherResultat(resultat);
+            this.setProgress(100);
+            this.setStatus("TERMINÉ", "Sceau forgé avec succès");
+            this.log(`Succès total - ID : ${resultat.identifiant}`);
+
+            document.getElementById("btnPNG").removeAttribute("disabled");
+            document.getElementById("btnKit").removeAttribute("disabled");
+
+        } catch(e) {
+            console.error(e);
+            this.erreur(e.message);
+        }
+    },
+
+    afficherResultat(r) {
+        const sealContainer = document.getElementById("seal-container");
+        if(sealContainer && r.svg) {
+            sealContainer.innerHTML = r.svg;
+        }
+
+        document.getElementById("identifiant").textContent = r.identifiant || "-";
+        document.getElementById("sha256").textContent = r.empreinte_geometrique || r.index_sha256 || r.sha256 || "-";
+        document.getElementById("debug").textContent = r.signature_maitre || r.signature || "-";
+        document.getElementById("version").textContent = r.version || "ANOR-V16";
+    },
+
+    erreur(message) {
+        this.setStatus("ERREUR", message);
+        this.log(`ERREUR : ${message}`);
+        alert(message);
+    },
+
+    reset() {
+        this.resultat = null;
+        const form = document.getElementById("forgeForm");
+        if(form) form.reset();
+
+        const img = document.getElementById("previewImg");
+        if(img) {
+            img.src = "";
+            img.style.display = "none";
+        }
+
+        document.getElementById("imagePlaceholder").style.display = "flex";
+        document.getElementById("seal-container").innerHTML = "";
+        
+        document.getElementById("identifiant").textContent = "-";
+        document.getElementById("sha256").textContent = "-";
+        document.getElementById("debug").textContent = "-";
+        
+        document.getElementById("btnPNG").setAttribute("disabled", "true");
+        document.getElementById("btnKit").setAttribute("disabled", "true");
+
+        this.setProgress(0);
+        this.setStatus("PRÊT", "En attente");
+        document.getElementById("journal").innerHTML = "En attente...";
+        
+        ["stepCompositeur", "stepGeometry", "stepRenderer", "stepDecoder", "stepVerification"].forEach(id => {
+            const el = document.getElementById(id);
+            if(el) el.className = "pipelineStep";
+        });
+
+        initialiserPays();
+    }
+};
+</script>
+</body>
+</html>
