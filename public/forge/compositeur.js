@@ -38,7 +38,7 @@ class Compositeur {
 
             let tailleDefinie = 'medium';
             if (formeType === 'rect_long') tailleDefinie = 'long';
-            if (formeType === 'rect_court') tailleDefinise = 'short';
+            if (formeType === 'rect_court') tailleDefinie = 'short';
 
             glyphes.push({
                 forme: formeType,
