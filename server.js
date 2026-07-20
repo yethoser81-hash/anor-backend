@@ -8,6 +8,11 @@ const path = require('path');
 const fs = require('fs');
 const crypto = require('crypto');
 
+// Importation de vos modules architecturaux validés
+const Compositeur = require('./public/forge/compositeur');
+const GeometryIndex = require('./core/geometryIndex');
+const KitGeneratorService = require('./services/kitGeneratorService');
+
 const app = express();
 const PORT = process.env.PORT || 10000;
 
@@ -42,14 +47,12 @@ const storage = multer.diskStorage({
 
 const upload = multer({ 
     storage: storage,
-    limits: { fileSize: 10 * 1024 * 1024 } // Limite à 10 Mo par fichier
+    limits: { fileSize: 10 * 1024 * 1024 }
 });
 
 // Middlewares globaux
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
-
-// Servir les fichiers statiques du dossier public (forge.html, CSS, assets, etc.)
 app.use(express.static(path.join(__dirname, 'public')));
 
 // Gestion CORS basique
@@ -65,24 +68,18 @@ app.use((req, res, next) => {
 
 // ==========================================
 // Moteur de Base de Données Haute Performance O(1)
-// Conçu pour encaisser des millions de sceaux sans latence.
 // ==========================================
 const db = {
-    // Index principal par identifiant (Complexité O(1) pour l'accès direct)
     registryMap: new Map(),
-    
-    // Index secondaire par empreinte géométrique (pour la recherche inversée ultra-rapide)
     fingerprintMap: new Map(),
 
     insert(data) {
-        // Enregistrement dans les tables de hachage indexées
         this.registryMap.set(data.identifiant, data);
         this.fingerprintMap.set(data.empreinte_geometrique, data);
         return data;
     },
     
     findByIdentifiant(id) {
-        // Recherche à temps constant O(1) via la clé de hachage
         return this.registryMap.get(id) || null;
     },
 
@@ -99,12 +96,10 @@ const db = {
 // ROUTES DE L'API ANOR V16
 // ==========================================
 
-// Route racine : Redirige vers l'interface de la Forge (forge.html)
 app.get('/', (req, res) => {
     res.sendFile(path.join(__dirname, 'public', 'forge.html'));
 });
 
-// Route de test de santé du serveur
 app.get('/health', (req, res) => {
     res.json({ 
         status: 'ONLINE', 
@@ -114,7 +109,7 @@ app.get('/health', (req, res) => {
     });
 });
 
-// Endpoint principal de la Forge : Traitement du formulaire, génération du sceau et indexation immédiate
+// Endpoint principal de la Forge : Utilise Compositeur et GeometryIndex
 app.post('/api/forge', upload.fields([
     { name: 'certificat_pdf', maxCount: 1 },
     { name: 'visuel', maxCount: 1 }
@@ -134,7 +129,6 @@ app.post('/api/forge', upload.fields([
             date_peremption
         } = req.body;
 
-        // Validation stricte des champs obligatoires
         if (!nom_produit || !nom_producteur || !lot || !pays_origine) {
             return res.status(400).json({
                 success: false,
@@ -142,12 +136,10 @@ app.post('/api/forge', upload.fields([
             });
         }
 
-        // Récupération des fichiers téléversés
         const files = req.files || {};
         const certificatFile = files['certificat_pdf'] ? files['certificat_pdf'][0] : null;
         const visuelFile = files['visuel'] ? files['visuel'][0] : null;
 
-        // Association directe de l'URL/chemin du certificat vers le champ 'pdf_url'
         const pdf_url = certificatFile ? `/uploads/certificates/${certificatFile.filename}` : null;
         const visuel_url = visuelFile ? `/uploads/visuals/${visuelFile.filename}` : null;
 
@@ -155,40 +147,78 @@ app.post('/api/forge', upload.fields([
         const randomHex = crypto.randomBytes(4).toString('hex').toUpperCase();
         const identifiant = `ANOR-${new Date().getFullYear()}-${randomHex}`;
 
-        // Construction de la chaîne brute pour le calcul de l'empreinte géométrique SHA-256
-        const rawString = `${identifiant}|${nom_produit}|${nom_producteur}|${lot}|${pays_origine}|${pdf_url || 'no_pdf'}|${Date.now()}`;
-        const empreinte_geometrique = crypto.createHash('sha256').update(rawString).digest('hex');
-
-        // Génération de la signature maître sécurisée
+        // 1. Génération de la signature maître sécurisée
         const signature_maitre = crypto.createHmac('sha256', 'ANOR_MASTER_SECRET_KEY_V16')
-            .update(empreinte_geometrique)
+            .update(`${identifiant}|${lot}|${pays_origine}`)
             .digest('hex');
 
-        // Génération dynamique du Sceau SVG numérique officiel ANOR V16
+        // 2. Appel du Compositeur officiel pour générer les glyphes de la structure géométrique
+        const glyphes = Compositeur.composer(signature_maitre, { zoneSerie: true });
+
+        // 3. Appel du GeometryIndex pour normaliser et calculer l'empreinte SHA-256 déterministe
+        const indexGeo = GeometryIndex.build(glyphes);
+        const empreinte_geometrique = indexGeo.sha256;
+
+        // 4. Construction dynamique du rendu SVG fidèle au modèle visuel bleu et noir avec médaillon NC CERTIFIED
         const svg = `
-        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 300 300" width="100%" height="100%">
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 500 500" width="100%" height="100%">
             <defs>
-                <linearGradient id="goldGrad" x1="0%" y1="0%" x2="100%" y2="100%">
-                    <stop offset="0%" stop-color="#C5A059" />
-                    <stop offset="100%" stop-color="#8C6D33" />
+                <radialGradient id="bgGrad" cx="50%" cy="50%" r="50%">
+                    <stop offset="0%" stop-color="#05140D" />
+                    <stop offset="100%" stop-color="#010402" />
+                </radialGradient>
+                <linearGradient id="blueRing" x1="0%" y1="0%" x2="100%" y2="100%">
+                    <stop offset="0%" stop-color="#0066FF" />
+                    <stop offset="100%" stop-color="#003399" />
                 </linearGradient>
             </defs>
-            <circle cx="150" cy="150" r="140" fill="#0B2215" stroke="url(#goldGrad)" stroke-width="8"/>
-            <circle cx="150" cy="150" r="125" fill="none" stroke="#C5A059" stroke-dasharray="4,4" stroke-width="2"/>
-            <text x="150" y="55" fill="#C5A059" font-size="12" font-family="Arial, sans-serif" font-weight="bold" text-anchor="middle" letter-spacing="2">REPUBLIQUE DU CAMEROUN</text>
-            <text x="150" y="75" fill="#FFFFFF" font-size="9" font-family="Arial, sans-serif" text-anchor="middle" letter-spacing="1">AGENCE NATIONALE DE NORMES ET DE QUALITÉ</text>
-            <text x="150" y="140" fill="#FFFFFF" font-size="16" font-family="Arial, sans-serif" font-weight="bold" text-anchor="middle">${nom_produit.toUpperCase()}</text>
-            <text x="150" y="165" fill="#C5A059" font-size="11" font-family="Arial, sans-serif" text-anchor="middle">LOT : ${lot}</text>
-            <path id="curve" d="M 60,150 A 90,90 0 1,1 240,150" fill="transparent" />
-            <text font-size="10" fill="#C5A059" font-family="Arial, sans-serif" letter-spacing="1">
-                <textPath href="#curve" startOffset="50%" text-anchor="middle">CERTIFIÉ CONFORME • V16</textPath>
-            </text>
-            <rect x="50" y="195" width="200" height="45" rx="6" fill="#05120B" stroke="#C5A059" stroke-width="1.5"/>
-            <text x="150" y="215" fill="#FFFFFF" font-size="9" font-family="monospace" text-anchor="middle">ID: ${identifiant}</text>
-            <text x="150" y="230" fill="#C5A059" font-size="8" font-family="monospace" text-anchor="middle">SHA: ${empreinte_geometrique.substring(0, 16)}...</text>
+
+            <!-- Fond et anneau principal du sceau -->
+            <circle cx="250" cy="250" r="245" fill="url(#bgGrad)" stroke="url(#blueRing)" stroke-width="8"/>
+            <circle cx="250" cy="250" r="230" fill="none" stroke="#0066FF" stroke-width="1.5" stroke-dasharray="5,5" opacity="0.6"/>
+
+            <!-- Rendu dynamique des glyphes géométriques de la bibliothèque -->
+            <g id="glyphes-layer">
+                ${glyphes.map(g => {
+                    const x = 250 + g.rayon * Math.cos(g.angle);
+                    const y = 250 + g.rayon * Math.sin(g.angle);
+                    const rot = (g.angle * 180) / Math.PI;
+                    const strokeColor = "#0066FF";
+                    const fillColor = g.plein ? "#0066FF" : "none";
+
+                    if (g.forme === 'anchor_start') {
+                        return `<circle cx="${x}" cy="${y}" r="6" fill="#0066FF" stroke="#FFFFFF" stroke-width="1.5"/>`;
+                    } else if (g.forme === 'rect') {
+                        return `<rect x="${x - 8}" y="${y - 4}" width="16" height="8" rx="2" fill="${fillColor}" stroke="${strokeColor}" stroke-width="1.5" transform="rotate(${rot} ${x} ${y})" />`;
+                    } else if (g.forme === 'circle') {
+                        return `<circle cx="${x}" cy="${y}" r="5" fill="${fillColor}" stroke="${strokeColor}" stroke-width="1.5"/>`;
+                    } else if (g.forme === 'diamond') {
+                        return `<rect x="${x - 5}" y="${y - 5}" width="10" height="10" fill="${fillColor}" stroke="${strokeColor}" stroke-width="1.5" transform="rotate(45 ${x} ${y})" />`;
+                    } else if (g.forme === 'plus') {
+                        return `<text x="${x}" y="${y + 5}" font-size="14" fill="${strokeColor}" font-family="monospace" text-anchor="middle">+</text>`;
+                    }
+                    return '';
+                }).join('')}
+            </g>
+
+            <!-- Médaillon Central officiel NC CERTIFIED -->
+            <g transform="translate(250, 250)">
+                <circle cx="0" cy="0" r="85" fill="#0A2218" stroke="#0066FF" stroke-width="4"/>
+                <circle cx="0" cy="0" r="75" fill="none" stroke="#0066FF" stroke-width="1" stroke-dasharray="3,3"/>
+                <path id="innerCurve" d="M -60 0 A 60 60 0 1 1 60 0" fill="none" />
+                <text font-size="8.5" fill="#0066FF" font-family="Arial, sans-serif" font-weight="bold" letter-spacing="3.5">
+                    <textPath href="#innerCurve" startOffset="50%" text-anchor="middle">A N O R   C E R T I F I E D</textPath>
+                </text>
+                <circle cx="0" cy="0" r="42" fill="#0044CC" stroke="#0066FF" stroke-width="2"/>
+                <text x="0" y="9" fill="#FFFFFF" font-size="26" font-family="Arial, sans-serif" font-weight="bold" text-anchor="middle">NC</text>
+            </g>
+
+            <!-- Zone d'identification réglementaire au bas du sceau -->
+            <rect x="90" y="430" width="320" height="42" rx="8" fill="#020805" stroke="#0066FF" stroke-width="2"/>
+            <text x="250" y="448" fill="#0066FF" font-size="11" font-family="monospace" font-weight="bold" text-anchor="middle">LOT : ${lot.toUpperCase()} | ${pays_origine.toUpperCase()}</text>
+            <text x="250" y="464" fill="#FFFFFF" font-size="9" font-family="monospace" text-anchor="middle">ID: ${identifiant} • SHA: ${empreinte_geometrique.substring(0, 16)}</text>
         </svg>`;
 
-        // Enregistrement structuré indexé
         const nouveauDossier = {
             identifiant,
             nom_produit,
@@ -206,6 +236,7 @@ app.post('/api/forge', upload.fields([
             visuel_url,
             empreinte_geometrique,
             signature_maitre,
+            index_geometrique: indexGeo,
             svg,           
             version: "ANOR-V16",
             created_at: new Date().toISOString()
@@ -213,10 +244,9 @@ app.post('/api/forge', upload.fields([
 
         db.insert(nouveauDossier);
 
-        // Réponse JSON de succès transmise au frontend
         return res.status(200).json({
             success: true,
-            message: "Sceau forgé et indexé en O(1) avec succès.",
+            message: "Sceau forgé avec succès via le compositeur géométrique.",
             identifiant,
             empreinte_geometrique,
             signature_maitre,
@@ -235,7 +265,6 @@ app.post('/api/forge', upload.fields([
     }
 });
 
-// Endpoint pour débloquer et afficher le PNG HD / SVG du Sceau (Accès ultra-rapide)
 app.get('/api/forge/png/:identifiant', (req, res) => {
     const { identifiant } = req.params;
     const record = db.findByIdentifiant(identifiant);
@@ -248,57 +277,39 @@ app.get('/api/forge/png/:identifiant', (req, res) => {
     return res.send(record.svg);
 });
 
-// Endpoint pour débloquer le Kit Complet (Recherche indexée instantanée)
 app.get('/api/forge/kit/:identifiant', (req, res) => {
     const { identifiant } = req.params;
     const record = db.findByIdentifiant(identifiant);
 
     if (!record) {
-        return res.status(404).json({
-            success: false,
-            message: "Kit introuvable pour cet identifiant."
-        });
+        return res.status(404).json({ success: false, message: "Kit introuvable." });
     }
 
     return res.status(200).json({
         success: true,
-        message: "Kit complet de certification récupéré instantanément.",
+        message: "Kit de certification récupéré.",
         kit: {
             identifiant: record.identifiant,
             produit: record.nom_produit,
             producteur: record.nom_producteur,
             lot: record.lot,
-            pays_origine: record.pays_origine,
-            pdf_certificat: record.pdf_url ? `${req.protocol}://${req.get('host')}${record.pdf_url}` : null,
-            visuel_produit: record.visuel_url ? `${req.protocol}://${req.get('host')}${record.visuel_url}` : null,
             empreinte_geometrique: record.empreinte_geometrique,
-            signature_maitre: record.signature_maitre,
-            date_generation: record.created_at
+            signature_maitre: record.signature_maitre
         }
     });
 });
 
-// Endpoint de lecture rapide / scan de vérification (Garantie de performance même à 10 millions d'entrées)
 app.get('/api/registry/:identifiant', (req, res) => {
     const { identifiant } = req.params;
-    
-    // Accès direct par index de hachage Map : Temps d'exécution constant ~0 milliseconde
     const record = db.findByIdentifiant(identifiant);
 
     if (!record) {
-        return res.status(404).json({
-            success: false,
-            message: "Aucun enregistrement trouvé pour cet identifiant ANOR."
-        });
+        return res.status(404).json({ success: false, message: "Enregistrement introuvable." });
     }
 
-    return res.status(200).json({
-        success: true,
-        data: record
-    });
+    return res.status(200).json({ success: true, data: record });
 });
 
-// Démarrage du serveur backend
 app.listen(PORT, () => {
-    console.log(`[ANOR-V16] Serveur backend opérationnel sur le port ${PORT} avec indexation haute performance en mémoire.`);
+    console.log(`[ANOR-V16] Serveur opérationnel sur le port ${PORT} avec le Compositeur géométrique actif.`);
 });
