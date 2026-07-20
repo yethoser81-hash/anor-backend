@@ -1,5 +1,5 @@
 // ==========================================
-// ANOR V16 • Serveur Backend Principal (API Forge & Indexation Haute Performance)
+// ANOR V16.5 • Serveur Backend Principal (API Forge & Indexation Haute Performance)
 // ==========================================
 
 const express = require('express');
@@ -8,6 +8,7 @@ const path = require('path');
 const fs = require('fs');
 const crypto = require('crypto');
 const svgToImg = require('svg-to-img'); // Conversion raster haute fidélité
+const archiver = require('archiver'); // Génération des archives ZIP pour les kits
 
 // Importation de vos modules architecturaux validés
 const Compositeur = require('./public/forge/compositeur');
@@ -129,7 +130,7 @@ const db = {
 db.init();
 
 // ==========================================
-// ROUTES DE L'API ANOR V16
+// ROUTES DE L'API ANOR V16.5
 // ==========================================
 
 app.get('/', (req, res) => {
@@ -139,7 +140,7 @@ app.get('/', (req, res) => {
 app.get('/health', (req, res) => {
     res.json({ 
         status: 'ONLINE', 
-        version: 'ANOR-V16', 
+        version: 'ANOR-V16.5', 
         total_sceaux_indexes: db.count(),
         timestamp: new Date().toISOString() 
     });
@@ -197,67 +198,262 @@ app.post('/api/forge', upload.fields([
 
         // Optimisation compacte des notations
         const lotCompact = lot.replace(/mille/gi, 'M').replace(/III/g, '3').toUpperCase();
+        const serialNumber = `SN-${randomHex}`;
+        const shaCourt = empreinte_geometrique.substring(0, 16);
 
-        // 4. Construction dynamique du rendu SVG fidèle aux spécifications géométriques
+        // 4. Construction dynamique du rendu SVG officiel ANOR V16.5
         const svg = `
-        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 500 500" width="100%" height="100%">
-            <defs>
-                <linearGradient id="blueRing" x1="0%" y1="0%" x2="100%" y2="100%">
-                    <stop offset="0%" stop-color="#0066FF" />
-                    <stop offset="100%" stop-color="#003399" />
-                </linearGradient>
-                <path id="textPath" d="M -60,0 A 60,60 0 1,1 60,0 A 60,60 0 1,1 -60,0" fill="none"/>
-            </defs>
+<svg
+xmlns="http://www.w3.org/2000/svg"
+viewBox="0 0 700 700"
+width="700"
+height="700">
 
-            <!-- Anneau principal du sceau (Fond totalement transparent) -->
-            <circle cx="250" cy="250" r="245" fill="none" stroke="url(#blueRing)" stroke-width="6"/>
-            <circle cx="250" cy="250" r="230" fill="none" stroke="#0066FF" stroke-width="1.2" stroke-dasharray="4,6" opacity="0.5"/>
+<defs>
 
-            <!-- Rendu structuré des glyphes géométriques -->
-            <g id="glyphes-layer">
-                ${glyphes.map(g => {
-                    const x = 250 + g.rayon * Math.cos(g.angle);
-                    const y = 250 + g.rayon * Math.sin(g.angle);
-                    const rot = (g.angle * 180) / Math.PI;
-                    const strokeColor = "#0066FF";
-                    const fillColor = g.plein ? "#0066FF" : "none";
-                    const strokeWidth = g.plein ? 1 : 1.8;
+<linearGradient id="ringBlue" x1="0%" y1="0%" x2="100%" y2="100%">
+<stop offset="0%" stop-color="#33AAFF"/>
+<stop offset="100%" stop-color="#003399"/>
+</linearGradient>
 
-                    if (g.forme === 'anchor_top') {
-                        return `<polygon points="${x},${y-7} ${x-6},${y+5} ${x+6},${y+5}" fill="#0066FF" stroke="#FFFFFF" stroke-width="1"/>`;
-                    } else if (g.forme === 'rect_long') {
-                        return `<rect x="${x - 18}" y="${y - 4}" width="36" height="8" rx="2" fill="${fillColor}" stroke="${strokeColor}" stroke-width="${strokeWidth}" transform="rotate(${rot} ${x} ${y})" />`;
-                    } else if (g.forme === 'rect_court') {
-                        return `<rect x="${x - 8}" y="${y - 3}" width="16" height="6" rx="1.5" fill="${fillColor}" stroke="${strokeColor}" stroke-width="${strokeWidth}" transform="rotate(${rot} ${x} ${y})" />`;
-                    } else if (g.forme === 'circle') {
-                        return `<circle cx="${x}" cy="${y}" r="4.5" fill="${fillColor}" stroke="${strokeColor}" stroke-width="${strokeWidth}"/>`;
-                    } else if (g.forme === 'diamond') {
-                        return `<rect x="${x - 5}" y="${y - 5}" width="10" height="10" fill="${fillColor}" stroke="${strokeColor}" stroke-width="${strokeWidth}" transform="rotate(45 ${x} ${y})" />`;
-                    } else if (g.forme === 'plus') {
-                        return `<text x="${x}" y="${y + 4}" font-size="12" fill="${strokeColor}" font-family="monospace" text-anchor="middle" font-weight="bold">+</text>`;
-                    } else {
-                        return `<rect x="${x - 5}" y="${y - 5}" width="10" height="10" fill="${fillColor}" stroke="${strokeColor}" stroke-width="${strokeWidth}" transform="rotate(${rot} ${x} ${y})" />`;
-                    }
-                }).join('')}
-            </g>
+<linearGradient id="centerBlue" x1="0%" y1="0%" x2="0%" y2="100%">
+<stop offset="0%" stop-color="#001B52"/>
+<stop offset="100%" stop-color="#000000"/>
+</linearGradient>
 
-            <!-- Médaillon Central officiel avec texte circulaire -->
-            <g transform="translate(250, 250)">
-                <circle cx="0" cy="0" r="78" fill="#000000" stroke="#0066FF" stroke-width="3"/>
-                <text font-size="8" font-family="monospace" fill="#0066FF" font-weight="bold" letter-spacing="1.5">
-                    <textPath href="#textPath" startOffset="50%" text-anchor="middle">ANOR CERTIFIED • OFFICIAL SEAL •</textPath>
-                </text>
-                <circle cx="0" cy="0" r="42" fill="#FFFFFF" fill-opacity="0.08" stroke="#0066FF" stroke-width="2"/>
-                <text x="0" y="6" font-size="24" font-family="monospace" fill="#FFFFFF" font-weight="bold" text-anchor="middle">NC</text>
-            </g>
+<filter id="shadow">
+<feDropShadow
+dx="0"
+dy="0"
+stdDeviation="4"
+flood-color="#0066ff"
+flood-opacity="0.55"/>
+</filter>
 
-            <!-- Zone d'identification réglementaire sud -->
-            <g transform="translate(250, 395)">
-                <rect x="-130" y="0" width="260" height="34" rx="6" fill="#000000" fill-opacity="0.85" stroke="#0066FF" stroke-width="1.5"/>
-                <text x="0" y="13" fill="#0066FF" font-size="9.5" font-family="monospace" font-weight="bold" text-anchor="middle">LOT : ${lotCompact} | ${pays_origine.toUpperCase()}</text>
-                <text x="0" y="26" fill="#FFFFFF" font-size="8.5" font-family="monospace" text-anchor="middle">ID: ${identifiant} • SHA: ${empreinte_geometrique.substring(0, 12)}</text>
-            </g>
-        </svg>`;
+<path
+id="textTop"
+d="
+M 350 350
+m -140 0
+a 140 140 0 1 1 280 0
+a 140 140 0 1 1 -280 0"
+/>
+
+<path
+id="textBottom"
+d="
+M 350 350
+m 140 0
+a 140 140 0 1 0 -280 0
+a 140 140 0 1 0 280 0"
+/>
+
+</defs>
+
+<!-- ========================================================== -->
+<!-- Anneau externe -->
+<!-- ========================================================== -->
+
+<circle
+cx="350"
+cy="350"
+r="335"
+fill="none"
+stroke="url(#ringBlue)"
+stroke-width="6"/>
+
+<circle
+cx="350"
+cy="350"
+r="322"
+fill="none"
+stroke="#0A6EFF"
+stroke-width="2"/>
+
+<circle
+cx="350"
+cy="350"
+r="304"
+fill="none"
+stroke="#0A6EFF"
+stroke-dasharray="6 8"
+stroke-width="1"/>
+
+<!-- ========================================================== -->
+<!-- GLYPHES -->
+<!-- ========================================================== -->
+
+<g
+id="glyph-layer"
+filter="url(#shadow)">
+
+${glyphes.map(g => {
+    const x = 350 + g.rayon * Math.cos(g.angle);
+    const y = 350 + g.rayon * Math.sin(g.angle);
+    const rot = ((g.rotation || g.angle) * 180 / Math.PI);
+    const scale = g.scale || 1;
+    const stroke = "#0A6EFF";
+    const fill = g.plein ? "#0A6EFF" : "none";
+
+    switch(g.forme) {
+        case "anchor_top":
+            return `<polygon points="${x},${y-11} ${x-9},${y+8} ${x+9},${y+8}" fill="#0A6EFF" stroke="#FFFFFF" stroke-width="2"/>`;
+        case "rect_long":
+            return `<rect x="${x-18*scale}" y="${y-4*scale}" width="${36*scale}" height="${8*scale}" rx="2" fill="${fill}" stroke="${stroke}" stroke-width="1.5" transform="rotate(${rot} ${x} ${y})"/>`;
+        case "rect_court":
+            return `<rect x="${x-10*scale}" y="${y-4*scale}" width="${20*scale}" height="${8*scale}" rx="2" fill="${fill}" stroke="${stroke}" stroke-width="1.5" transform="rotate(${rot} ${x} ${y})"/>`;
+        case "square":
+            return `<rect x="${x-6*scale}" y="${y-6*scale}" width="${12*scale}" height="${12*scale}" fill="${fill}" stroke="${stroke}" stroke-width="1.5" transform="rotate(${rot} ${x} ${y})"/>`;
+        case "diamond":
+            return `<rect x="${x-6*scale}" y="${y-6*scale}" width="${12*scale}" height="${12*scale}" fill="${fill}" stroke="${stroke}" stroke-width="1.5" transform="rotate(45 ${x} ${y})"/>`;
+        case "circle":
+            return `<circle cx="${x}" cy="${y}" r="${4.8*scale}" fill="${fill}" stroke="${stroke}" stroke-width="1.5"/>`;
+        case "double_circle":
+            return `<circle cx="${x}" cy="${y}" r="${5*scale}" fill="none" stroke="${stroke}" stroke-width="1.5"/><circle cx="${x}" cy="${y}" r="${2.4*scale}" fill="${stroke}"/>`;
+        case "triangle":
+            return `<polygon points="${x},${y-7*scale} ${x+6*scale},${y+6*scale} ${x-6*scale},${y+6*scale}" fill="${fill}" stroke="${stroke}" stroke-width="1.5" transform="rotate(${rot} ${x} ${y})"/>`;
+        case "triangle_inverse":
+            return `<polygon points="${x},${y+7*scale} ${x+6*scale},${y-6*scale} ${x-6*scale},${y-6*scale}" fill="${fill}" stroke="${stroke}" stroke-width="1.5" transform="rotate(${rot} ${x} ${y})"/>`;
+        case "hexagon":
+            return `<polygon points="${x},${y-6*scale} ${x+5*scale},${y-3*scale} ${x+5*scale},${y+3*scale} ${x},${y+6*scale} ${x-5*scale},${y+3*scale} ${x-5*scale},${y-3*scale}" fill="${fill}" stroke="${stroke}" stroke-width="1.5" transform="rotate(${rot} ${x} ${y})"/>`;
+        case "cross":
+            return `<line x1="${x-5*scale}" y1="${y-5*scale}" x2="${x+5*scale}" y2="${y+5*scale}" stroke="${stroke}" stroke-width="2"/><line x1="${x+5*scale}" y1="${y-5*scale}" x2="${x-5*scale}" y2="${y+5*scale}" stroke="${stroke}" stroke-width="2"/>`;
+        case "plus":
+            return `<line x1="${x}" y1="${y-5*scale}" x2="${x}" y2="${y+5*scale}" stroke="${stroke}" stroke-width="2"/><line x1="${x-5*scale}" y1="${y}" x2="${x+5*scale}" y2="${y}" stroke="${stroke}" stroke-width="2"/>`;
+        case "bar_vertical":
+            return `<rect x="${x-2}" y="${y-8*scale}" width="4" height="${16*scale}" fill="${stroke}" transform="rotate(${rot} ${x} ${y})"/>`;
+        case "bar_horizontal":
+            return `<rect x="${x-8*scale}" y="${y-2}" width="${16*scale}" height="4" fill="${stroke}" transform="rotate(${rot} ${x} ${y})"/>`;
+        case "chevron":
+            return `<polyline points="${x-6*scale},${y-3*scale} ${x},${y+4*scale} ${x+6*scale},${y-3*scale}" fill="none" stroke="${stroke}" stroke-width="2" transform="rotate(${rot} ${x} ${y})"/>`;
+        case "arc":
+            return `<path d="M ${x-5*scale} ${y} A ${5*scale} ${5*scale} 0 0 1 ${x+5*scale} ${y}" fill="none" stroke="${stroke}" stroke-width="2" transform="rotate(${rot} ${x} ${y})"/>`;
+        default:
+            return "";
+    }
+}).join("")}
+
+</g>
+
+<!-- ========================================================== -->
+<!-- LOGO CENTRAL -->
+<!-- ========================================================== -->
+
+<g transform="translate(350 350)">
+<circle r="92" fill="url(#centerBlue)" stroke="#0A6EFF" stroke-width="4"/>
+<circle r="76" fill="none" stroke="#0A6EFF" stroke-width="2"/>
+<circle r="60" fill="#081B3A" stroke="#0A6EFF" stroke-width="1"/>
+
+<text x="0" y="-8" fill="#FFFFFF" font-size="34" font-family="Arial" font-weight="bold" text-anchor="middle">NC</text>
+<text x="0" y="22" fill="#6EC1FF" font-size="13" font-family="Arial" font-weight="bold" text-anchor="middle">CERTIFIED</text>
+</g>
+
+<!-- ========================================================== -->
+<!-- TEXTE CIRCULAIRE -->
+<!-- ========================================================== -->
+
+<text font-size="12" fill="#0A6EFF" font-family="Arial" font-weight="bold" letter-spacing="2">
+<textPath href="#textTop" startOffset="50%" text-anchor="middle">ANOR • NATIONAL CERTIFICATION • OFFICIAL SEAL •</textPath>
+</text>
+
+<text font-size="11" fill="#0A6EFF" font-family="Arial" font-weight="bold" letter-spacing="2">
+<textPath href="#textBottom" startOffset="50%" text-anchor="middle">SECURITY • AUTHENTICITY • TRACEABILITY •</textPath>
+</text>
+
+<!-- ========================================================== -->
+<!-- CARTOUCHE SERIALISATION -->
+<!-- ========================================================== -->
+
+<g transform="translate(350 585)">
+<rect x="-210" y="0" width="420" height="78" rx="12" fill="#020202" stroke="#0A6EFF" stroke-width="2"/>
+<line x1="-70" y1="0" x2="-70" y2="78" stroke="#0A6EFF"/>
+<line x1="70" y1="0" x2="70" y2="78" stroke="#0A6EFF"/>
+
+<text x="-140" y="24" fill="#6EC1FF" font-size="12" font-family="monospace" text-anchor="middle">LOT</text>
+<text x="-140" y="48" fill="#FFFFFF" font-size="14" font-family="monospace" font-weight="bold" text-anchor="middle">${lotCompact}</text>
+
+<text x="0" y="24" fill="#6EC1FF" font-size="12" font-family="monospace" text-anchor="middle">SERIAL</text>
+<text x="0" y="48" fill="#FFFFFF" font-size="14" font-family="monospace" font-weight="bold" text-anchor="middle">${serialNumber}</text>
+
+<text x="140" y="24" fill="#6EC1FF" font-size="12" font-family="monospace" text-anchor="middle">ID</text>
+<text x="140" y="48" fill="#FFFFFF" font-size="11" font-family="monospace" font-weight="bold" text-anchor="middle">${identifiant}</text>
+
+<text x="0" y="68" fill="#7FD6FF" font-size="10" font-family="monospace" text-anchor="middle">SHA256 : ${shaCourt}</text>
+</g>
+
+</svg>
+`;
+
+        // ==========================================================
+        // Génération automatique du Kit ANOR V16.5
+        // ZIP + PNG HD + SVG + METADATA + SHA
+        // ==========================================================
+        let kit_path = null;
+        try {
+            const kitFolder = path.join(KITS_DIR, `KIT_${identifiant}`);
+            if (!fs.existsSync(kitFolder)) {
+                fs.mkdirSync(kitFolder, { recursive: true });
+            }
+
+            // SVG officiel
+            const svgPath = path.join(kitFolder, `SCEAU_${identifiant}.svg`);
+            fs.writeFileSync(svgPath, svg, 'utf8');
+
+            // PNG HD
+            const pngPath = path.join(kitFolder, `SCEAU_${identifiant}_HD.png`);
+            try {
+                const pngBuffer = await svgToImg.from(svg).toPng({
+                    width: 3000,
+                    height: 3000
+                });
+                fs.writeFileSync(pngPath, pngBuffer);
+            } catch (pngError) {
+                console.warn("PNG kit non généré:", pngError.message);
+            }
+
+            // Metadata
+            const kitMetadata = {
+                identifiant,
+                nom_produit,
+                nom_producteur,
+                lot: lotCompact,
+                pays_origine,
+                quantite,
+                empreinte_geometrique,
+                signature_maitre,
+                version: "ANOR-V16.5",
+                created_at: new Date().toISOString()
+            };
+
+            fs.writeFileSync(
+                path.join(kitFolder, "metadata.json"),
+                JSON.stringify(kitMetadata, null, 2),
+                "utf8"
+            );
+
+            // Signature
+            fs.writeFileSync(
+                path.join(kitFolder, "signature.sha256"),
+                empreinte_geometrique,
+                "utf8"
+            );
+
+            // ZIP
+            const zipPath = path.join(KITS_DIR, `KIT_CERTIFICATION_${identifiant}.zip`);
+            const output = fs.createWriteStream(zipPath);
+            const archive = require('archiver')('zip', {
+                zlib: { level: 9 }
+            });
+
+            archive.pipe(output);
+            archive.directory(kitFolder, false);
+            await archive.finalize();
+
+            kit_path = zipPath;
+
+        } catch (kitError) {
+            console.warn("Erreur génération kit:", kitError.message);
+        }
 
         const nouveauDossier = {
             identifiant,
@@ -278,33 +474,27 @@ app.post('/api/forge', upload.fields([
             signature_maitre,
             index_geometrique: indexGeo,
             svg,          
-            version: "ANOR-V16",
+            kit_path,
+            numero_serie: serialNumber,
+            version: "ANOR-V16.5",
             created_at: new Date().toISOString()
         };
 
         db.insert(nouveauDossier);
 
-        // Génération automatique du Kit de certification complet
-        let kit_path = null;
-        try {
-            if (typeof KitGeneratorService.generateKit === 'function') {
-                kit_path = await KitGeneratorService.generateKit(nouveauDossier);
-            }
-        } catch (kitErr) {
-            console.warn("Avertissement génération du kit :", kitErr.message);
-        }
-
         return res.status(200).json({
             success: true,
-            message: "Sceau forgé et enregistré avec succès en base de données.",
+            message: "Sceau forgé (v16.5) et enregistré avec succès en base de données.",
             identifiant,
             empreinte_geometrique,
             signature_maitre,
             pdf_url,
             visuel_url,
-            kit_path,
             svg,
-            version: "ANOR-V16"
+            version: "ANOR-V16.5",
+            numero_serie: serialNumber,
+            kit_download: `/api/forge/kit/download/${identifiant}`,
+            png_download: `/api/forge/png/${identifiant}`
         });
 
     } catch (error) {
@@ -317,57 +507,148 @@ app.post('/api/forge', upload.fields([
     }
 });
 
-// Endpoint pour le téléchargement direct du Sceau en PNG Haute Définition (HD)
+// ==========================================================
+// EXPORT PNG HD ANOR V16.5
+// PNG haute résolution 3000x3000
+// ==========================================================
 app.get('/api/forge/png/:identifiant', async (req, res) => {
     const { identifiant } = req.params;
     const record = db.findByIdentifiant(identifiant);
 
     if (!record || !record.svg) {
-        return res.status(404).send("Sceau introuvable ou non généré.");
+        return res.status(404).send("Sceau introuvable.");
     }
 
     try {
-        const pngBuffer = await svgToImg.from(record.svg).toPng({ scale: 2 });
+        const pngBuffer = await svgToImg.from(record.svg).toPng({
+            width: 3000,
+            height: 3000
+        });
+
         res.setHeader('Content-Type', 'image/png');
-        res.setHeader('Content-Disposition', `attachment; filename="SCEAU_${identifiant}_HD.png"`);
+        res.setHeader('Content-Disposition', `attachment; filename="ANOR_${identifiant}_HD.png"`);
         return res.send(pngBuffer);
-    } catch (conversionError) {
-        console.warn("Erreur conversion raster HD, repli SVG :", conversionError.message);
+
+    } catch (error) {
+        console.error("Erreur PNG HD:", error.message);
         res.setHeader('Content-Type', 'image/svg+xml');
-        res.setHeader('Content-Disposition', `attachment; filename="SCEAU_${identifiant}.svg"`);
         return res.send(record.svg);
     }
 });
 
-// Endpoint pour télécharger le Kit de certification complet (ZIP ou dossier structuré)
+// ==========================================================
+// KIT CERTIFICATION COMPLET ANOR V16.5
+// ==========================================================
 app.get('/api/forge/kit/download/:identifiant', async (req, res) => {
     const { identifiant } = req.params;
     const record = db.findByIdentifiant(identifiant);
 
     if (!record) {
-        return res.status(404).json({ success: false, message: "Enregistrement introuvable pour ce kit." });
+        return res.status(404).json({
+            success: false,
+            message: "Sceau inconnu"
+        });
     }
 
     try {
-        // Génération ou récupération des données du kit enrichies
-        let kitData = record;
-        if (typeof KitGeneratorService.getKitData === 'function') {
-            kitData = await KitGeneratorService.getKitData(record);
+        const kitFolder = path.join(KITS_DIR, `KIT_${identifiant}`);
+        if (!fs.existsSync(kitFolder)) {
+            fs.mkdirSync(kitFolder, { recursive: true });
         }
 
-        // Si un fichier ZIP de kit a été généré par le service
-        if (record.kit_path && fs.existsSync(record.kit_path)) {
-            return res.download(record.kit_path);
+        // ----------------------------------------------------------
+        // SVG ORIGINAL
+        // ----------------------------------------------------------
+        fs.writeFileSync(path.join(kitFolder, `SCEAU_${identifiant}.svg`), record.svg, 'utf8');
+
+        // ----------------------------------------------------------
+        // PNG HD
+        // ----------------------------------------------------------
+        try {
+            const png = await svgToImg.from(record.svg).toPng({
+                width: 3000,
+                height: 3000
+            });
+            fs.writeFileSync(path.join(kitFolder, `SCEAU_${identifiant}_HD.png`), png);
+        } catch (e) {
+            console.warn("PNG kit impossible:", e.message);
         }
 
-        // Fallback propre : création dynamique d'un fichier JSON complet du kit téléchargeable
-        const kitFilePath = path.join(KITS_DIR, `KIT_${identifiant}.json`);
-        fs.writeFileSync(kitFilePath, JSON.stringify(kitData, null, 2), 'utf8');
+        // ----------------------------------------------------------
+        // METADATA JSON
+        // ----------------------------------------------------------
+        const metadata = {
+            identifiant: record.identifiant,
+            produit: record.nom_produit,
+            producteur: record.nom_producteur,
+            lot: record.lot,
+            pays: record.pays_origine,
+            composition: record.composition,
+            empreinte_geometrique: record.empreinte_geometrique,
+            signature_maitre: record.signature_maitre,
+            version: record.version,
+            date_creation: record.created_at
+        };
+        fs.writeFileSync(path.join(kitFolder, 'metadata.json'), JSON.stringify(metadata, null, 2), 'utf8');
 
-        return res.download(kitFilePath, `KIT_CERTIFICATION_${identifiant}.json`);
-    } catch (e) {
-        console.error("Erreur téléchargement kit :", e.message);
-        return res.status(500).json({ success: false, message: "Erreur lors de la préparation du kit.", error: e.message });
+        // ----------------------------------------------------------
+        // SIGNATURE SHA
+        // ----------------------------------------------------------
+        fs.writeFileSync(path.join(kitFolder, 'SIGNATURE.sha256'), record.empreinte_geometrique, 'utf8');
+
+        // ----------------------------------------------------------
+        // INDEX GEOMETRIQUE
+        // ----------------------------------------------------------
+        fs.writeFileSync(path.join(kitFolder, 'geometry_index.json'), JSON.stringify(record.index_geometrique, null, 2), 'utf8');
+
+        // ----------------------------------------------------------
+        // CERTIFICAT ORIGINAL
+        // ----------------------------------------------------------
+        if (record.pdf_url) {
+            const sourcePDF = path.join(__dirname, record.pdf_url);
+            if (fs.existsSync(sourcePDF)) {
+                fs.copyFileSync(sourcePDF, path.join(kitFolder, 'CERTIFICAT_ORIGINAL.pdf'));
+            }
+        }
+
+        // ----------------------------------------------------------
+        // VISUEL PRODUIT
+        // ----------------------------------------------------------
+        if (record.visuel_url) {
+            const sourceImage = path.join(__dirname, record.visuel_url);
+            if (fs.existsSync(sourceImage)) {
+                fs.copyFileSync(sourceImage, path.join(kitFolder, 'VISUEL_PRODUIT'));
+            }
+        }
+
+        // ----------------------------------------------------------
+        // ZIP FINAL
+        // ----------------------------------------------------------
+        const zipPath = path.join(KITS_DIR, `KIT_CERTIFICATION_${identifiant}.zip`);
+        const output = fs.createWriteStream(zipPath);
+        const archive = archiver('zip', {
+            zlib: { level: 9 }
+        });
+
+        output.on('close', () => {
+            return res.download(zipPath, `KIT_CERTIFICATION_${identifiant}.zip`);
+        });
+
+        archive.on('error', (err) => {
+            throw err;
+        });
+
+        archive.pipe(output);
+        archive.directory(kitFolder, false);
+        await archive.finalize();
+
+    } catch (error) {
+        console.error("Erreur génération kit:", error);
+        return res.status(500).json({
+            success: false,
+            message: "Erreur création kit",
+            error: error.message
+        });
     }
 });
 
@@ -383,5 +664,5 @@ app.get('/api/registry/:identifiant', (req, res) => {
 });
 
 app.listen(PORT, () => {
-    console.log(`[ANOR-V16] Serveur opérationnel sur le port ${PORT} avec le Compositeur géométrique structuré.`);
+    console.log(`[ANOR-V16.5] Serveur opérationnel sur le port ${PORT} avec routes PNG HD et Kit de certification ZIP.`);
 });
