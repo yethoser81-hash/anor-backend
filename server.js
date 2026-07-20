@@ -49,6 +49,9 @@ const upload = multer({
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
+// Servir les fichiers statiques du dossier public (forge.html, CSS, assets, etc.)
+app.use(express.static(path.join(__dirname, 'public')));
+
 // Gestion CORS basique
 app.use((req, res, next) => {
     res.setHeader('Access-Control-Allow-Origin', '*');
@@ -95,6 +98,11 @@ const db = {
 // ==========================================
 // ROUTES DE L'API ANOR V16
 // ==========================================
+
+// Route racine : Redirige vers l'interface de la Forge (forge.html)
+app.get('/', (req, res) => {
+    res.sendFile(path.join(__dirname, 'public', 'forge.html'));
+});
 
 // Route de test de santé du serveur
 app.get('/health', (req, res) => {
