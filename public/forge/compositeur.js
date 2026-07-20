@@ -1,62 +1,58 @@
-/**
- * ==========================================================
- * public/forge/compositeur.js
- * ANOR V14
- * Moteur de composition géométrique des couches SVG,
- * intégrant les 3 couches, le logo, la zone de série et
- * le repère angulaire statique (point de départ de lecture).
- * ==========================================================
- */
+// ==========================================
+// ANOR V16 • Compositeur Géométrique de Sceaux
+// ==========================================
 
 class Compositeur {
-
-    /**
-     * Compose les glyphes et les instructions graphiques du sceau
-     * @param {string} signature - Signature maître du produit
-     * @param {Object} options - Options de composition (zoneSerie, etc.)
-     * @returns {Array} Liste des glyphes générés avec leurs propriétés
-     */
-    static composer(signature, options = { zoneSerie: true }) {
-        const layers = [100, 160, 215];
-        const shapes = ['rect', 'circle', 'diamond', 'plus'];
+    static composer(signatureHex, options = {}) {
         const glyphes = [];
-
-        // Ajout du repère angulaire statique (point de départ de lecture fixe à l'angle 0)
+        const nbFormes = 64; // Densité des glyphes sur les orbites concentriques
+        
+        // Point de départ de lecture (Ancrage) positionné tout près du médaillon central
         glyphes.push({
             forme: 'anchor_start',
-            plein: true,
-            anneau: 0,
-            position: 250,
+            rayon: 95, // Proche du centre (médaillon rayon ~75-85)
             angle: 0,
-            rayon: 247
+            plein: true,
+            taille: 'small'
         });
 
-        layers.forEach((radius, layerIndex) => {
-            const numElements = (layerIndex === 0) ? 12 : 24;
+        // Utilisation de la signature pour générer des variations déterministes
+        for (let i = 1; i < nbFormes; i++) {
+            const hexPair = signatureHex.substring((i * 2) % (signatureHex.length - 2), ((i * 2) % (signatureHex.length - 2)) + 2);
+            const val = parseInt(hexPair, 16);
 
-            for (let i = 0; i < numElements; i++) {
-                const angle = (i / numElements) * Math.PI * 2;
-                // Indexation déterministe basée sur la signature pour la reproductibilité
-                const shapeIndex = (signature.length + i + layerIndex) % shapes.length;
-                const shapeType = shapes[shapeIndex];
-                const isFilled = ((i + layerIndex) % 2 === 0);
+            // Distribution sur plusieurs anneaux concentriques (du centre vers l'extérieur : de 110 à 210)
+            const rayonMin = 110;
+            const rayonMax = 210;
+            const rayon = rayonMin + (val % (rayonMax - rayonMin));
+            
+            // Angle réparti circulairement avec une dérive pseudo-aléatoire
+            const angle = (i / nbFormes) * 2 * Math.PI + (val * 0.01);
 
-                glyphes.push({
-                    forme: shapeType,
-                    plein: isFilled,
-                    anneau: layerIndex + 1,
-                    position: radius,
-                    angle: angle,
-                    rayon: radius
-                });
-            }
-        });
+            // Alternance stricte formes pleines / vides et types de formes variées
+            const types = ['rect_long', 'rect_court', 'circle', 'diamond', 'plus', 'square'];
+            const typeIndex = val % types.length;
+            const formeType = types[typeIndex];
+            
+            const plein = (val % 2 === 0); // Alternance 50% plein / 50% vide
+
+            let tailleDefinie = 'medium';
+            if (formeType === 'rect_long') tailleDefinie = 'long';
+            if (formeType === 'rect_court') tailleDefinise = 'short';
+
+            glyphes.push({
+                forme: formeType,
+                rayon: rayon,
+                angle: angle,
+                plein: plein,
+                taille: tailleDefinie
+            });
+        }
 
         return glyphes;
     }
 }
 
-// Support pour Node.js et navigateur
 if (typeof module !== 'undefined' && module.exports) {
     module.exports = Compositeur;
 }
