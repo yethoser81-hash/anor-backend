@@ -224,11 +224,12 @@
 </section>
 </main>
 
-<!-- SCRIPT LOGIQUE V16 -->
+<!-- SCRIPT LOGIQUE V16 CORRIGÉ -->
 <script>
+// Utilise l'origine courante en production sur Render, et localhost en développement local
 window.API = (location.hostname === "localhost" || location.hostname === "127.0.0.1")
     ? "http://localhost:10000"
-    : "https://anor-api.onrender.com";
+    : window.location.origin;
 
 const PAYS_MONDE = [
     "Afghanistan", "Afrique du Sud", "Albanie", "Algérie", "Allemagne", "Angola", "Arabie Saoudite", "Argentine", "Australie", "Autriche",
