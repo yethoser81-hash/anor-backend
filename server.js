@@ -14,13 +14,8 @@ const AiBackendEngine = require('./engine/aiBackendEngine');
 // Import du gestionnaire de tâches d'arrière-plan
 const taskQueue = require('./worker');
 
-// Résolution souple du renderer
-let SealRenderer;
-try {
-    SealRenderer = require('./engine/sealRenderer');
-} catch (e) {
-    SealRenderer = require('./renderer/sealRenderer');
-}
+// Import strict du moteur de rendu V16 (Désactivation du fallback vers l'ancien moteur)
+const SealRenderer = require('./engine/sealRenderer');
 
 const app = express();
 
@@ -230,7 +225,7 @@ DOCUMENT OFFICIEL DE SÉCURITÉ - À L'ATTENTION DE L'IMPRIMEUR ET DU FABRICANT
 ================================================================================
 
 1. IDENTIFICATION DU LOT ET DU PRODUIT :
-   - Numéro de Lot  : ${lot}
+   - Numéro de Lot   : ${lot}
    - Nom du Produit : ${nom_produit || 'N/A'}
    - Producteur     : ${nom_producteur || 'N/A'}
    - Quantité certifiée : ${parseInt(quantite, 10).toLocaleString('fr-FR')} unités
