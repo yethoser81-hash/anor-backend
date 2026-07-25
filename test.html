@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <title>Sceau Souverain ANOR - Haute Précision</title>
+    <style>
+        body { background: #000; display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; margin: 0; color: #4A90E2; }
+        #seal-container { position: relative; width: 500px; height: 500px; display: none; border: 2px solid #4A90E2; border-radius: 50%; }
+        
+        /* Base des formes */
+        .shape { position: absolute; border: 2px solid #4A90E2; display: flex; align-items: center; justify-content: center; box-sizing: border-box; }
+        .filled { background: #4A90E2; }
+        
+        /* Formes variées */
+        .square { width: 10px; height: 10px; }
+        .rect { width: 18px; height: 6px; } /* Orientation largeur */
+        .circle { width: 10px; height: 10px; border-radius: 50%; }
+        .diamond { width: 9px; height: 9px; transform: rotate(45deg); }
+        .plus { border: none; font-size: 20px; color: #4A90E2; font-weight: bold; }
+        .plus::before { content: '+'; }
+
+        #generate-btn { margin-top: 30px; padding: 12px 24px; cursor: pointer; background: #4A90E2; color: #000; border: none; border-radius: 5px; font-weight: bold; }
+    </style>
+</head>
+<body>
+
+<div id="seal-container"></div>
+<button id="generate-btn">Générer le Sceau</button>
+
+<script>
+    function generateSeal() {
+        const container = document.getElementById('seal-container');
+        container.innerHTML = '';
+        const radii = [210, 160, 110]; 
+        const shapes = ['square', 'rect', 'circle', 'diamond', 'plus'];
+
+        radii.forEach((r) => {
+            for (let i = 0; i < 20; i++) {
+                const angle = (i / 20) * Math.PI * 2;
+                const type = shapes[Math.floor(Math.random() * shapes.length)];
+                
+                // Variabilité : une forme sur deux est pleine ou vide
+                const isFilled = Math.random() > 0.5;
+                
+                const el = document.createElement('div');
+                el.className = `shape ${type} ${isFilled ? 'filled' : ''}`;
+                
+                // Positionnement
+                const x = 250 + r * Math.cos(angle) - 5;
+                const y = 250 + r * Math.sin(angle) - 5;
+                
+                el.style.left = `${x}px`;
+                el.style.top = `${y}px`;
+                el.style.transform = `rotate(${angle}rad)`;
+                
+                container.appendChild(el);
+            }
+        });
+        container.style.display = 'block';
+    }
+    document.getElementById('generate-btn').addEventListener('click', generateSeal);
+</script>
+</body>
+</html>

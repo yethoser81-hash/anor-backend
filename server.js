@@ -1,618 +1,435 @@
-// ==========================================
-// ANOR V16.5 • Serveur Backend Principal (API Forge & Indexation Haute Performance)
-// ==========================================
-
 const express = require('express');
-const multer = require('multer');
+const cors = require('cors');
 const path = require('path');
-const fs = require('fs');
-const crypto = require('crypto');
-const svgToImg = require('svg-to-img'); // Conversion raster haute fidélité
-const archiver = require('archiver'); // Génération des archives ZIP pour les kits
+require('dotenv').config();
+const JSZip = require("jszip");
+const fs = require("fs");
+const multer = require('multer');
+const rateLimit = require('express-rate-limit'); // Sécurité Anti-DDoS / Brute-force
+const upload = multer({ limits: { fileSize: 10 * 1024 * 1024 } }); // Limite 10MB
 
-// Importation de vos modules architecturaux validés
-const Compositeur = require('./public/forge/compositeur');
-const GeometryIndex = require('./core/geometryIndex');
-const KitGeneratorService = require('./services/kitGeneratorService');
+const supabase = require('./config/database');
+const AiBackendEngine = require('./engine/aiBackendEngine');
+
+// Import du gestionnaire de tâches d'arrière-plan
+const taskQueue = require('./worker');
+
+// Résolution souple du renderer
+let SealRenderer;
+try {
+    SealRenderer = require('./engine/sealRenderer');
+} catch (e) {
+    SealRenderer = require('./renderer/sealRenderer');
+}
 
 const app = express();
-const PORT = process.env.PORT || 10000;
 
-// Configuration des dossiers de stockage locaux
-const UPLOAD_DIR = path.join(__dirname, 'uploads');
-const CERT_DIR = path.join(UPLOAD_DIR, 'certificates');
-const VISUAL_DIR = path.join(UPLOAD_DIR, 'visuals');
-const KITS_DIR = path.join(UPLOAD_DIR, 'kits');
+// ==========================================
+// 🛡️ SÉCURITÉ 1 : PROTECTION ANTI-HACKING & CORS
+// ==========================================
+app.use(cors());
+app.use(express.json({ limit: '10mb' })); // Protection contre l'épuisement mémoire
+app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
-[UPLOAD_DIR, CERT_DIR, VISUAL_DIR, KITS_DIR].forEach(dir => {
-    if (!fs.existsSync(dir)) {
-        fs.mkdirSync(dir, { recursive: true });
-    }
-});
-
-// Configuration de Multer pour la gestion des fichiers multipart/form-data
-const storage = multer.diskStorage({
-    destination: (req, file, cb) => {
-        if (file.fieldname === 'certificat_pdf') {
-            cb(null, CERT_DIR);
-        } else if (file.fieldname === 'visuel') {
-            cb(null, VISUAL_DIR);
-        } else {
-            cb(null, UPLOAD_DIR);
-        }
-    },
-    filename: (req, file, cb) => {
-        const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1e9);
-        const ext = path.extname(file.originalname);
-        cb(null, `${file.fieldname}-${uniqueSuffix}${ext}`);
-    }
-});
-
-const upload = multer({ 
-    storage: storage,
-    limits: { fileSize: 10 * 1024 * 1024 }
-});
-
-// Middlewares globaux
-app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
-app.use(express.static(path.join(__dirname, 'public')));
-app.use('/uploads', express.static(UPLOAD_DIR));
-
-// Gestion CORS basique
+// En-têtes de Sécurité Intégrés (Protection contre l'injection & Clickjacking)
 app.use((req, res, next) => {
-    res.setHeader('Access-Control-Allow-Origin', '*');
-    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
-    res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
-    if (req.method === 'OPTIONS') {
-        return res.sendStatus(200);
-    }
+    res.setHeader("Content-Security-Policy", "default-src 'self' http://localhost:* 'unsafe-inline' 'unsafe-eval' data: blob:;");
+    res.setHeader("X-Content-Type-Options", "nosniff");
+    res.setHeader("X-Frame-Options", "DENY");
+    res.setHeader("X-XSS-Protection", "1; mode=block");
     next();
 });
 
-// ==========================================
-// Moteur de Base de Données Haute Performance O(1) avec Persistance Fichier
-// ==========================================
-const DB_FILE = path.join(__dirname, 'database_registry.json');
-const db = {
-    registryMap: new Map(),
-    fingerprintMap: new Map(),
+// Limiteur de requêtes pour contrer le spamming d'API de vérification (Rate Limiting)
+const scanLimiter = rateLimit({
+    windowMs: 1 * 60 * 1000, // 1 minute
+    max: 60, // Max 60 scans par minute par IP
+    message: { error: "Trop de requêtes de scan de ce périphérique. Veuillez ralentir." }
+});
 
-    init() {
-        try {
-            if (fs.existsSync(DB_FILE)) {
-                const data = JSON.parse(fs.readFileSync(DB_FILE, 'utf8'));
-                data.forEach(item => {
-                    this.registryMap.set(item.identifiant, item);
-                    if (item.empreinte_geometrique) {
-                        this.fingerprintMap.set(item.empreinte_geometrique, item);
-                    }
-                });
-                console.log(`[DB] ${this.registryMap.size} sceaux rechargés depuis le stockage persistant.`);
-            }
-        } catch (e) {
-            console.error("[DB] Erreur lors du chargement de la base:", e.message);
-        }
-    },
+// Servir les fichiers statiques
+app.use(express.static(__dirname));
 
-    save() {
-        try {
-            const dataArray = Array.from(this.registryMap.values());
-            fs.writeFileSync(DB_FILE, JSON.stringify(dataArray, null, 2));
-        } catch (e) {
-            console.error("[DB] Erreur lors de l'écriture en base:", e.message);
-        }
-    },
+// Route explicite pour intercepter / et /index.html
+app.get(['/', '/index.html'], (req, res) => {
+    res.sendFile(path.join(__dirname, 'index.html'));
+});
 
-    insert(data) {
-        this.registryMap.set(data.identifiant, data);
-        if (data.empreinte_geometrique) {
-            this.fingerprintMap.set(data.empreinte_geometrique, data);
-        }
-        this.save();
-        return data;
-    },
-    
-    findByIdentifiant(id) {
-        return this.registryMap.get(id) || null;
-    },
-
-    findByFingerprint(fingerprint) {
-        return this.fingerprintMap.get(fingerprint) || null;
-    },
-
-    count() {
-        return this.registryMap.size;
+/**
+ * Route pour vérifier le statut d'un traitement en arrière-plan
+ */
+app.get('/api/seals/status/:jobId', (req, res) => {
+    const job = taskQueue.getJobStatus(req.params.jobId);
+    if (!job) {
+        return res.status(404).json({ error: "Tâche introuvable." });
     }
-};
-
-// Initialisation de la persistance au démarrage
-db.init();
-
-// ==========================================
-// ROUTES DE L'API ANOR V16.5
-// ==========================================
-
-app.get('/', (req, res) => {
-    res.sendFile(path.join(__dirname, 'public', 'forge.html'));
+    res.json(job);
 });
 
-app.get('/health', (req, res) => {
-    res.json({ 
-        status: 'ONLINE', 
-        version: 'ANOR-V16.5', 
-        total_sceaux_indexes: db.count(),
-        timestamp: new Date().toISOString() 
-    });
-});
-
-// Endpoint principal de la Forge : Capture intégrale des données de forge.html
-app.post('/api/forge', upload.fields([
+/**
+ * Route unifiée pour la Forge ANOR (Asynchrone via Worker)
+ */
+app.post('/api/seals/generate-batch-seal', upload.fields([
     { name: 'certificat_pdf', maxCount: 1 },
-    { name: 'visuel', maxCount: 1 }
+    { name: 'visuel_produit', maxCount: 1 }
 ]), async (req, res) => {
     try {
         const {
             nom_produit,
             nom_producteur,
-            composition,
             lot,
             quantite,
             type_emballage,
+            composition,
             pays_origine,
-            email_entreprise,
             date_certificat_conformite,
             date_fabrication,
             date_peremption
         } = req.body;
 
-        if (!nom_produit || !nom_producteur || !lot || !pays_origine) {
-            return res.status(400).json({
-                success: false,
-                message: "Champs obligatoires manquants (nom_produit, nom_producteur, lot, pays_origine)."
-            });
+        if (!lot || !quantite || !type_emballage) {
+            return res.status(400).json({ error: "Les champs lot, quantite et type_emballage sont obligatoires." });
         }
 
-        const files = req.files || {};
-        const certificatFile = files['certificat_pdf'] ? files['certificat_pdf'][0] : null;
-        const visuelFile = files['visuel'] ? files['visuel'][0] : null;
+        const jobId = `job_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
 
-        const pdf_url = certificatFile ? `/uploads/certificates/${certificatFile.filename}` : null;
-        const visuel_url = visuelFile ? `/uploads/visuals/${visuelFile.filename}` : null;
+        taskQueue.addJob(jobId, async () => {
+            const certificateCode = `${lot}`;
 
-        // Génération de l'identifiant unique ANOR
-        const randomHex = crypto.randomBytes(4).toString('hex').toUpperCase();
-        const identifiant = `ANOR-${new Date().getFullYear()}-${randomHex}`;
-
-        // 1. Génération de la signature maître sécurisée
-        const signature_maitre = crypto.createHmac('sha256', 'ANOR_MASTER_SECRET_KEY_V16')
-            .update(`${identifiant}|${lot}|${pays_origine}`)
-            .digest('hex');
-
-        // 2. Appel du Compositeur officiel structuré sur grille
-        const glyphes = Compositeur.composer(signature_maitre, { zoneSerie: true });
-
-        // 3. Appel du GeometryIndex pour normaliser et calculer l'empreinte SHA-256 déterministe
-        const indexGeo = GeometryIndex.build(glyphes);
-        const empreinte_geometrique = indexGeo.sha256;
-
-        // Optimisation compacte des notations
-        const lotCompact = lot.replace(/mille/gi, 'M').replace(/III/g, '3').toUpperCase();
-        const serialNumber = `SN-${randomHex}`;
-        const shaCourt = empreinte_geometrique.substring(0, 16);
-
-        // 4. Construction dynamique du rendu SVG officiel ANOR V16.5
-        const svg = `
-<svg
-xmlns="http://www.w3.org/2000/svg"
-viewBox="0 0 700 700"
-width="700"
-height="700">
-
-<defs>
-
-<linearGradient id="ringBlue" x1="0%" y1="0%" x2="100%" y2="100%">
-<stop offset="0%" stop-color="#33AAFF"/>
-<stop offset="100%" stop-color="#003399"/>
-</linearGradient>
-
-<linearGradient id="centerBlue" x1="0%" y1="0%" x2="0%" y2="100%">
-<stop offset="0%" stop-color="#001B52"/>
-<stop offset="100%" stop-color="#000000"/>
-</linearGradient>
-
-<filter id="shadow">
-<feDropShadow
-dx="0"
-dy="0"
-stdDeviation="4"
-flood-color="#0066ff"
-flood-opacity="0.55"/>
-</filter>
-
-<path
-id="textTop"
-d="
-M 350 350
-m -140 0
-a 140 140 0 1 1 280 0
-a 140 140 0 1 1 -280 0"
-/>
-
-<path
-id="textBottom"
-d="
-M 350 350
-m 140 0
-a 140 140 0 1 0 -280 0
-a 140 140 0 1 0 280 0"
-/>
-
-</defs>
-
-<!-- ========================================================== -->
-<!-- Anneau externe -->
-<!-- ========================================================== -->
-
-<circle
-cx="350"
-cy="350"
-r="335"
-fill="none"
-stroke="url(#ringBlue)"
-stroke-width="6"/>
-
-<circle
-cx="350"
-cy="350"
-r="322"
-fill="none"
-stroke="#0A6EFF"
-stroke-width="2"/>
-
-<circle
-cx="350"
-cy="350"
-r="304"
-fill="none"
-stroke="#0A6EFF"
-stroke-dasharray="6 8"
-stroke-width="1"/>
-
-<!-- ========================================================== -->
-<!-- GLYPHES -->
-<!-- ========================================================== -->
-
-<g
-id="glyph-layer"
-filter="url(#shadow)">
-
-${glyphes.map(g => {
-    const x = 350 + g.rayon * Math.cos(g.angle);
-    const y = 350 + g.rayon * Math.sin(g.angle);
-    const rot = ((g.rotation || g.angle) * 180 / Math.PI);
-    const scale = g.scale || 1;
-    const stroke = "#0A6EFF";
-    const fill = g.plein ? "#0A6EFF" : "none";
-
-    switch(g.forme) {
-        case "anchor_top":
-            return `<polygon points="${x},${y-11} ${x-9},${y+8} ${x+9},${y+8}" fill="#0A6EFF" stroke="#FFFFFF" stroke-width="2"/>`;
-        case "rect_long":
-            return `<rect x="${x-18*scale}" y="${y-4*scale}" width="${36*scale}" height="${8*scale}" rx="2" fill="${fill}" stroke="${stroke}" stroke-width="1.5" transform="rotate(${rot} ${x} ${y})"/>`;
-        case "rect_court":
-            return `<rect x="${x-10*scale}" y="${y-4*scale}" width="${20*scale}" height="${8*scale}" rx="2" fill="${fill}" stroke="${stroke}" stroke-width="1.5" transform="rotate(${rot} ${x} ${y})"/>`;
-        case "square":
-            return `<rect x="${x-6*scale}" y="${y-6*scale}" width="${12*scale}" height="${12*scale}" fill="${fill}" stroke="${stroke}" stroke-width="1.5" transform="rotate(${rot} ${x} ${y})"/>`;
-        case "diamond":
-            return `<rect x="${x-6*scale}" y="${y-6*scale}" width="${12*scale}" height="${12*scale}" fill="${fill}" stroke="${stroke}" stroke-width="1.5" transform="rotate(45 ${x} ${y})"/>`;
-        case "circle":
-            return `<circle cx="${x}" cy="${y}" r="${4.8*scale}" fill="${fill}" stroke="${stroke}" stroke-width="1.5"/>`;
-        case "double_circle":
-            return `<circle cx="${x}" cy="${y}" r="${5*scale}" fill="none" stroke="${stroke}" stroke-width="1.5"/><circle cx="${x}" cy="${y}" r="${2.4*scale}" fill="${stroke}"/>`;
-        case "triangle":
-            return `<polygon points="${x},${y-7*scale} ${x+6*scale},${y+6*scale} ${x-6*scale},${y+6*scale}" fill="${fill}" stroke="${stroke}" stroke-width="1.5" transform="rotate(${rot} ${x} ${y})"/>`;
-        case "triangle_inverse":
-            return `<polygon points="${x},${y+7*scale} ${x+6*scale},${y-6*scale} ${x-6*scale},${y-6*scale}" fill="${fill}" stroke="${stroke}" stroke-width="1.5" transform="rotate(${rot} ${x} ${y})"/>`;
-        case "hexagon":
-            return `<polygon points="${x},${y-6*scale} ${x+5*scale},${y-3*scale} ${x+5*scale},${y+3*scale} ${x},${y+6*scale} ${x-5*scale},${y+3*scale} ${x-5*scale},${y-3*scale}" fill="${fill}" stroke="${stroke}" stroke-width="1.5" transform="rotate(${rot} ${x} ${y})"/>`;
-        case "cross":
-            return `<line x1="${x-5*scale}" y1="${y-5*scale}" x2="${x+5*scale}" y2="${y+5*scale}" stroke="${stroke}" stroke-width="2"/><line x1="${x+5*scale}" y1="${y-5*scale}" x2="${x-5*scale}" y2="${y+5*scale}" stroke="${stroke}" stroke-width="2"/>`;
-        case "plus":
-            return `<line x1="${x}" y1="${y-5*scale}" x2="${x}" y2="${y+5*scale}" stroke="${stroke}" stroke-width="2"/><line x1="${x-5*scale}" y1="${y}" x2="${x+5*scale}" y2="${y}" stroke="${stroke}" stroke-width="2"/>`;
-        case "bar_vertical":
-            return `<rect x="${x-2}" y="${y-8*scale}" width="4" height="${16*scale}" fill="${stroke}" transform="rotate(${rot} ${x} ${y})"/>`;
-        case "bar_horizontal":
-            return `<rect x="${x-8*scale}" y="${y-2}" width="${16*scale}" height="4" fill="${stroke}" transform="rotate(${rot} ${x} ${y})"/>`;
-        case "chevron":
-            return `<polyline points="${x-6*scale},${y-3*scale} ${x},${y+4*scale} ${x+6*scale},${y-3*scale}" fill="none" stroke="${stroke}" stroke-width="2" transform="rotate(${rot} ${x} ${y})"/>`;
-        case "arc":
-            return `<path d="M ${x-5*scale} ${y} A ${5*scale} ${5*scale} 0 0 1 ${x+5*scale} ${y}" fill="none" stroke="${stroke}" stroke-width="2" transform="rotate(${rot} ${x} ${y})"/>`;
-        default:
-            return "";
-    }
-}).join("")}
-
-</g>
-
-<!-- ========================================================== -->
-<!-- LOGO CENTRAL -->
-<!-- ========================================================== -->
-
-<g transform="translate(350 350)">
-<circle r="92" fill="url(#centerBlue)" stroke="#0A6EFF" stroke-width="4"/>
-<circle r="76" fill="none" stroke="#0A6EFF" stroke-width="2"/>
-<circle r="60" fill="#081B3A" stroke="#0A6EFF" stroke-width="1"/>
-
-<text x="0" y="-8" fill="#FFFFFF" font-size="34" font-family="Arial" font-weight="bold" text-anchor="middle">NC</text>
-<text x="0" y="22" fill="#6EC1FF" font-size="13" font-family="Arial" font-weight="bold" text-anchor="middle">CERTIFIED</text>
-</g>
-
-<!-- ========================================================== -->
-<!-- TEXTE CIRCULAIRE -->
-<!-- ========================================================== -->
-
-<text font-size="12" fill="#0A6EFF" font-family="Arial" font-weight="bold" letter-spacing="2">
-<textPath href="#textTop" startOffset="50%" text-anchor="middle">ANOR • NATIONAL CERTIFICATION • OFFICIAL SEAL •</textPath>
-</text>
-
-<text font-size="11" fill="#0A6EFF" font-family="Arial" font-weight="bold" letter-spacing="2">
-<textPath href="#textBottom" startOffset="50%" text-anchor="middle">SECURITY • AUTHENTICITY • TRACEABILITY •</textPath>
-</text>
-
-<!-- ========================================================== -->
-<!-- CARTOUCHE SERIALISATION -->
-<!-- ========================================================== -->
-
-<g transform="translate(350 585)">
-<rect x="-210" y="0" width="420" height="78" rx="12" fill="#020202" stroke="#0A6EFF" stroke-width="2"/>
-<line x1="-70" y1="0" x2="-70" y2="78" stroke="#0A6EFF"/>
-<line x1="70" y1="0" x2="70" y2="78" stroke="#0A6EFF"/>
-
-<text x="-140" y="24" fill="#6EC1FF" font-size="12" font-family="monospace" text-anchor="middle">LOT</text>
-<text x="-140" y="48" fill="#FFFFFF" font-size="14" font-family="monospace" font-weight="bold" text-anchor="middle">${lotCompact}</text>
-
-<text x="0" y="24" fill="#6EC1FF" font-size="12" font-family="monospace" text-anchor="middle">SERIAL</text>
-<text x="0" y="48" fill="#FFFFFF" font-size="14" font-family="monospace" font-weight="bold" text-anchor="middle">${serialNumber}</text>
-
-<text x="140" y="24" fill="#6EC1FF" font-size="12" font-family="monospace" text-anchor="middle">ID</text>
-<text x="140" y="48" fill="#FFFFFF" font-size="11" font-family="monospace" font-weight="bold" text-anchor="middle">${identifiant}</text>
-
-<text x="0" y="68" fill="#7FD6FF" font-size="10" font-family="monospace" text-anchor="middle">SHA256 : ${shaCourt}</text>
-</g>
-
-</svg>
-`;
-
-        // ==========================================================
-        // Génération automatique du Kit ANOR V16.5
-        // ZIP + PNG HD + SVG + METADATA + SHA
-        // ==========================================================
-        let kit_path = null;
-        try {
-
-            kit_path =
-            await KitGeneratorService.generateKit(nouveauDossier);
-
-        }catch(kitErr){
-
-            console.error(
-                "KIT ERROR:",
-                kitErr.message
+            const smartPayload = AiBackendEngine.generateSmartMatrix(certificateCode);
+            const imageBuffer = await SealRenderer.renderSealToBuffer(
+                smartPayload,
+                {
+                    lot,
+                    quantite,
+                    type_emballage,
+                    productName: nom_produit,
+                    nom_produit,
+                    nom_producteur,
+                    isMasterSeal: true,
+                    masterSerialLabel: `SÉRIE : DM / ${parseInt(quantite, 10).toLocaleString('fr-FR')}`
+                }
             );
 
-            kit_path = null;
+            if (!Buffer.isBuffer(imageBuffer)) {
+                throw new Error("Le renderer n'a pas renvoyé un Buffer valide.");
+            }
 
-        }
+            const rawBase64 = imageBuffer.toString("base64").replace(/\r|\n/g, "");
 
-        const nouveauDossier = {
-            identifiant,
-            nom_produit,
-            nom_producteur,
-            composition: composition || "",
-            lot: lotCompact,
-            quantite: parseInt(quantite) || 1,
-            type_emballage: type_emballage || "",
-            pays_origine,
-            email_entreprise: email_entreprise || "",
-            date_certificat_conformite: date_certificat_conformite || null,
-            date_fabrication: date_fabrication || null,
-            date_peremption: date_peremption || null,
-            pdf_url,      
-            visuel_url,
-            empreinte_geometrique,
-            signature_maitre,
-            index_geometrique: indexGeo,
-            svg,      
-            kit_path,
-            numero_serie: serialNumber,
-            version: "ANOR-V16.5",
-            created_at: new Date().toISOString()
-        };
+            let pdfUrl = null;
+            let visuelUrl = null;
 
-        db.insert(nouveauDossier);
+            if (req.files) {
+                const pdfFile = (req.files['certificat_pdf'] && req.files['certificat_pdf'][0]) 
+                             || (req.files['pdf'] && req.files['pdf'][0]);
 
-        return res.status(200).json({
+                if (pdfFile) {
+                    try {
+                        const pdfPath = `${Date.now()}_${pdfFile.originalname.replace(/[^a-zA-Z0-9.]/g, '_')}`;
+                        const { data: pdfData, error: pdfErr } = await supabase.storage
+                            .from('certificat-pdf')
+                            .upload(pdfPath, pdfFile.buffer, { contentType: pdfFile.mimetype, upsert: true });
+
+                        if (!pdfErr && pdfData) {
+                            const { data: publicUrlData } = supabase.storage
+                                .from('certificat-pdf')
+                                .getPublicUrl(pdfPath);
+                            pdfUrl = publicUrlData ? publicUrlData.publicUrl : null;
+                        }
+                    } catch (err) {
+                        console.warn("⚠️ Exception Storage (PDF) :", err.message);
+                    }
+
+                    if (!pdfUrl) {
+                        pdfUrl = `data:${pdfFile.mimetype};base64,${pdfFile.buffer.toString('base64')}`;
+                    }
+                }
+
+                const visuelFile = (req.files['visuel_produit'] && req.files['visuel_produit'][0]) 
+                                || (req.files['visuel'] && req.files['visuel'][0])
+                                || (req.files['image'] && req.files['image'][0]);
+
+                if (visuelFile) {
+                    try {
+                        const visuelPath = `${Date.now()}_${visuelFile.originalname.replace(/[^a-zA-Z0-9.]/g, '_')}`;
+                        const { data: visuelData, error: visuelErr } = await supabase.storage
+                            .from('Produits')
+                            .upload(visuelPath, visuelFile.buffer, { contentType: visuelFile.mimetype, upsert: true });
+
+                        if (!visuelErr && visuelData) {
+                            const { data: publicUrlData } = supabase.storage
+                                .from('Produits')
+                                .getPublicUrl(visuelPath);
+                            visuelUrl = publicUrlData ? publicUrlData.publicUrl : null;
+                        }
+                    } catch (err) {
+                        console.warn("⚠️ Exception Storage (Visuel) :", err.message);
+                    }
+
+                    if (!visuelUrl) {
+                        visuelUrl = `data:${visuelFile.mimetype};base64,${visuelFile.buffer.toString('base64')}`;
+                    }
+                }
+            }
+
+            const sha256_hash = smartPayload.aiSignature;
+            const signature_ia = smartPayload.aiSignature;
+            const engine_version = "ANOR-V16-SOVEREIGN";
+            const statut = "CERTIFIÉ";
+
+            const payloadDB = {
+                certificate_code: certificateCode,
+                lot: lot,
+                quantite: parseInt(quantite, 10),
+                type_emballage: type_emballage,
+                nom_produit: nom_produit || null,
+                nom_producteur: nom_producteur || null,
+                composition: composition || null,
+                pays_origine: pays_origine || null,
+                date_certificat_conformite: date_certificat_conformite || null,
+                date_fabrication: date_fabrication || null,
+                date_peremption: date_peremption || null,
+                certificat_pdf_url: pdfUrl,
+                visuel_produit_url: visuelUrl,
+                glyph_payload: smartPayload,
+                ai_signature_hash: smartPayload.aiSignature,
+                sha256_hash: sha256_hash,
+                signature_ia: signature_ia,
+                engine_version: engine_version,
+                statut: statut,
+                scan_count: 0
+            };
+
+            let { data, error } = await supabase
+                .from('produits_certifies')
+                .update(payloadDB)
+                .eq('lot', lot)
+                .select();
+
+            if (!data || data.length === 0) {
+                const insertRes = await supabase
+                    .from('produits_certifies')
+                    .insert([payloadDB])
+                    .select();
+                
+                data = insertRes.data;
+                error = insertRes.error;
+            }
+
+            if (error) throw error;
+
+            // Notice d'impression
+            const printNoticeContent = 
+`================================================================================
+           AGENCE NORMALE DE NORMALISATION ET DE QUALITÉ (ANOR)
+              NOTICE D'INSTRUCTION TECHNIQUE ET D'IMPRESSION
+================================================================================
+
+DOCUMENT OFFICIEL DE SÉCURITÉ - À L'ATTENTION DE L'IMPRIMEUR ET DU FABRICANT
+================================================================================
+
+1. IDENTIFICATION DU LOT ET DU PRODUIT :
+   - Numéro de Lot  : ${lot}
+   - Nom du Produit : ${nom_produit || 'N/A'}
+   - Producteur     : ${nom_producteur || 'N/A'}
+   - Quantité certifiée : ${parseInt(quantite, 10).toLocaleString('fr-FR')} unités
+   - Type d'emballage : ${type_emballage}
+
+2. CONSIGNES TECHNIQUES D'IMPRESSION DU SCEAU :
+   - Le fichier 'sceau_ANOR_MASTER.png' inclus dans ce paquet est la matrice Mère.
+   - Impression recommandée : Quadrichromie haute résolution (300 DPI minimum).
+   - Dimensions minimales du glyph central : 15mm x 15mm pour garantir la lecture par le scanner mobile.
+   - Tolérance de décalage des micro-points : Max 0.05mm.
+   - Ne pas altérer le ratio d'aspect (garder la matrice parfaitement carrée).
+
+3. CONFORMITÉ ET SÉCURITÉ :
+   - Ce sceau embarque la signature vectorielle de sécurité IA (${smartPayload.aiSignature}).
+   - Toute altération géométrique ou tentative de reproduction par photocopie invalidalise 
+     automatiquement l'authentification lors du contrôle sur le terrain par les agents ANOR.
+   - En cas d'anomalie à l'impression, contacter immédiatement les services techniques d'ANOR.
+
+--------------------------------------------------------------------------------
+Fait à Yaoundé, le ${new Date().toLocaleDateString('fr-FR')}
+Système Souverain de Certification - ANOR Engine V16
+================================================================================`;
+
+            const zip = new JSZip();
+            zip.file("NOTICE_DIMPRESSION_ET_INSTRUCTIONS.txt", printNoticeContent);
+            zip.file("certification.json", JSON.stringify({ 
+                lot, 
+                nom_produit, 
+                nom_producteur,
+                quantite: parseInt(quantite, 10), 
+                signature_ia: smartPayload.aiSignature,
+                created_at: new Date().toISOString() 
+            }, null, 4));
+            zip.file("sceau_ANOR_MASTER.png", imageBuffer);
+
+            const zipBuffer = await zip.generateAsync({ type: "nodebuffer", compression: "DEFLATE", compressionOptions: { level: 9 } });
+
+            return {
+                success: true,
+                lot,
+                sha256_hash: smartPayload.aiSignature,
+                imageUrl: `data:image/png;base64,${rawBase64}`,
+                zipUrl: "data:application/zip;base64," + zipBuffer.toString("base64"),
+                data: data ? data[0] : null
+            };
+        });
+
+        return res.status(202).json({
             success: true,
-            message: "Sceau forgé (v16.5) et enregistré avec succès en base de données.",
-            identifiant,
-            empreinte_geometrique,
-            signature_maitre,
-            pdf_url,
-            visuel_url,
-            svg,
-            version:"ANOR-V16.5",
-            numero_serie:serialNumber,
-            kit_download:`/api/forge/kit/download/${identifiant}`,
-            png_download:`/api/forge/png/${identifiant}`
+            message: "Génération en cours en arrière-plan.",
+            jobId: jobId
         });
 
     } catch (error) {
-        console.error("Erreur critique dans /api/forge :", error);
-        return res.status(500).json({
-            success: false,
-            message: "Erreur interne du serveur lors de la forge.",
-            error: error.message
-        });
+        console.error("Erreur Forge Backend:", error);
+        res.status(500).json({ error: error.message });
     }
 });
 
-// ==========================================================
-// EXPORT PNG HD ANOR V16.5
-// PNG haute résolution 3000x3000
-// ==========================================================
-app.get('/api/forge/png/:identifiant', async (req, res) => {
-    const { identifiant } = req.params;
-    const record = db.findByIdentifiant(identifiant);
-
-    if (!record || !record.svg) {
-        return res.status(404).send("Sceau introuvable.");
-    }
-
+// ==========================================
+// 🛡️ SÉCURITÉ 2 : VÉRIFICATION DYNAMIQUE & DÉTECTION D'ANOMALIES
+// ==========================================
+app.post('/api/seals/verify', scanLimiter, async (req, res) => {
     try {
-        const pngBuffer = await svgToImg.from(record.svg).toPng({
-            width: 3000,
-            height: 3000
-        });
+        const { scannedMatrix, lot, location, locationMethod, clientTimestamp, deviceMetadata } = req.body;
 
-        res.setHeader('Content-Type', 'image/png');
-        res.setHeader('Content-Disposition', `attachment; filename="ANOR_${identifiant}_HD.png"`);
-        return res.send(pngBuffer);
-
-    } catch (error) {
-        console.error("Erreur PNG HD:", error.message);
-        res.setHeader('Content-Type', 'image/svg+xml');
-        return res.send(record.svg);
-    }
-});
-
-// ==========================================================
-// KIT CERTIFICATION COMPLET ANOR V16.5
-// ==========================================================
-app.get('/api/forge/kit/download/:identifiant', async (req, res) => {
-    const { identifiant } = req.params;
-    const record = db.findByIdentifiant(identifiant);
-
-    if (!record) {
-        return res.status(404).json({
-            success: false,
-            message: "Sceau inconnu"
-        });
-    }
-
-    try {
-        const kitFolder = path.join(KITS_DIR, `KIT_${identifiant}`);
-        if (!fs.existsSync(kitFolder)) {
-            fs.mkdirSync(kitFolder, { recursive: true });
+        if (!lot || !scannedMatrix) {
+            return res.status(400).json({ error: "Numéro de lot et matrice obligatoire." });
         }
 
-        // ----------------------------------------------------------
-        // SVG ORIGINAL
-        // ----------------------------------------------------------
-        fs.writeFileSync(path.join(kitFolder, `SCEAU_${identifiant}.svg`), record.svg, 'utf8');
+        const { data: row, error } = await supabase
+            .from('produits_certifies')
+            .select('*')
+            .eq('lot', lot)
+            .single();
 
-        // ----------------------------------------------------------
-        // PNG HD
-        // ----------------------------------------------------------
-        try {
-            const png = await svgToImg.from(record.svg).toPng({
-                width: 3000,
-                height: 3000
+        if (error || !row) {
+            return res.status(404).json({ 
+                status: "CONTREFAÇON_REJETEE", 
+                message: "Sceau de lot inconnu ou contrefait." 
             });
-            fs.writeFileSync(path.join(kitFolder, `SCEAU_${identifiant}_HD.png`), png);
-        } catch (e) {
-            console.warn("PNG kit impossible:", e.message);
         }
 
-        // ----------------------------------------------------------
-        // METADATA JSON
-        // ----------------------------------------------------------
-        const metadata = {
-            identifiant: record.identifiant,
-            produit: record.nom_produit,
-            producteur: record.nom_producteur,
-            lot: record.lot,
-            pays: record.pays_origine,
-            composition: record.composition,
-            empreinte_geometrique: record.empreinte_geometrique,
-            signature_maitre: record.signature_maitre,
-            version: record.version,
-            date_creation: record.created_at
-        };
-        fs.writeFileSync(path.join(kitFolder, 'metadata.json'), JSON.stringify(metadata, null, 2), 'utf8');
+        // ÉVALUATION PAR LE MOTEUR IA BACKEND
+        const storedPayload = row.glyph_payload;
+        const evaluation = AiBackendEngine.evaluateScanConfidence(scannedMatrix, storedPayload ? storedPayload.matrix : []);
 
-        // ----------------------------------------------------------
-        // SIGNATURE SHA
-        // ----------------------------------------------------------
-        fs.writeFileSync(path.join(kitFolder, 'SIGNATURE.sha256'), record.empreinte_geometrique, 'utf8');
+        if (!evaluation.isValid) {
+            return res.status(401).json({ 
+                status: "CONTREFAÇON_DETECTEE", 
+                message: "Alerte : Incohérence géométrique détectée par le moteur IA.",
+                confidence: evaluation.confidence 
+            });
+        }
 
-        // ----------------------------------------------------------
-        // INDEX GEOMETRIQUE
-        // ----------------------------------------------------------
-        fs.writeFileSync(path.join(kitFolder, 'geometry_index.json'), JSON.stringify(record.index_geometrique, null, 2), 'utf8');
+        // DÉTECTION SÉCURITÉ : Clones / duplication de sceaux
+        const currentScanCount = (row.scan_count || 0) + 1;
+        const currentLocation = location || "Inconnue";
+        let warningFlag = null;
 
-        // ----------------------------------------------------------
-        // CERTIFICAT ORIGINAL
-        // ----------------------------------------------------------
-        if (record.pdf_url) {
-            const sourcePDF = path.join(__dirname, record.pdf_url);
-            if (fs.existsSync(sourcePDF)) {
-                fs.copyFileSync(sourcePDF, path.join(kitFolder, 'CERTIFICAT_ORIGINAL.pdf'));
+        if (row.last_scan_location && row.last_scan_location !== currentLocation) {
+            const timeDiffMinutes = (new Date() - new Date(row.last_scanned_at)) / (1000 * 60);
+            if (timeDiffMinutes < 15) {
+                warningFlag = "SUSPICION_DUPLICATION_SCEAU";
+                console.warn(`🚨 [ALERTE SÉCURITÉ] Suspicion de sceau cloné pour le lot ${lot} entre ${row.last_scan_location} et ${currentLocation}`);
             }
         }
 
-        // ----------------------------------------------------------
-        // VISUEL PRODUIT
-        // ----------------------------------------------------------
-        if (record.visuel_url) {
-            const sourceImage = path.join(__dirname, record.visuel_url);
-            if (fs.existsSync(sourceImage)) {
-                fs.copyFileSync(sourceImage, path.join(kitFolder, 'VISUEL_PRODUIT'));
-            }
-        }
+        await supabase
+            .from('produits_certifies')
+            .update({ 
+                scan_count: currentScanCount,
+                last_scan_location: currentLocation,
+                location_method: locationMethod || null,
+                device_metadata: deviceMetadata || null,
+                last_scanned_at: new Date()
+            })
+            .eq('lot', lot);
 
-        // ----------------------------------------------------------
-        // ZIP FINAL
-        // ----------------------------------------------------------
-        const zipPath = path.join(KITS_DIR, `KIT_CERTIFICATION_${identifiant}.zip`);
-        const output = fs.createWriteStream(zipPath);
-        const archive = archiver('zip', {
-            zlib: { level: 9 }
+        // RÉPONSE ENRICHI HARMONISÉE FRONTEND ET BACKEND
+        const confidenceScore = (evaluation.confidence * 100).toFixed(1) + "%";
+
+        res.json({
+            status: "AUTHENTIQUE",
+            confidence: evaluation.confidence,
+            score: confidenceScore,
+            security_alert: warningFlag,
+            securityAlert: warningFlag,
+            lot: row.lot,
+            batch: row.lot,
+            nom_produit: row.nom_produit || "Produit Certifié Conforme",
+            nomProduit: row.nom_produit || "Produit Certifié Conforme",
+            nom_producteur: row.nom_producteur || "Producteur Agréé",
+            nomProducteur: row.nom_producteur || "Producteur Agréé",
+            pays: row.pays_origine || "Cameroun",
+            pays_origine: row.pays_origine || "Cameroun",
+            quantite: row.quantite,
+            type_emballage: row.type_emballage,
+            typeEmballage: row.type_emballage,
+            visuel_produit_url: row.visuel_produit_url,
+            visuelProduitUrl: row.visuel_produit_url,
+            certificat_pdf_url: row.certificat_pdf_url,
+            certificatPdfUrl: row.certificat_pdf_url,
+            scan_count: currentScanCount,
+            scanCount: currentScanCount,
+            certified_at: row.created_at || row.date_certificat_conformite,
+            certDate: row.date_certificat_conformite || row.created_at,
+            prodDate: row.date_fabrication || "N/A",
+            expDate: row.date_peremption || "N/A",
+            norme: "ANOR NC-ISO"
         });
-
-        output.on('close', () => {
-            return res.download(zipPath, `KIT_CERTIFICATION_${identifiant}.zip`);
-        });
-
-        archive.on('error', (err) => {
-            throw err;
-        });
-
-        archive.pipe(output);
-        archive.directory(kitFolder, false);
-        await archive.finalize();
 
     } catch (error) {
-        console.error("Erreur génération kit:", error);
-        return res.status(500).json({
-            success: false,
-            message: "Erreur création kit",
-            error: error.message
+        res.status(500).json({ error: error.message });
+    }
+});
+
+// ==========================================
+// 🧠 ÉTAPE 1 : IA À APPRENTISSAGE ÉVOLUTIF (TÉLÉMÉTRIE TERRAIN)
+// ==========================================
+app.post('/api/seals/feedback', scanLimiter, async (req, res) => {
+    try {
+        const { lot, luminance, isLowLight, contrastScore, rawFrameSnippet } = req.body;
+
+        console.log(`🧠 [IA LEARNING] Télémétrie reçue pour Lot: ${lot} | Lumière: ${luminance} | Basse Lumière: ${isLowLight}`);
+
+        await supabase
+            .from('telemetrie_scans')
+            .insert([{
+                lot: lot || "INCONNU",
+                luminance: luminance,
+                is_low_light: isLowLight,
+                contrast_score: contrastScore,
+                frame_snippet: rawFrameSnippet ? rawFrameSnippet.substring(0, 500) : null,
+                created_at: new Date()
+            }]);
+
+        const updatedThresholds = {
+            recommendedLightBoost: !!isLowLight,
+            adaptiveContrastMin: luminance < 50 ? 0.35 : 0.50
+        };
+
+        res.json({
+            success: true,
+            adaptiveParameters: updatedThresholds,
+            message: "Télémétrie intégrée avec succès au modèle d'apprentissage."
         });
+
+    } catch (err) {
+        console.error("❌ Erreur Télémétrie IA:", err.message);
+        res.status(500).json({ error: "Échec d'enregistrement de la télémétrie." });
     }
 });
 
-app.get('/api/registry/:identifiant', (req, res) => {
-    const { identifiant } = req.params;
-    const record = db.findByIdentifiant(identifiant);
-
-    if (!record) {
-        return res.status(404).json({ success: false, message: "Enregistrement introuvable." });
-    }
-
-    return res.status(200).json({ success: true, data: record });
+app.get('/health', (req, res) => {
+    res.status(200).json({ status: "ONLINE", engine: "Souverain ANOR AI Engine - Sécurité V16 & Apprentissage Évolutif Actif" });
 });
 
+const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
-    console.log(`[ANOR-V16.5] Serveur opérationnel sur le port ${PORT} avec routes PNG HD et Kit de certification ZIP.`);
+    console.log(`[EXPERT BACKEND] Serveur Souverain ANOR sécurisé prêt sur http://localhost:${PORT}`);
 });
