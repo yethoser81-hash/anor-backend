@@ -2,6 +2,7 @@ const db = require('../config/database'); // Client Supabase
 const AiBackendEngine = require('../engine/aiBackendEngine');
 const SealRenderer = require('../engine/sealRenderer');
 const crypto = require('crypto');
+const worker = require('../worker'); // Importation du gestionnaire de file d'attente
 
 const CertificationController = {
 
@@ -23,10 +24,36 @@ const CertificationController = {
                 ? `data:image/png;base64,${imageBuffer.toString('base64').replace(/\r|\n/g, '')}` 
                 : null;
 
+            // 🟢 Télémétrie asynchrone : Génération d'aperçu
+            worker.addJob(`telemetry_preview_${Date.now()}`, async (data) => {
+                return await db.from('telemetry').insert([data]);
+            }, {
+                type: 'telemetry',
+                payload: {
+                    event: 'PREVIEW_GENERATED',
+                    source: 'certification_controller',
+                    metrics: { lot }
+                }
+            });
+
             return res.json({ success: true, imageUrl: base64Image });
         } catch (error) {
             console.error("❌ ERREUR PREVIEW :", error);
-            res.status(500).json({ error: error.message });
+
+            // 🟢 Log Supabase asynchrone en cas d'erreur
+            worker.addJob(`log_preview_err_${Date.now()}`, async (logData) => {
+                return await db.from('app_logs').insert([logData]);
+            }, {
+                type: 'supabase_log',
+                payload: {
+                    level: 'error',
+                    message: `Erreur aperçu sceau: ${error.message}`,
+                    service: 'certification-service',
+                    details: { stack: error.stack }
+                }
+            });
+
+            return res.status(500).json({ error: error.message });
         }
     },
 
@@ -125,6 +152,19 @@ const CertificationController = {
 
             if (updateError) {
                 console.warn("⚠️ Attention lors du UPDATE Supabase :", updateError.message);
+                
+                // 🟢 Log d'avertissement en arrière-plan
+                worker.addJob(`log_update_warn_${Date.now()}`, async (logData) => {
+                    return await db.from('app_logs').insert([logData]);
+                }, {
+                    type: 'supabase_log',
+                    payload: {
+                        level: 'warn',
+                        message: `Échec du UPDATE sur lot ${lot}, tentative d'insertion...`,
+                        service: 'certification-service',
+                        details: { error: updateError.message }
+                    }
+                });
             }
 
             let finalRecord = updatedData && updatedData.length > 0 ? updatedData[0] : null;
@@ -139,6 +179,20 @@ const CertificationController = {
 
                 if (insertError) {
                     console.error("❌ ERREUR CRITIQUE INSERT SUPABASE :", insertError);
+                    
+                    // 🟢 Log d'erreur critique asynchrone
+                    worker.addJob(`log_insert_err_${Date.now()}`, async (logData) => {
+                        return await db.from('app_logs').insert([logData]);
+                    }, {
+                        type: 'supabase_log',
+                        payload: {
+                            level: 'error',
+                            message: `Erreur critique INSERT Supabase pour le lot ${lot}`,
+                            service: 'certification-service',
+                            details: { error: insertError.message }
+                        }
+                    });
+
                     return res.status(500).json({ 
                         error: "Impossible d'enregistrer les données dans Supabase.", 
                         details: insertError.message 
@@ -149,6 +203,19 @@ const CertificationController = {
             }
 
             console.log("✅ [SUPABASE SUCCESS] Enregistrement réussi :", finalRecord);
+
+            // 🟢 Télémétrie : Forgement de kit réussi
+            worker.addJob(`telemetry_kit_${lot}_${Date.now()}`, async (data) => {
+                return await db.from('telemetry').insert([data]);
+            }, {
+                type: 'telemetry',
+                payload: {
+                    event: 'KIT_SEAL_GENERATED',
+                    source: 'certification_controller',
+                    metrics: { lot, nom_produit, quantite },
+                    context: { engine_version }
+                }
+            });
 
             return res.json({
                 success: true,
@@ -162,6 +229,20 @@ const CertificationController = {
 
         } catch (error) {
             console.error("❌ ERREUR CRITIQUE SERVEUR /kit :", error);
+
+            // 🟢 Log d'erreur serveur globale
+            worker.addJob(`log_kit_crit_${Date.now()}`, async (logData) => {
+                return await db.from('app_logs').insert([logData]);
+            }, {
+                type: 'supabase_log',
+                payload: {
+                    level: 'error',
+                    message: `Erreur critique /kit: ${error.message}`,
+                    service: 'certification-service',
+                    details: { stack: error.stack }
+                }
+            });
+
             return res.status(500).json({ error: error.message });
         }
     },
@@ -181,6 +262,18 @@ const CertificationController = {
                 .single();
 
             if (error || !row) {
+                // 🟢 Télémétrie : Tentative de scan sur un lot introuvable
+                worker.addJob(`telemetry_verify_unknown_${Date.now()}`, async (data) => {
+                    return await db.from('telemetry').insert([data]);
+                }, {
+                    type: 'telemetry',
+                    payload: {
+                        event: 'VERIFY_UNKNOWN_LOT',
+                        source: 'verification_service',
+                        metrics: { lot }
+                    }
+                });
+
                 return res.status(404).json({ valid: false, message: "Produit ou lot non certifié." });
             }
 
@@ -188,6 +281,19 @@ const CertificationController = {
             if (scannedMatrix && row.glyph_payload) {
                 const evaluation = AiBackendEngine.evaluateScanConfidence(scannedMatrix, row.glyph_payload.matrix);
                 if (!evaluation.isValid) {
+
+                    // 🟢 Log & Télémétrie : Contrefaçon détectée
+                    worker.addJob(`telemetry_counterfeit_${lot}_${Date.now()}`, async (data) => {
+                        return await db.from('telemetry').insert([data]);
+                    }, {
+                        type: 'telemetry',
+                        payload: {
+                            event: 'COUNTERFEIT_DETECTED',
+                            source: 'verification_service',
+                            metrics: { lot, confidence: evaluation.confidence }
+                        }
+                    });
+
                     return res.status(401).json({
                         valid: false,
                         status: "CONTREFAÇON_DETECTEE",
@@ -197,10 +303,35 @@ const CertificationController = {
                 }
             }
 
+            // 🟢 Télémétrie : Vérification réussie
+            worker.addJob(`telemetry_verify_success_${lot}_${Date.now()}`, async (data) => {
+                return await db.from('telemetry').insert([data]);
+            }, {
+                type: 'telemetry',
+                payload: {
+                    event: 'VERIFY_SUCCESS',
+                    source: 'verification_service',
+                    metrics: { lot }
+                }
+            });
+
             return res.json({ valid: true, product: row });
         } catch (error) {
             console.error("❌ ERREUR VERIFY :", error);
-            res.status(500).json({ error: error.message });
+
+            worker.addJob(`log_verify_err_${Date.now()}`, async (logData) => {
+                return await db.from('app_logs').insert([logData]);
+            }, {
+                type: 'supabase_log',
+                payload: {
+                    level: 'error',
+                    message: `Erreur durant la vérification: ${error.message}`,
+                    service: 'verification-service',
+                    details: { stack: error.stack }
+                }
+            });
+
+            return res.status(500).json({ error: error.message });
         }
     }
 };

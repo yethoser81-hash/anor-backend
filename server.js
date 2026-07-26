@@ -14,7 +14,7 @@ const AiBackendEngine = require('./engine/aiBackendEngine');
 // Import du gestionnaire de tâches d'arrière-plan
 const taskQueue = require('./worker');
 
-// Import strict du moteur de rendu V16 (Désactivation du fallback vers l'ancien moteur)
+// Import strict du moteur de rendu V16
 const SealRenderer = require('./engine/sealRenderer');
 
 const app = express();
@@ -26,7 +26,7 @@ app.use(cors());
 app.use(express.json({ limit: '10mb' })); // Protection contre l'épuisement mémoire
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
-// En-têtes de Sécurité Intégrés (Protection contre l'injection & Clickjacking)
+// En-têtes de Sécurité Intégrés
 app.use((req, res, next) => {
     res.setHeader("Content-Security-Policy", "default-src 'self' http://localhost:* 'unsafe-inline' 'unsafe-eval' data: blob:;");
     res.setHeader("X-Content-Type-Options", "nosniff");
@@ -218,7 +218,7 @@ app.post('/api/seals/generate-batch-seal', upload.fields([
             const printNoticeContent = 
 `================================================================================
            AGENCE NORMALE DE NORMALISATION ET DE QUALITÉ (ANOR)
-              NOTICE D'INSTRUCTION TECHNIQUE ET D'IMPRESSION
+             NOTICE D'INSTRUCTION TECHNIQUE ET D'IMPRESSION
 ================================================================================
 
 DOCUMENT OFFICIEL DE SÉCURITÉ - À L'ATTENTION DE L'IMPRIMEUR ET DU FABRICANT
@@ -290,19 +290,62 @@ Système Souverain de Certification - ANOR Engine V16
 // ==========================================
 app.post('/api/seals/verify', scanLimiter, async (req, res) => {
     try {
-        const { scannedMatrix, lot, location, locationMethod, clientTimestamp, deviceMetadata } = req.body;
+        const { scannedMatrix, lot, location, locationMethod, deviceMetadata } = req.body;
 
-        if (!lot || !scannedMatrix) {
-            return res.status(400).json({ error: "Numéro de lot et matrice obligatoire." });
+        // Assouplissement : Il faut AU MOINS la matrice scannée OU le numéro de lot
+        if (!scannedMatrix && !lot) {
+            return res.status(400).json({ 
+                error: "Données de scan insuffisantes. Une matrice ou un numéro de lot est requis." 
+            });
         }
 
-        const { data: row, error } = await supabase
-            .from('produits_certifies')
-            .select('*')
-            .eq('lot', lot)
-            .single();
+        let row = null;
 
-        if (error || !row) {
+        // 1. Recherche prioritaire par Numéro de Lot si disponible
+        if (lot) {
+            const { data, error } = await supabase
+                .from('produits_certifies')
+                .select('*')
+                .eq('lot', lot)
+                .maybeSingle();
+
+            if (!error && data) {
+                row = data;
+            }
+        }
+
+        // 2. Recherche alternative par Matrice seule si le lot est absent ou non trouvé
+        if (!row && scannedMatrix) {
+            const { data: candidates, error } = await supabase
+                .from('produits_certifies')
+                .select('*')
+                .limit(100);
+
+            if (!error && candidates && candidates.length > 0) {
+                let bestMatch = null;
+                let highestScore = 0;
+
+                for (const candidate of candidates) {
+                    const storedPayload = candidate.glyph_payload;
+                    const evalResult = AiBackendEngine.evaluateScanConfidence(
+                        scannedMatrix, 
+                        storedPayload ? storedPayload.matrix : []
+                    );
+
+                    if (evalResult.isValid && evalResult.confidence > highestScore) {
+                        highestScore = evalResult.confidence;
+                        bestMatch = candidate;
+                    }
+                }
+
+                if (bestMatch && highestScore >= 0.70) {
+                    row = bestMatch;
+                }
+            }
+        }
+
+        // Si aucun produit correspondant n'a été trouvé
+        if (!row) {
             return res.status(404).json({ 
                 status: "CONTREFAÇON_REJETEE", 
                 message: "Sceau de lot inconnu ou contrefait." 
@@ -311,7 +354,10 @@ app.post('/api/seals/verify', scanLimiter, async (req, res) => {
 
         // ÉVALUATION PAR LE MOTEUR IA BACKEND
         const storedPayload = row.glyph_payload;
-        const evaluation = AiBackendEngine.evaluateScanConfidence(scannedMatrix, storedPayload ? storedPayload.matrix : []);
+        const evaluation = AiBackendEngine.evaluateScanConfidence(
+            scannedMatrix || [], 
+            storedPayload ? storedPayload.matrix : []
+        );
 
         if (!evaluation.isValid) {
             return res.status(401).json({ 
@@ -330,7 +376,7 @@ app.post('/api/seals/verify', scanLimiter, async (req, res) => {
             const timeDiffMinutes = (new Date() - new Date(row.last_scanned_at)) / (1000 * 60);
             if (timeDiffMinutes < 15) {
                 warningFlag = "SUSPICION_DUPLICATION_SCEAU";
-                console.warn(`🚨 [ALERTE SÉCURITÉ] Suspicion de sceau cloné pour le lot ${lot} entre ${row.last_scan_location} et ${currentLocation}`);
+                console.warn(`🚨 [ALERTE SÉCURITÉ] Suspicion de sceau cloné pour le lot ${row.lot} entre ${row.last_scan_location} et ${currentLocation}`);
             }
         }
 
@@ -343,15 +389,15 @@ app.post('/api/seals/verify', scanLimiter, async (req, res) => {
                 device_metadata: deviceMetadata || null,
                 last_scanned_at: new Date()
             })
-            .eq('lot', lot);
+            .eq('lot', row.lot);
 
-        // RÉPONSE ENRICHI HARMONISÉE FRONTEND ET BACKEND
-        const confidenceScore = (evaluation.confidence * 100).toFixed(1) + "%";
+        // RÉPONSE ENRICHIE ET HARMONISÉE FRONTEND ET BACKEND (Snake_case & CamelCase)
+        const confidenceScoreStr = (evaluation.confidence * 100).toFixed(1) + "%";
 
         res.json({
             status: "AUTHENTIQUE",
             confidence: evaluation.confidence,
-            score: confidenceScore,
+            score: confidenceScoreStr,
             security_alert: warningFlag,
             securityAlert: warningFlag,
             lot: row.lot,
@@ -379,6 +425,7 @@ app.post('/api/seals/verify', scanLimiter, async (req, res) => {
         });
 
     } catch (error) {
+        console.error("Erreur lors de la vérification:", error);
         res.status(500).json({ error: error.message });
     }
 });
@@ -390,7 +437,7 @@ app.post('/api/seals/feedback', scanLimiter, async (req, res) => {
     try {
         const { lot, luminance, isLowLight, contrastScore, rawFrameSnippet } = req.body;
 
-        console.log(`🧠 [IA LEARNING] Télémétrie reçue pour Lot: ${lot} | Lumière: ${luminance} | Basse Lumière: ${isLowLight}`);
+        console.log(`🧠 [IA LEARNING] Télémétrie reçue pour Lot: ${lot || 'NON_SPÉCIFIÉ'} | Lumière: ${luminance} | Basse Lumière: ${isLowLight}`);
 
         await supabase
             .from('telemetrie_scans')
