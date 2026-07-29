@@ -1,37 +1,81 @@
+/**
+ * ======================================================
+ * SYSTEME SOUVERAIN DE CERTIFICATION ANOR - SERVER CORE
+ * Version: 17.1.0 (Security Hardened & Production Ready)
+ * ======================================================
+ */
+
 const express = require('express');
 const cors = require('cors');
 const path = require('path');
 const crypto = require('crypto');
 require('dotenv').config();
 const JSZip = require("jszip");
-const fs = require("fs");
 const multer = require('multer');
-const rateLimit = require('express-rate-limit'); // Sécurité Anti-DDoS / Brute-force
+const rateLimit = require('express-rate-limit');
+const helmet = require("helmet");
 
-// Limite stricte de taille de fichier téléversé (10MB)
-const upload = multer({ limits: { fileSize: 10 * 1024 * 1024 } }); 
+// Constantes de versioning & environnement global
+const SERVER_VERSION = "17.1.0";
+const isProduction = process.env.NODE_ENV === "production";
+
+// Configuration sécurisée de Multer (Stockage en mémoire avec filtrage de fichiers)
+const upload = multer({
+    storage: multer.memoryStorage(),
+    limits: { fileSize: 10 * 1024 * 1024 }, // Limite de 10 MB par fichier
+    fileFilter: (req, file, cb) => {
+        const allowedMimetypes = [
+            'application/pdf',
+            'image/jpeg',
+            'image/png',
+            'image/webp'
+        ];
+        if (allowedMimetypes.includes(file.mimetype)) {
+            cb(null, true);
+        } else {
+            cb(new Error("TYPE_FICHIER_NON_AUTORISE"));
+        }
+    }
+});
 
 const supabase = require('./config/database');
 const AiBackendEngine = require('./engine/aiBackendEngine');
-
-// Import du gestionnaire de tâches d'arrière-plan
 const taskQueue = require('./worker');
-
-// Import strict du moteur de rendu V16
 const SealRenderer = require('./engine/sealRenderer');
 
 const app = express();
 
-// ==========================================
-// 🛡️ SÉCURITÉ 1 : PROTECTION ANTI-HACKING & CORS
-// ==========================================
-app.use(cors());
-app.use(express.json({ limit: '10mb' })); // Protection contre l'épuisement mémoire
-app.use(express.urlencoded({ extended: true, limit: '10mb' }));
+// Désactivation explicite du header d'identification du serveur
+app.disable("x-powered-by");
 
-// En-têtes de Sécurité Intégrés et Durcis
+// ==========================================
+// 🛡️ SÉCURITÉ & MIDDLEWARES GLOBAUX
+// ==========================================
+
+// En-têtes de sécurité HTTP robustes via Helmet
+app.use(
+    helmet({
+        crossOriginEmbedderPolicy: false,
+        contentSecurityPolicy: {
+            directives: {
+                defaultSrc: ["'self'", "data:", "blob:"],
+                scriptSrc: ["'self'"],
+                styleSrc: ["'self'", "'unsafe-inline'"],
+                imgSrc: ["'self'", "data:", "blob:", "https:"],
+                connectSrc: ["'self'", "https:"],
+                objectSrc: ["'none'"],
+                upgradeInsecureRequests: [],
+            },
+        },
+    })
+);
+
+app.use(cors());
+app.use(express.json({ limit: "10mb" }));
+app.use(express.urlencoded({ extended: true, limit: "10mb" }));
+
+// Protection contre l'injection d'en-têtes et renforcement des politiques client
 app.use((req, res, next) => {
-    res.setHeader("Content-Security-Policy", "default-src 'self' data: blob:; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline';");
     res.setHeader("X-Content-Type-Options", "nosniff");
     res.setHeader("X-Frame-Options", "DENY");
     res.setHeader("X-XSS-Protection", "1; mode=block");
@@ -39,19 +83,187 @@ app.use((req, res, next) => {
     next();
 });
 
-// Limiteur de requêtes pour contrer le spamming d'API de vérification (Rate Limiting)
-const scanLimiter = rateLimit({
-    windowMs: 1 * 60 * 1000, // 1 minute
-    max: 60, // Max 60 scans par minute par IP
-    message: { status: 429, error: "Trop de requêtes de scan de ce périphérique. Veuillez ralentir." }
+// Logger de requêtes HTTP sécurisé
+app.use((req, res, next) => {
+    const startTime = Date.now();
+    const requestId = req.headers["x-request-id"] || crypto.randomUUID();
+    req.requestId = requestId;
+    res.setHeader("X-Request-Id", requestId);
+
+    res.on("finish", () => {
+        const duration = Date.now() - startTime;
+        if (!isProduction) {
+            console.log(`[${new Date().toISOString()}] ${req.method} ${req.originalUrl} - ${res.statusCode} (${duration}ms) [ID: ${requestId}]`);
+        }
+    });
+
+    next();
 });
+
+// Limiteur de requêtes global anti-DDoS
+const globalLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000,
+    max: 300,
+    standardHeaders: true,
+    legacyHeaders: false,
+    message: { status: 429, error: "TOO_MANY_REQUESTS", message: "Trop de requêtes globales. Veuillez patienter." }
+});
+app.use(globalLimiter);
+
+// Limiteur strict pour les opérations d'authentification et de scan
+const scanLimiter = rateLimit({
+    windowMs: 1 * 60 * 1000,
+    max: 60,
+    standardHeaders: true,
+    legacyHeaders: false,
+    message: { status: 429, error: "TROP_DE_REQUETES", message: "Trop de requêtes de scan. Veuillez ralentir." }
+});
+
+/**
+ * ======================================================
+ * Protection Anti-Rejeu (Replay Protection)
+ * ======================================================
+ */
+const recentRequests = new Map();
+const REQUEST_TTL = 30000; // 30 secondes
+
+setInterval(() => {
+    const now = Date.now();
+    for (const [id, time] of recentRequests.entries()) {
+        if (now - time > REQUEST_TTL) {
+            recentRequests.delete(id);
+        }
+    }
+}, 10000);
+
+app.use((req, res, next) => {
+    const id = req.headers["x-request-id"];
+    if (!id) {
+        return next();
+    }
+
+    if (recentRequests.has(id)) {
+        return apiError(
+            res,
+            409,
+            "DUPLICATE_REQUEST",
+            "Cette requête a déjà été traitée."
+        );
+    }
+
+    recentRequests.set(id, Date.now());
+    next();
+});
+
+/**
+ * ======================================================
+ * HELPERS UNIFIÉS DE RÉPONSE ET SÉCURITÉ
+ * ======================================================
+ */
+function apiSuccess(res, data = {}, status = 200) {
+    return res
+        .status(status)
+        .json({
+            success: true,
+            requestId: res.getHeader("X-Request-Id") || res.req?.headers["x-request-id"] || null,
+            timestamp: Date.now(),
+            ...data
+        });
+}
+
+function apiError(res, status = 500, code = "SERVER_ERROR", message = "Une erreur est survenue.", details = null) {
+    const payload = {
+        success: false,
+        error: {
+            code,
+            message
+        },
+        timestamp: Date.now()
+    };
+    if (details && !isProduction) {
+        payload.error.details = details;
+    }
+    return res.status(status).json(payload);
+}
+
+function securityLog(req, event, details = {}) {
+    console.warn(
+        JSON.stringify({
+            time: new Date().toISOString(),
+            requestId: req.headers["x-request-id"] || req.requestId || null,
+            ip: req.ip,
+            event,
+            details
+        })
+    );
+}
+
+function isValidUserAgent(agent) {
+    if (!agent || typeof agent !== 'string') return false;
+    if (agent.length > 400) return false;
+    return true;
+}
+
+function isValidMatrix(matrix) {
+    if (!Array.isArray(matrix) || matrix.length !== 32) return false;
+    for (const row of matrix) {
+        if (!Array.isArray(row) || row.length !== 32) return false;
+        for (const value of row) {
+            if (value !== 0 && value !== 1) return false;
+        }
+    }
+    return true;
+}
+
+/**
+ * Sanitisation des noms de fichiers pour éviter le Path Traversal
+ */
+function sanitizeFilename(filename) {
+    if (!filename) return 'file';
+    return filename.replace(/[^a-zA-Z0-9._-]/g, '_');
+}
+
+// Nettoyage régulier de la mémoire de masse
+setInterval(() => {
+    if (global.gc) {
+        global.gc();
+    }
+}, 600000);
 
 // Servir les fichiers statiques
 app.use(express.static(__dirname));
 
-// Route explicite pour intercepter / et /index.html
+// Route principale statique
 app.get(['/', '/index.html'], (req, res) => {
     res.sendFile(path.join(__dirname, 'index.html'));
+});
+
+/**
+ * Route de contrôle de santé du serveur et des services (Health Check)
+ */
+app.get("/health", async (req, res) => {
+    let database = "DOWN";
+    try {
+        const { error } = await supabase
+            .from("produits_certifies")
+            .select("lot")
+            .limit(1);
+
+        if (!error) {
+            database = "UP";
+        }
+    } catch (e) {
+        database = "DOWN";
+    }
+
+    return apiSuccess(res, {
+        status: "ONLINE",
+        engine: `ANOR AI ${SERVER_VERSION}`,
+        database,
+        uptime: process.uptime(),
+        memory: process.memoryUsage().rss,
+        node: process.version
+    });
 });
 
 /**
@@ -59,24 +271,37 @@ app.get(['/', '/index.html'], (req, res) => {
  */
 app.get('/api/seals/status/:jobId', (req, res) => {
     const { jobId } = req.params;
-    if (!jobId || typeof jobId !== 'string' || jobId.length > 100) {
-        return res.status(400).json({ error: "Identifiant de tâche invalide." });
+    if (!jobId || typeof jobId !== 'string' || !/^[a-zA-Z0-9_-]{1,100}$/.test(jobId)) {
+        return apiError(res, 400, "INVALID_JOB_ID", "Identifiant de tâche invalide.");
     }
 
     const job = taskQueue.getJobStatus(jobId);
     if (!job) {
-        return res.status(404).json({ error: "Tâche introuvable." });
+        return apiError(res, 404, "JOB_NOT_FOUND", "Tâche introuvable.");
     }
-    res.json(job);
+    return apiSuccess(res, { job });
 });
 
 /**
  * Route unifiée pour la Forge ANOR (Asynchrone via Worker)
  */
-app.post('/api/seals/generate-batch-seal', upload.fields([
-    { name: 'certificat_pdf', maxCount: 1 },
-    { name: 'visuel_produit', maxCount: 1 }
-]), async (req, res) => {
+app.post('/api/seals/generate-batch-seal', (req, res, next) => {
+    upload.fields([
+        { name: 'certificat_pdf', maxCount: 1 },
+        { name: 'visuel_produit', maxCount: 1 }
+    ])(req, res, (err) => {
+        if (err) {
+            if (err.message === "TYPE_FICHIER_NON_AUTORISE") {
+                return apiError(res, 400, "INVALID_FILE_TYPE", "Format de fichier non pris en charge. Formats acceptés : PDF, PNG, JPEG, WEBP.");
+            }
+            if (err.code === 'LIMIT_FILE_SIZE') {
+                return apiError(res, 400, "FILE_TOO_LARGE", "Fichier trop volumineux (max 10MB).");
+            }
+            return apiError(res, 400, "UPLOAD_ERROR", err.message);
+        }
+        next();
+    });
+}, async (req, res) => {
     try {
         const {
             nom_produit,
@@ -92,7 +317,12 @@ app.post('/api/seals/generate-batch-seal', upload.fields([
         } = req.body;
 
         if (!lot || !quantite || !type_emballage) {
-            return res.status(400).json({ error: "Les champs lot, quantite et type_emballage sont obligatoires." });
+            return apiError(res, 400, "MISSING_PARAMETERS", "Les champs lot, quantite et type_emballage sont obligatoires.");
+        }
+
+        const parsedQuantite = parseInt(quantite, 10);
+        if (isNaN(parsedQuantite) || parsedQuantite <= 0) {
+            return apiError(res, 400, "INVALID_QUANTITY", "La quantité doit être un nombre entier positif.");
         }
 
         const jobId = `job_${Date.now()}_${crypto.randomBytes(4).toString('hex')}`;
@@ -105,17 +335,15 @@ app.post('/api/seals/generate-batch-seal', upload.fields([
                     smartPayload,
                     {
                         lot,
-                        quantite,
+                        quantite: parsedQuantite,
                         type_emballage,
                         productName: nom_produit,
                         nom_produit,
                         nom_producteur,
                         isMasterSeal: true,
-                        masterSerialLabel: `SÉRIE : DM / ${parseInt(quantite, 10).toLocaleString('fr-FR')}`
+                        masterSerialLabel: `SÉRIE : DM / ${parsedQuantite.toLocaleString('fr-FR')}`
                     }
                 );
-
-                console.log("✔ Sceau généré");
 
                 if (!Buffer.isBuffer(imageBuffer)) {
                     throw new Error("Le renderer n'a pas renvoyé un Buffer valide.");
@@ -127,12 +355,10 @@ app.post('/api/seals/generate-batch-seal', upload.fields([
                 let visuelUrl = null;
 
                 if (req.files) {
-                    const pdfFile = (req.files['certificat_pdf'] && req.files['certificat_pdf'][0]) 
-                                 || (req.files['pdf'] && req.files['pdf'][0]);
-
+                    const pdfFile = req.files['certificat_pdf']?.[0];
                     if (pdfFile) {
                         try {
-                            const pdfPath = `${Date.now()}_${pdfFile.originalname.replace(/[^a-zA-Z0-9.]/g, '_')}`;
+                            const pdfPath = `${Date.now()}_${sanitizeFilename(pdfFile.originalname)}`;
                             const { data: pdfData, error: pdfErr } = await supabase.storage
                                 .from('certificat-pdf')
                                 .upload(pdfPath, pdfFile.buffer, { contentType: pdfFile.mimetype, upsert: true });
@@ -152,13 +378,10 @@ app.post('/api/seals/generate-batch-seal', upload.fields([
                         }
                     }
 
-                    const visuelFile = (req.files['visuel_produit'] && req.files['visuel_produit'][0]) 
-                                     || (req.files['visuel'] && req.files['visuel'][0])
-                                     || (req.files['image'] && req.files['image'][0]);
-
+                    const visuelFile = req.files['visuel_produit']?.[0];
                     if (visuelFile) {
                         try {
-                            const visuelPath = `${Date.now()}_${visuelFile.originalname.replace(/[^a-zA-Z0-9.]/g, '_')}`;
+                            const visuelPath = `${Date.now()}_${sanitizeFilename(visuelFile.originalname)}`;
                             const { data: visuelData, error: visuelErr } = await supabase.storage
                                 .from('Produits')
                                 .upload(visuelPath, visuelFile.buffer, { contentType: visuelFile.mimetype, upsert: true });
@@ -181,7 +404,7 @@ app.post('/api/seals/generate-batch-seal', upload.fields([
 
                 const sha256_hash = smartPayload.aiSignature;
                 const signature_ia = smartPayload.aiSignature;
-                const engine_version = "ANOR-V16-SOVEREIGN";
+                const engine_version = SERVER_VERSION;
                 const statut = "CERTIFIÉ";
 
                 const matrixHash = smartPayload.matrix 
@@ -191,7 +414,7 @@ app.post('/api/seals/generate-batch-seal', upload.fields([
                 const payloadDB = {
                     certificate_code: certificateCode,
                     lot: lot,
-                    quantite: parseInt(quantite, 10),
+                    quantite: parsedQuantite,
                     type_emballage: type_emballage,
                     nom_produit: nom_produit || null,
                     nom_producteur: nom_producteur || null,
@@ -212,8 +435,6 @@ app.post('/api/seals/generate-batch-seal', upload.fields([
                     scan_count: 0
                 };
 
-                console.log("✔ Début écriture Supabase");
-
                 let { data, error } = await supabase
                     .from('produits_certifies')
                     .update(payloadDB)
@@ -232,12 +453,10 @@ app.post('/api/seals/generate-batch-seal', upload.fields([
 
                 if (error) throw error;
 
-                console.log("✔ Écriture Supabase OK");
-
                 const printNoticeContent = 
 `================================================================================
            AGENCE NATIONALE DE NORMALISATION ET DE QUALITÉ (ANOR)
-              NOTICE D'INSTRUCTION TECHNIQUE ET D'IMPRESSION
+             NOTICE D'INSTRUCTION TECHNIQUE ET D'IMPRESSION
 ================================================================================
 
 DOCUMENT OFFICIEL DE SÉCURITÉ - À L'ATTENTION DE L'IMPRIMEUR ET DU FABRICANT
@@ -247,7 +466,7 @@ DOCUMENT OFFICIEL DE SÉCURITÉ - À L'ATTENTION DE L'IMPRIMEUR ET DU FABRICANT
    - Numéro de Lot   : ${lot}
    - Nom du Produit : ${nom_produit || 'N/A'}
    - Producteur     : ${nom_producteur || 'N/A'}
-   - Quantité certifiée : ${parseInt(quantite, 10).toLocaleString('fr-FR')} unités
+   - Quantité certifiée : ${parsedQuantite.toLocaleString('fr-FR')} unités
    - Type d'emballage : ${type_emballage}
 
 2. CONSIGNES TECHNIQUES D'IMPRESSION DU SCEAU :
@@ -255,7 +474,7 @@ DOCUMENT OFFICIEL DE SÉCURITÉ - À L'ATTENTION DE L'IMPRIMEUR ET DU FABRICANT
    - Impression recommandée : Quadrichromie haute résolution (300 DPI minimum).
    - Dimensions minimales du glyph central : 15mm x 15mm pour garantir la lecture par le scanner mobile.
    - Tolérance de décalage des micro-points : Max 0.05mm.
-   - Ne pas altérer le ratio d'aspect (garder la matrice parfaitement carrée).
+   - Ne pas altérer le ratio d'aspect (garder la matrice perfectly carrée).
 
 3. CONFORMITÉ ET SÉCURITÉ :
    - Ce sceau embarque la signature vectorielle de sécurité IA (${smartPayload.aiSignature}).
@@ -265,7 +484,7 @@ DOCUMENT OFFICIEL DE SÉCURITÉ - À L'ATTENTION DE L'IMPRIMEUR ET DU FABRICANT
 
 --------------------------------------------------------------------------------
 Fait à Yaoundé, le ${new Date().toLocaleDateString('fr-FR')}
-Système Souverain de Certification - ANOR Engine V16
+Système Souverain de Certification - ANOR Engine ${SERVER_VERSION}
 ================================================================================`;
 
                 const zip = new JSZip();
@@ -274,15 +493,13 @@ Système Souverain de Certification - ANOR Engine V16
                     lot, 
                     nom_produit, 
                     nom_producteur,
-                    quantite: parseInt(quantite, 10), 
+                    quantite: parsedQuantite, 
                     signature_ia: smartPayload.aiSignature,
                     created_at: new Date().toISOString() 
                 }, null, 4));
                 zip.file("sceau_ANOR_MASTER.png", imageBuffer);
 
                 const zipBuffer = await zip.generateAsync({ type: "nodebuffer", compression: "DEFLATE", compressionOptions: { level: 9 } });
-
-                console.log("✔ Fin de génération OK");
 
                 return {
                     success: true,
@@ -294,20 +511,19 @@ Système Souverain de Certification - ANOR Engine V16
                 };
 
             } catch (err) {
-                console.error(`❌ Erreur d'exécution de la tâche [${jobId}]:`, err);
+                console.error(`❌ Erreur d'exécution de la tâche [${jobId}]:`, err.message);
                 throw err;
             }
         });
 
-        return res.status(202).json({
-            success: true,
+        return apiSuccess(res, {
             message: "Génération en cours en arrière-plan.",
             jobId: jobId
-        });
+        }, 202);
 
     } catch (error) {
-        console.error("Erreur Forge Backend:", error);
-        res.status(500).json({ error: error.message });
+        console.error("Erreur Forge Backend:", error.message);
+        return apiError(res, 500, "FORGE_ERROR", "Une erreur est survenue lors du lancement de la génération.");
     }
 });
 
@@ -316,36 +532,38 @@ Système Souverain de Certification - ANOR Engine V16
 // ==========================================
 app.post('/api/seals/verify', scanLimiter, async (req, res) => {
     const startTime = Date.now();
+    const MAX_PROCESSING_TIME = 5000;
 
     try {
+        if (!isValidUserAgent(req.headers["user-agent"])) {
+            securityLog(req, "INVALID_USER_AGENT", { agent: req.headers["user-agent"] });
+            return apiError(res, 400, "INVALID_CLIENT", "Client non valide.");
+        }
+
+        const bodySize = Buffer.byteLength(JSON.stringify(req.body), "utf8");
+        if (bodySize > 200000) {
+            securityLog(req, "PAYLOAD_TOO_LARGE", { sizeBytes: bodySize });
+            return apiError(res, 413, "PAYLOAD_TOO_LARGE", "Charge utile trop volumineuse.");
+        }
+
         const { scannedMatrix, lot, location, locationMethod, deviceMetadata } = req.body;
 
-        // Validation de sécurité du numéro de lot
+        if (!lot && !scannedMatrix) {
+            return apiError(res, 400, "MISSING_SCAN", "Données de scan insuffisantes. Une matrice ou un lot est requis.");
+        }
+
         if (lot && (typeof lot !== "string" || lot.length > 80)) {
-            return res.status(400).json({
-                status: "INVALID_LOT",
-                message: "Format de numéro de lot invalide."
-            });
+            return apiError(res, 400, "INVALID_LOT", "Format de numéro de lot invalide.");
         }
 
-        // Validation de sécurité de la matrice (32x32)
-        if (scannedMatrix && (!Array.isArray(scannedMatrix) || scannedMatrix.length !== 32)) {
-            return res.status(400).json({
-                status: "INVALID_MATRIX",
-                message: "Format de matrice invalide."
-            });
-        }
-
-        if (!scannedMatrix && !lot) {
-            return res.status(400).json({ 
-                error: "Données de scan insuffisantes. Une matrice ou un numéro de lot est requis." 
-            });
+        if (scannedMatrix && !isValidMatrix(scannedMatrix)) {
+            return apiError(res, 400, "INVALID_MATRIX", "La matrice reçue est invalide.");
         }
 
         let row = null;
         const verificationMode = lot ? "LOT" : "MATRIX";
 
-        // 1. Recherche prioritaire par Numéro de Lot si disponible
+        // 1. Recherche par Numéro de Lot
         if (lot) {
             const { data, error } = await supabase
                 .from('produits_certifies')
@@ -358,7 +576,7 @@ app.post('/api/seals/verify', scanLimiter, async (req, res) => {
             }
         }
 
-        // 2. Recherche alternative par Matrice
+        // 2. Recherche par Matrice
         if (!row && scannedMatrix) {
             const scannedHash = crypto.createHash('sha256').update(JSON.stringify(scannedMatrix)).digest('hex');
 
@@ -406,19 +624,17 @@ app.post('/api/seals/verify', scanLimiter, async (req, res) => {
             }
         }
 
-        // Si aucun produit correspondant n'a été trouvé
+        if (Date.now() - startTime > MAX_PROCESSING_TIME) {
+            return apiError(res, 503, "TIMEOUT", "Temps maximal de traitement dépassé.");
+        }
+
         if (!row) {
-            return res.status(404).json({ 
-                status: "CONTREFAÇON_REJETEE", 
-                message: "Sceau de lot inconnu ou contrefait.",
-                processingTime: Date.now() - startTime,
-                engineVersion: "V16",
-                verificationMode: verificationMode,
-                serverTimestamp: Date.now()
+            return apiError(res, 404, "UNKNOWN_SEAL", "Sceau de lot inconnu ou contrefait.", {
+                status: "CONTREFAÇON_REJETEE",
+                verificationMode
             });
         }
 
-        // Évaluation par le moteur IA Backend
         const storedPayload = row.glyph_payload;
         const scannedHash = scannedMatrix ? crypto.createHash('sha256').update(JSON.stringify(scannedMatrix)).digest('hex') : null;
         let evaluation;
@@ -433,18 +649,13 @@ app.post('/api/seals/verify', scanLimiter, async (req, res) => {
         }
 
         if (!evaluation.isValid) {
-            return res.status(401).json({ 
-                status: "CONTREFAÇON_DETECTEE", 
-                message: "Alerte : Incohérence géométrique détectée par le moteur IA.",
+            return apiError(res, 401, "INVALID_SEAL", "Alerte : Incohérence géométrique détectée par le moteur IA.", {
+                status: "CONTREFAÇON_DETECTEE",
                 confidence: evaluation.confidence,
-                processingTime: Date.now() - startTime,
-                engineVersion: "V16",
-                verificationMode: verificationMode,
-                serverTimestamp: Date.now()
+                verificationMode
             });
         }
 
-        // Détection de duplication/clonage de sceau
         const currentScanCount = (row.scan_count || 0) + 1;
         const currentLocation = location || "Inconnue";
         let warningFlag = null;
@@ -453,11 +664,14 @@ app.post('/api/seals/verify', scanLimiter, async (req, res) => {
             const timeDiffMinutes = (new Date() - new Date(row.last_scanned_at)) / (1000 * 60);
             if (timeDiffMinutes < 15) {
                 warningFlag = "SUSPICION_DUPLICATION_SCEAU";
-                console.warn(`🚨 [ALERTE SÉCURITÉ] Suspicion de sceau cloné pour le lot ${row.lot} entre ${row.last_scan_location} et ${currentLocation}`);
+                securityLog(req, "SEAL_DUPLICATION", {
+                    lot: row.lot,
+                    previous: row.last_scan_location,
+                    current: currentLocation
+                });
             }
         }
 
-        // Mise à jour de la télémétrie en arrière-plan sans bloquer la réponse
         supabase
             .from('produits_certifies')
             .update({ 
@@ -474,10 +688,12 @@ app.post('/api/seals/verify', scanLimiter, async (req, res) => {
 
         const confidenceScoreStr = (evaluation.confidence * 100).toFixed(1) + "%";
 
-        res.json({
+        return apiSuccess(res, {
             status: "AUTHENTIQUE",
+            verified: true,
             confidence: evaluation.confidence,
             score: confidenceScoreStr,
+            confidenceScore: evaluation.confidence,
             security_alert: warningFlag,
             securityAlert: warningFlag,
             lot: row.lot,
@@ -503,27 +719,29 @@ app.post('/api/seals/verify', scanLimiter, async (req, res) => {
             expDate: row.date_peremption || "N/A",
             norme: "ANOR NC-ISO",
             processingTime: Date.now() - startTime,
-            engineVersion: "V16",
+            processingTimeMs: Date.now() - startTime,
+            engineVersion: SERVER_VERSION,
             verificationMode: verificationMode,
             serverTimestamp: Date.now()
         });
 
     } catch (error) {
-        console.error("Erreur lors de la vérification:", error);
-        res.status(500).json({ error: error.message });
+        console.error("Erreur lors de la vérification:", error.message);
+        return apiError(res, 500, "SERVER_ERROR", "Une erreur interne s'est produite lors de la vérification.");
     }
 });
 
 // ==========================================
-// 🧠 ÉTAPE 1 : IA À APPRENTISSAGE ÉVOLUTIF (TÉLÉMÉTRIE TERRAIN)
+// 🧠 TELEMETRIE TERRAIN & APPRENTISSAGE IA
 // ==========================================
 app.post('/api/seals/feedback', scanLimiter, async (req, res) => {
     try {
         const { lot, luminance, isLowLight, contrastScore, rawFrameSnippet } = req.body;
 
-        console.log(`🧠 [IA LEARNING] Télémétrie reçue pour Lot: ${lot || 'NON_SPÉCIFIÉ'} | Lumière: ${luminance} | Basse Lumière: ${isLowLight}`);
+        if (!isProduction) {
+            console.log(`🧠 [IA LEARNING] Télémétrie reçue pour Lot: ${lot || 'NON_SPÉCIFIÉ'} | Lumière: ${luminance} | Basse Lumière: ${isLowLight}`);
+        }
 
-        // Tronquage strict pour éviter un éventuel déversement volumineux de mémoire
         const safeSnippet = (rawFrameSnippet && typeof rawFrameSnippet === 'string') 
             ? rawFrameSnippet.substring(0, 500) 
             : null;
@@ -544,23 +762,61 @@ app.post('/api/seals/feedback', scanLimiter, async (req, res) => {
             adaptiveContrastMin: (typeof luminance === 'number' && luminance < 50) ? 0.35 : 0.50
         };
 
-        res.json({
-            success: true,
+        return apiSuccess(res, {
             adaptiveParameters: updatedThresholds,
             message: "Télémétrie intégrée avec succès au modèle d'apprentissage."
         });
 
     } catch (err) {
         console.error("❌ Erreur Télémétrie IA:", err.message);
-        res.status(500).json({ error: "Échec d'enregistrement de la télémétrie." });
+        return apiError(res, 500, "TELEMETRY_ERROR", "Échec d'enregistrement de la télémétrie.");
     }
 });
 
-app.get('/health', (req, res) => {
-    res.status(200).json({ status: "ONLINE", engine: "Souverain ANOR AI Engine - Sécurité V16 & Apprentissage Évolutif Actif" });
+/**
+ * ======================================================
+ * GESTIONNAIRE GLOBAL D'ERREURS EXPRESS
+ * ======================================================
+ */
+app.use((err, req, res, next) => {
+    console.error("[GLOBAL ERROR]", err.message || err);
+    return apiError(
+        res,
+        500,
+        "SERVER_ERROR",
+        "Erreur interne du serveur."
+    );
 });
 
-const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => {
-    console.log(`[EXPERT BACKEND] Serveur Souverain ANOR sécurisé prêt sur http://localhost:${PORT}`);
+/**
+ * ======================================================
+ * PROTECTION DES ROUTES INCONNUES (404 Fallback)
+ * ======================================================
+ */
+app.use((req, res) => {
+    return apiError(
+        res,
+        404,
+        "ROUTE_NOT_FOUND",
+        "Route inexistante."
+    );
 });
+
+// ==========================================
+// 🚀 DEMARRAGE DU SERVEUR & SHUTDOWN PROPRE
+// ==========================================
+const PORT = process.env.PORT || 3000;
+const server = app.listen(PORT, () => {
+    console.log(`[EXPERT BACKEND] Serveur Souverain ANOR v${SERVER_VERSION} sécurisé prêt sur http://localhost:${PORT}`);
+});
+
+function shutdown(signal) {
+    console.log(`${signal} reçu. Fermeture du serveur en cours...`);
+    server.close(() => {
+        console.log("Serveur arrêté proprement.");
+        process.exit(0);
+    });
+}
+
+process.on("SIGINT", () => shutdown("SIGINT"));
+process.on("SIGTERM", () => shutdown("SIGTERM"));

@@ -3,8 +3,7 @@ const GlyphsLibrary = require("../library/glyphsLibrary");
 
 /**
  * IA Géométrique Souveraine ANOR
- * Génère une matrice complète directement exploitable
- * par sealRenderer.js sans aucun recalcul.
+ * Génère et vérifie la matrice géométrique du sceau ANOR.
  */
 
 const AiBackendEngine = {
@@ -33,7 +32,7 @@ const AiBackendEngine = {
             { val: 50000,  symbol: 'LM' }, // Cinquante Mille
             { val: 10000,  symbol: 'DM' }, // Dix Mille
             { val: 1000,   symbol: 'M'  }, // Mille
-            { val: 500,    symbol: 'D'  }, // Cing Cents
+            { val: 500,    symbol: 'D'  }, // Cinq Cents
             { val: 100,    symbol: 'C'  }, // Cent
             { val: 50,     symbol: 'L'  }, // Cinquante
             { val: 10,     symbol: 'X'  }  // Dix
@@ -110,7 +109,7 @@ const AiBackendEngine = {
                 cursor += 8;
 
                 //----------------------------------------------
-                // angle légèrement irregular
+                // angle légèrement irrégulier
                 //----------------------------------------------
 
                 const jitterAngle =
@@ -170,9 +169,7 @@ const AiBackendEngine = {
                     case "rect":
 
                         width = 5 + (d % 3);
-
                         height = 20 + (a % 18);
-
                         break;
 
                     default:
@@ -187,7 +184,6 @@ const AiBackendEngine = {
                 //----------------------------------------------
 
                 const rotation =
-
                     (d / 255) * Math.PI * 2;
 
                 //----------------------------------------------
@@ -201,31 +197,21 @@ const AiBackendEngine = {
                 //----------------------------------------------
 
                 const strokeWidth =
-
-                    1 +
-                    (b % 3);
+                    1 + (b % 3);
 
                 //----------------------------------------------
                 // opacité
                 //----------------------------------------------
 
                 const opacity =
-
-                    0.88 +
-                    ((c % 12) / 100);
+                    0.88 + ((c % 12) / 100);
 
                 //----------------------------------------------
                 // poids IA
                 //----------------------------------------------
 
                 const weight =
-
-                    (
-                        a +
-                        b +
-                        c +
-                        d
-                    ) % 256;
+                    (a + b + c + d) % 256;
 
                 //----------------------------------------------
 
@@ -266,87 +252,592 @@ const AiBackendEngine = {
         //----------------------------------------------------
 
         const aiSignature =
-
             crypto
                 .createHash("sha256")
                 .update(JSON.stringify(matrix))
                 .digest("hex");
 
         return {
-
             matrix,
-
             aiSignature
+        };
+
+    },
+
+    //--------------------------------------------------------
+    // Rotation virtuelle d'une matrice géométrique (Livraison IA-2)
+    //--------------------------------------------------------
+
+    rotateMatrix(matrix, angleOffset) {
+
+        if (!Array.isArray(matrix)) {
+            return [];
+        }
+
+        const twoPi = Math.PI * 2;
+
+        return matrix.map(item => ({
+
+            ...item,
+
+            angle:
+                (
+                    item.angle +
+                    angleOffset +
+                    twoPi
+                ) % twoPi
+
+        }));
+
+    },
+
+    //--------------------------------------------------------
+    // Correction légère de perspective (Livraison IA-3)
+    //--------------------------------------------------------
+
+    normalizeGeometry(matrix) {
+
+        if (!Array.isArray(matrix) || matrix.length === 0) {
+            return [];
+        }
+
+        const radii = matrix.map(g => g.radius);
+
+        const minRadius = Math.min(...radii);
+        const maxRadius = Math.max(...radii);
+
+        const radiusRange = Math.max(maxRadius - minRadius, 1);
+
+        return matrix.map(item => ({
+
+            ...item,
+
+            radius:
+                (
+                    item.radius - minRadius
+                ) / radiusRange,
+
+            angle:
+                item.angle % (Math.PI * 2),
+
+            width:
+                item.width / 20,
+
+            height:
+                item.height / 20,
+
+            rotation:
+                item.rotation % (Math.PI * 2)
+
+        }));
+
+    },
+
+    //--------------------------------------------------------
+    // Recherche du meilleur correspondant géométrique (Livraison IA-5)
+    //--------------------------------------------------------
+
+    findBestMatch(scanGlyph, referenceMatrix, usedIndexes) {
+
+        let bestIndex = -1;
+
+        let bestScore = -Infinity;
+
+        for (let i = 0; i < referenceMatrix.length; i++) {
+
+            if (usedIndexes.has(i))
+                continue;
+
+            const ref = referenceMatrix[i];
+
+            let score = 0;
+
+            if (scanGlyph.glyph === ref.glyph)
+                score += 40;
+
+            score -=
+                Math.abs(scanGlyph.radius - ref.radius) * 400;
+
+            score -=
+                Math.abs(scanGlyph.angle - ref.angle) * 120;
+
+            score -=
+                Math.abs(scanGlyph.rotation - ref.rotation) * 80;
+
+            score -=
+                Math.abs(scanGlyph.width - ref.width) * 25;
+
+            score -=
+                Math.abs(scanGlyph.height - ref.height) * 25;
+
+            if (scanGlyph.filled === ref.filled)
+                score += 15;
+
+            if (score > bestScore) {
+
+                bestScore = score;
+
+                bestIndex = i;
+
+            }
+
+        }
+
+        return bestIndex;
+
+    },
+
+    //--------------------------------------------------------
+    // Comparaison pondérée normalisée (Livraison IA-5)
+    //--------------------------------------------------------
+
+    evaluateWeighted(scannedMatrix, referenceMatrix) {
+
+        let obtainedScore = 0;
+
+        let maximumScore = 0;
+
+        let glyphMatches = 0;
+
+        let radiusMatches = 0;
+
+        let angleMatches = 0;
+
+        let rotationMatches = 0;
+
+        let fillMatches = 0;
+
+        let sizeMatches = 0;
+
+        const usedIndexes = new Set();
+
+        for (const scan of scannedMatrix) {
+
+            const bestIndex =
+                this.findBestMatch(
+                    scan,
+                    referenceMatrix,
+                    usedIndexes
+                );
+
+            if (bestIndex === -1)
+                continue;
+
+            usedIndexes.add(bestIndex);
+
+            const ref = referenceMatrix[bestIndex];
+
+            maximumScore += 100;
+
+            //--------------------------------
+
+            if (scan.glyph === ref.glyph) {
+
+                obtainedScore += 30;
+
+                glyphMatches++;
+
+            }
+
+            //--------------------------------
+
+            const dr =
+                Math.abs(
+                    scan.radius -
+                    ref.radius
+                );
+
+            /*
+            Tolérance progressive
+            */
+
+            const radiusTolerance =
+                ref.radius > 0.70
+                ? 0.030
+                : 0.045;
+
+            if (
+                dr <=
+                radiusTolerance
+            ) {
+
+                obtainedScore += 20;
+
+                radiusMatches++;
+
+            }
+            else if (
+                dr <=
+                radiusTolerance * 2
+            ) {
+
+                obtainedScore += 10;
+
+            }
+
+            //--------------------------------
+
+            const da =
+                Math.abs(
+                    scan.angle -
+                    ref.angle
+                );
+
+            if (da <= 0.03) {
+
+                obtainedScore += 15;
+
+                angleMatches++;
+
+            }
+            else if (da <= 0.08) {
+
+                obtainedScore += 8;
+
+            }
+
+            //--------------------------------
+
+            const drot =
+                Math.abs(
+                    scan.rotation -
+                    ref.rotation
+                );
+
+            if (drot <= 0.10) {
+
+                obtainedScore += 15;
+
+                rotationMatches++;
+
+            }
+            else if (drot <= 0.25) {
+
+                obtainedScore += 8;
+
+            }
+
+            //--------------------------------
+
+            if (
+                scan.filled ===
+                ref.filled
+            ) {
+
+                obtainedScore += 10;
+
+                fillMatches++;
+
+            }
+
+            //--------------------------------
+
+            const dw =
+                Math.abs(
+                    scan.width -
+                    ref.width
+                );
+
+            const dh =
+                Math.abs(
+                    scan.height -
+                    ref.height
+                );
+
+            if (
+                dw <= 0.06 &&
+                dh <= 0.06
+            ) {
+
+                obtainedScore += 10;
+
+                sizeMatches++;
+
+            }
+            else if (
+                dw <= 0.12 &&
+                dh <= 0.12
+            ) {
+
+                obtainedScore += 5;
+
+            }
+
+        }
+
+        // Pénalité sur les glyphes manquants
+        const unmatched =
+            referenceMatrix.length -
+            usedIndexes.size;
+
+        obtainedScore -= unmatched * 5;
+
+        if (obtainedScore < 0)
+            obtainedScore = 0;
+
+        const total = Math.min(
+            scannedMatrix.length,
+            referenceMatrix.length
+        );
+
+        return {
+
+            confidence:
+                maximumScore === 0
+                    ? 0
+                    : obtainedScore /
+                      maximumScore,
+
+            coverage:
+                usedIndexes.size /
+                referenceMatrix.length,
+
+            details: {
+
+                glyphMatches,
+
+                radiusMatches,
+
+                angleMatches,
+
+                rotationMatches,
+
+                fillMatches,
+
+                sizeMatches,
+
+                total
+
+            }
 
         };
 
     },
 
     //--------------------------------------------------------
-    // Vérification
+    // Calcul dynamique du seuil de validation (Livraison IA-6)
+    //--------------------------------------------------------
+
+    computeAdaptiveThreshold(metrics) {
+
+        let threshold = 0.88;
+
+        //---------------------------------------
+        // couverture
+        //---------------------------------------
+
+        if (metrics.coverage > 0.98)
+            threshold -= 0.03;
+
+        else if (metrics.coverage < 0.92)
+            threshold += 0.04;
+
+        //---------------------------------------
+        // reconnaissance des glyphes
+        //---------------------------------------
+
+        const glyphRatio =
+            metrics.details.glyphMatches /
+            Math.max(metrics.details.total, 1);
+
+        if (glyphRatio > 0.95)
+            threshold -= 0.02;
+
+        else if (glyphRatio < 0.80)
+            threshold += 0.03;
+
+        //---------------------------------------
+        // rotation
+        //---------------------------------------
+
+        const rotationRatio =
+            metrics.details.rotationMatches /
+            Math.max(metrics.details.total, 1);
+
+        if (rotationRatio < 0.70)
+            threshold += 0.02;
+
+        //---------------------------------------
+        // borne finale
+        //---------------------------------------
+
+        threshold =
+            Math.max(
+                0.82,
+                Math.min(
+                    threshold,
+                    0.95
+                )
+            );
+
+        return Number(
+            threshold.toFixed(3)
+        );
+
+    },
+
+    //--------------------------------------------------------
+    // Vérification IA multi-rotation & adaptative (Livraison IA-6)
     //--------------------------------------------------------
 
     evaluateScanConfidence(scannedMatrix, referenceMatrix) {
 
-        if (!scannedMatrix || !referenceMatrix) {
+        if (
+            !Array.isArray(scannedMatrix) ||
+            !Array.isArray(referenceMatrix)
+        ) {
 
             return {
-
                 isValid: false,
-
-                confidence: 0
-
+                confidence: 0,
+                adaptiveThreshold: 0.88,
+                qualityIndex: 0,
+                confidenceClass: "LOW",
+                anomalyDetected: true,
+                coverage: 0,
+                rotationCorrection: true,
+                details: {}
             };
 
         }
 
-        let score = 0;
-
         const total = Math.min(
-
             scannedMatrix.length,
-
             referenceMatrix.length
-
         );
 
-        for (let i = 0; i < total; i++) {
+        if (total === 0) {
 
-            const s = scannedMatrix[i];
-            const r = referenceMatrix[i];
+            return {
+                isValid: false,
+                confidence: 0,
+                adaptiveThreshold: 0.88,
+                qualityIndex: 0,
+                confidenceClass: "LOW",
+                anomalyDetected: true,
+                coverage: 0,
+                rotationCorrection: true,
+                details: {}
+            };
 
-            if (!s || !r) continue;
-
-            if (s.glyph === r.glyph)
-                score += 2;
-
-            if (Math.abs(s.radius - r.radius) < 8)
-                score += 2;
-
-            if (Math.abs(s.angle - r.angle) < 0.05)
-                score += 2;
-
-            if (s.filled === r.filled)
-                score += 1;
-
-            if (Math.abs(s.rotation - r.rotation) < 0.2)
-                score += 2;
-
-            if (Math.abs(s.width - r.width) <= 2)
-                score += 1;
         }
 
-        const maxScore = total * 10;
+        const rotations = [
+            -15,
+            -10,
+            -5,
+            0,
+            5,
+            10,
+            15
+        ];
 
-        const confidence = maxScore === 0
-            ? 0
-            : score / maxScore;
+        let bestConfidence = 0;
+        let bestCoverage = 0;
+        let bestDetails = null;
+
+        for (const deg of rotations) {
+
+            const rotatedReference =
+                this.normalizeGeometry(
+                    this.rotateMatrix(
+                        referenceMatrix,
+                        deg * Math.PI / 180
+                    )
+                );
+
+            const normalizedScan =
+                this.normalizeGeometry(
+                    scannedMatrix
+                );
+
+            const result =
+                this.evaluateWeighted(
+                    normalizedScan,
+                    rotatedReference
+                );
+
+            if (
+                result.confidence >
+                bestConfidence
+            ) {
+
+                bestConfidence =
+                    result.confidence;
+
+                bestCoverage =
+                    result.coverage;
+
+                bestDetails =
+                    result.details;
+
+            }
+
+        }
+
+        //--------------------------------------------------------
+        // Calculs décisionnels IA-6
+        //--------------------------------------------------------
+
+        const adaptiveThreshold =
+            this.computeAdaptiveThreshold({
+                confidence: bestConfidence,
+                coverage: bestCoverage,
+                details: bestDetails
+            });
+
+        const qualityIndex =
+            Math.round(
+                (
+                    bestConfidence * 0.6 +
+                    bestCoverage * 0.4
+                ) * 100
+            );
+
+        let confidenceClass = "LOW";
+
+        if (bestConfidence >= 0.96)
+            confidenceClass = "EXCELLENT";
+
+        else if (bestConfidence >= 0.92)
+            confidenceClass = "HIGH";
+
+        else if (bestConfidence >= 0.88)
+            confidenceClass = "MEDIUM";
+
+        const anomalyDetected =
+            bestCoverage < 0.80 ||
+            bestDetails.glyphMatches <
+            bestDetails.total * 0.65;
+
+        //--------------------------------------------------------
+        // Retour final avec métriques décisionnelles
+        //--------------------------------------------------------
 
         return {
 
-            isValid: confidence >= 0.90,
+            isValid:
+                bestConfidence >= adaptiveThreshold,
 
-            confidence: Number(confidence.toFixed(3))
+            confidence: Number(
+                bestConfidence.toFixed(4)
+            ),
+
+            adaptiveThreshold,
+
+            qualityIndex,
+
+            confidenceClass,
+
+            anomalyDetected,
+
+            coverage: Number(
+                bestCoverage.toFixed(3)
+            ),
+
+            rotationCorrection: true,
+
+            details: bestDetails
 
         };
 
