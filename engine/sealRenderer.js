@@ -73,7 +73,7 @@ const sealRenderer = {
         // ==========================================
         const logoSize = 270;
         const logoRadius = logoSize / 2;
-        const logoPath = options.logoPath || payload.logoPath || path.resolve(process.cwd(), 'assets/logo_anor_master.png');
+        const logoPath = options.logoPath || payload.logoPath || path.join(__dirname, "../assets/logo_anor_master.png");
 
         if (fs.existsSync(logoPath)) {
             try {
@@ -126,11 +126,16 @@ const sealRenderer = {
                 const hashByte = parseInt(hashSeed.substring((globalIndex * 2) % 60, ((globalIndex * 2) % 60) + 2), 16) || globalIndex;
                 
                 const item = matrixData[globalIndex] || {};
-                const glyphTypeIndex = item.type !== undefined ? item.type : hashByte;
-                const glyphType = GlyphsLibrary.resolveGlyph(glyphTypeIndex);
+                const glyphType = item.glyph || GlyphsLibrary.resolveGlyph(hashByte);
                 const glyphDef = GlyphsLibrary.getGlyphDefinition(glyphType);
 
-                const isFilled = item.isFilled !== undefined ? item.isFilled : (hashByte % 2 === 0);
+                if (!glyphDef) {
+                    throw new Error(`Glyphe inconnu : ${glyphType}`);
+                }
+
+                const isFilled = item.filled !== undefined
+                    ? item.filled
+                    : (hashByte % 2 === 0);
 
                 const px = centerX + r * Math.cos(angle);
                 const py = centerY + r * Math.sin(angle);

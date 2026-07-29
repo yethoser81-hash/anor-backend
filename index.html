@@ -373,7 +373,7 @@ document.addEventListener("DOMContentLoaded", async () => {
                         jobResult = statusData.result;
                         break;
                     } else if (statusData.status === 'failed') {
-                        throw new Error(statusData.error || "Échec du serveur durant la génération.");
+                        throw new Error(statusData.error?.message || statusData.message ||"Échec du serveur durant la génération.");
                     }
 
                     // Incrément progressif visuel

@@ -115,6 +115,8 @@ app.post('/api/seals/generate-batch-seal', upload.fields([
                     }
                 );
 
+                console.log("✔ Sceau généré");
+
                 if (!Buffer.isBuffer(imageBuffer)) {
                     throw new Error("Le renderer n'a pas renvoyé un Buffer valide.");
                 }
@@ -151,8 +153,8 @@ app.post('/api/seals/generate-batch-seal', upload.fields([
                     }
 
                     const visuelFile = (req.files['visuel_produit'] && req.files['visuel_produit'][0]) 
-                                    || (req.files['visuel'] && req.files['visuel'][0])
-                                    || (req.files['image'] && req.files['image'][0]);
+                                     || (req.files['visuel'] && req.files['visuel'][0])
+                                     || (req.files['image'] && req.files['image'][0]);
 
                     if (visuelFile) {
                         try {
@@ -210,6 +212,8 @@ app.post('/api/seals/generate-batch-seal', upload.fields([
                     scan_count: 0
                 };
 
+                console.log("✔ Début écriture Supabase");
+
                 let { data, error } = await supabase
                     .from('produits_certifies')
                     .update(payloadDB)
@@ -228,10 +232,12 @@ app.post('/api/seals/generate-batch-seal', upload.fields([
 
                 if (error) throw error;
 
+                console.log("✔ Écriture Supabase OK");
+
                 const printNoticeContent = 
 `================================================================================
            AGENCE NATIONALE DE NORMALISATION ET DE QUALITÉ (ANOR)
-             NOTICE D'INSTRUCTION TECHNIQUE ET D'IMPRESSION
+              NOTICE D'INSTRUCTION TECHNIQUE ET D'IMPRESSION
 ================================================================================
 
 DOCUMENT OFFICIEL DE SÉCURITÉ - À L'ATTENTION DE L'IMPRIMEUR ET DU FABRICANT
@@ -275,6 +281,8 @@ Système Souverain de Certification - ANOR Engine V16
                 zip.file("sceau_ANOR_MASTER.png", imageBuffer);
 
                 const zipBuffer = await zip.generateAsync({ type: "nodebuffer", compression: "DEFLATE", compressionOptions: { level: 9 } });
+
+                console.log("✔ Fin de génération OK");
 
                 return {
                     success: true,
