@@ -1,7 +1,7 @@
 /**
  * ======================================================
  * SYSTEME SOUVERAIN DE CERTIFICATION ANOR - SERVER CORE
- * Version: 17.1.0 (Security Hardened & Production Ready)
+ * Version: 17.2.0 (Security Hardened & Production Ready)
  * ======================================================
  */
 
@@ -16,7 +16,7 @@ const rateLimit = require('express-rate-limit');
 const helmet = require("helmet");
 
 // Constantes de versioning & environnement global
-const SERVER_VERSION = "17.1.0";
+const SERVER_VERSION = "17.2.0";
 const isProduction = process.env.NODE_ENV === "production";
 
 // Configuration sécurisée de Multer (Stockage en mémoire avec filtrage de fichiers)
@@ -137,12 +137,19 @@ setInterval(() => {
 }, 10000);
 
 app.use((req, res, next) => {
-    const id = req.headers["x-request-id"];
-    if (!id) {
+    // Seules les requêtes de modification ou sensibles sont contrôlées contre le rejeu
+    if (req.method === "GET" || req.method === "HEAD" || req.method === "OPTIONS") {
         return next();
     }
 
-    if (recentRequests.has(id)) {
+    const clientReqId = req.headers["x-request-id"];
+    if (!clientReqId) {
+        return next();
+    }
+
+    const replayKey = `${req.method}:${req.originalUrl}:${clientReqId}`;
+
+    if (recentRequests.has(replayKey)) {
         return apiError(
             res,
             409,
@@ -151,7 +158,7 @@ app.use((req, res, next) => {
         );
     }
 
-    recentRequests.set(id, Date.now());
+    recentRequests.set(replayKey, Date.now());
     next();
 });
 
@@ -223,7 +230,7 @@ function sanitizeFilename(filename) {
     return filename.replace(/[^a-zA-Z0-9._-]/g, '_');
 }
 
-// Nettoyage régulier de la mémoire de masse
+// Nettoyage régulier du Garbage Collector
 setInterval(() => {
     if (global.gc) {
         global.gc();
@@ -325,6 +332,9 @@ app.post('/api/seals/generate-batch-seal', (req, res, next) => {
             return apiError(res, 400, "INVALID_QUANTITY", "La quantité doit être un nombre entier positif.");
         }
 
+        const pdfFile = req.files?.['certificat_pdf']?.[0] || null;
+        const visuelFile = req.files?.['visuel_produit']?.[0] || null;
+
         const jobId = `job_${Date.now()}_${crypto.randomBytes(4).toString('hex')}`;
 
         taskQueue.addJob(jobId, async () => {
@@ -354,51 +364,47 @@ app.post('/api/seals/generate-batch-seal', (req, res, next) => {
                 let pdfUrl = null;
                 let visuelUrl = null;
 
-                if (req.files) {
-                    const pdfFile = req.files['certificat_pdf']?.[0];
-                    if (pdfFile) {
-                        try {
-                            const pdfPath = `${Date.now()}_${sanitizeFilename(pdfFile.originalname)}`;
-                            const { data: pdfData, error: pdfErr } = await supabase.storage
+                if (pdfFile) {
+                    try {
+                        const pdfPath = `${Date.now()}_${sanitizeFilename(pdfFile.originalname)}`;
+                        const { data: pdfData, error: pdfErr } = await supabase.storage
+                            .from('certificat-pdf')
+                            .upload(pdfPath, pdfFile.buffer, { contentType: pdfFile.mimetype, upsert: true });
+
+                        if (!pdfErr && pdfData) {
+                            const { data: publicUrlData } = supabase.storage
                                 .from('certificat-pdf')
-                                .upload(pdfPath, pdfFile.buffer, { contentType: pdfFile.mimetype, upsert: true });
-
-                            if (!pdfErr && pdfData) {
-                                const { data: publicUrlData } = supabase.storage
-                                    .from('certificat-pdf')
-                                    .getPublicUrl(pdfPath);
-                                pdfUrl = publicUrlData ? publicUrlData.publicUrl : null;
-                            }
-                        } catch (err) {
-                            console.warn("⚠️ Exception Storage (PDF) :", err.message);
+                                .getPublicUrl(pdfPath);
+                            pdfUrl = publicUrlData ? publicUrlData.publicUrl : null;
                         }
-
-                        if (!pdfUrl) {
-                            pdfUrl = `data:${pdfFile.mimetype};base64,${pdfFile.buffer.toString('base64')}`;
-                        }
+                    } catch (err) {
+                        console.warn("⚠️ Exception Storage (PDF) :", err.message);
                     }
 
-                    const visuelFile = req.files['visuel_produit']?.[0];
-                    if (visuelFile) {
-                        try {
-                            const visuelPath = `${Date.now()}_${sanitizeFilename(visuelFile.originalname)}`;
-                            const { data: visuelData, error: visuelErr } = await supabase.storage
+                    if (!pdfUrl) {
+                        pdfUrl = `data:${pdfFile.mimetype};base64,${pdfFile.buffer.toString('base64')}`;
+                    }
+                }
+
+                if (visuelFile) {
+                    try {
+                        const visuelPath = `${Date.now()}_${sanitizeFilename(visuelFile.originalname)}`;
+                        const { data: visuelData, error: visuelErr } = await supabase.storage
+                            .from('Produits')
+                            .upload(visuelPath, visuelFile.buffer, { contentType: visuelFile.mimetype, upsert: true });
+
+                        if (!visuelErr && visuelData) {
+                            const { data: publicUrlData } = supabase.storage
                                 .from('Produits')
-                                .upload(visuelPath, visuelFile.buffer, { contentType: visuelFile.mimetype, upsert: true });
-
-                            if (!visuelErr && visuelData) {
-                                const { data: publicUrlData } = supabase.storage
-                                    .from('Produits')
-                                    .getPublicUrl(visuelPath);
-                                visuelUrl = publicUrlData ? publicUrlData.publicUrl : null;
-                            }
-                        } catch (err) {
-                            console.warn("⚠️ Exception Storage (Visuel) :", err.message);
+                                .getPublicUrl(visuelPath);
+                            visuelUrl = publicUrlData ? publicUrlData.publicUrl : null;
                         }
+                    } catch (err) {
+                        console.warn("⚠️ Exception Storage (Visuel) :", err.message);
+                    }
 
-                        if (!visuelUrl) {
-                            visuelUrl = `data:${visuelFile.mimetype};base64,${visuelFile.buffer.toString('base64')}`;
-                        }
+                    if (!visuelUrl) {
+                        visuelUrl = `data:${visuelFile.mimetype};base64,${visuelFile.buffer.toString('base64')}`;
                     }
                 }
 
@@ -474,7 +480,7 @@ DOCUMENT OFFICIEL DE SÉCURITÉ - À L'ATTENTION DE L'IMPRIMEUR ET DU FABRICANT
    - Impression recommandée : Quadrichromie haute résolution (300 DPI minimum).
    - Dimensions minimales du glyph central : 15mm x 15mm pour garantir la lecture par le scanner mobile.
    - Tolérance de décalage des micro-points : Max 0.05mm.
-   - Ne pas altérer le ratio d'aspect (garder la matrice perfectly carrée).
+   - Ne pas altérer le ratio d'aspect (garder la matrice parfaitement carrée).
 
 3. CONFORMITÉ ET SÉCURITÉ :
    - Ce sceau embarque la signature vectorielle de sécurité IA (${smartPayload.aiSignature}).
