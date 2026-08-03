@@ -1,7 +1,7 @@
 /**
  * ======================================================
  * SYSTEME SOUVERAIN DE CERTIFICATION ANOR - SERVER CORE
- * Version: 17.1.0 (Production Ready - Hardened)
+ * Version: 17.2.0 (Production Ready - Hardened & Async Safe)
  * ======================================================
  */
 
@@ -11,20 +11,19 @@ const path = require('path');
 const crypto = require('crypto');
 require('dotenv').config();
 const JSZip = require("jszip");
-const fs = require("fs");
 const multer = require('multer');
 const rateLimit = require('express-rate-limit');
 const helmet = require("helmet");
 
 // Constantes de versioning & environnement global
-const SERVER_VERSION = "17.1.0";
+const SERVER_VERSION = "17.2.0";
 const isProduction = process.env.NODE_ENV === "production";
 
 // Limite stricte de taille de fichier téléversé (10MB)
 const upload = multer({ 
     limits: { fileSize: 10 * 1024 * 1024 },
     fileFilter: (req, file, cb) => {
-        // Validation basique du type Mime à la réception
+        // Validation stricte des types MIME autorisés
         const allowedMimes = ['application/pdf', 'image/jpeg', 'image/png', 'image/webp'];
         if (allowedMimes.includes(file.mimetype)) {
             cb(null, true);
@@ -114,12 +113,19 @@ setInterval(() => {
 }, 10000);
 
 app.use((req, res, next) => {
+    // Ne vérifier l'anti-rejeu que sur les requêtes modifiantes (POST, PUT, DELETE)
+    if (['GET', 'HEAD', 'OPTIONS'].includes(req.method)) {
+        return next();
+    }
+
     const id = req.headers["x-request-id"];
     if (!id) {
         return next();
     }
 
-    if (recentRequests.has(id)) {
+    const replayKey = `${req.method}:${req.path}:${id}`;
+
+    if (recentRequests.has(replayKey)) {
         return apiError(
             res,
             409,
@@ -128,13 +134,12 @@ app.use((req, res, next) => {
         );
     }
 
-    // Si la limite de stockage mémoire est atteinte, supprimer la plus ancienne entrée
     if (recentRequests.size >= MAX_RECENT_REQUESTS) {
         const oldestKey = recentRequests.keys().next().value;
         recentRequests.delete(oldestKey);
     }
 
-    recentRequests.set(id, Date.now());
+    recentRequests.set(replayKey, Date.now());
     next();
 });
 
@@ -187,21 +192,16 @@ function sanitizeFileName(filename) {
 }
 
 function isValidUserAgent(agent) {
-    if (!agent) {
-        return false;
-    }
-    if (agent.length > 400) {
+    if (!agent || agent.length > 400) {
         return false;
     }
     return true;
 }
 
 function isValidMatrix(matrix) {
-    if (!Array.isArray(matrix)) return false;
-    if (matrix.length !== 32) return false;
+    if (!Array.isArray(matrix) || matrix.length !== 32) return false;
     for (const row of matrix) {
-        if (!Array.isArray(row)) return false;
-        if (row.length !== 32) return false;
+        if (!Array.isArray(row) || row.length !== 32) return false;
         for (const value of row) {
             if (value !== 0 && value !== 1) return false;
         }
@@ -298,6 +298,13 @@ app.post('/api/seals/generate-batch-seal', upload.fields([
             return apiError(res, 400, "INVALID_QUANTITY", "La quantité doit être un nombre entier positif.");
         }
 
+        // Extraction en amont des buffers pour éviter les perte de références post-réponse HTTP
+        const pdfFile = req.files ? ((req.files['certificat_pdf'] && req.files['certificat_pdf'][0]) || (req.files['pdf'] && req.files['pdf'][0])) : null;
+        const visuelFile = req.files ? ((req.files['visuel_produit'] && req.files['visuel_produit'][0]) || (req.files['visuel'] && req.files['visuel'][0]) || (req.files['image'] && req.files['image'][0])) : null;
+
+        const pdfBufferData = pdfFile ? { buffer: pdfFile.buffer, mimetype: pdfFile.mimetype, originalname: pdfFile.originalname } : null;
+        const visuelBufferData = visuelFile ? { buffer: visuelFile.buffer, mimetype: visuelFile.mimetype, originalname: visuelFile.originalname } : null;
+
         const jobId = `job_${Date.now()}_${crypto.randomBytes(4).toString('hex')}`;
 
         taskQueue.addJob(jobId, async () => {
@@ -331,56 +338,49 @@ app.post('/api/seals/generate-batch-seal', upload.fields([
                 let pdfUrl = null;
                 let visuelUrl = null;
 
-                if (req.files) {
-                    const pdfFile = (req.files['certificat_pdf'] && req.files['certificat_pdf'][0]) 
-                                 || (req.files['pdf'] && req.files['pdf'][0]);
+                // Traitement du PDF
+                if (pdfBufferData) {
+                    try {
+                        const pdfPath = `${Date.now()}_${sanitizeFileName(pdfBufferData.originalname)}`;
+                        const { data: pdfData, error: pdfErr } = await supabase.storage
+                            .from('certificat-pdf')
+                            .upload(pdfPath, pdfBufferData.buffer, { contentType: pdfBufferData.mimetype, upsert: true });
 
-                    if (pdfFile) {
-                        try {
-                            const pdfPath = `${Date.now()}_${sanitizeFileName(pdfFile.originalname)}`;
-                            const { data: pdfData, error: pdfErr } = await supabase.storage
+                        if (!pdfErr && pdfData) {
+                            const { data: publicUrlData } = supabase.storage
                                 .from('certificat-pdf')
-                                .upload(pdfPath, pdfFile.buffer, { contentType: pdfFile.mimetype, upsert: true });
-
-                            if (!pdfErr && pdfData) {
-                                const { data: publicUrlData } = supabase.storage
-                                    .from('certificat-pdf')
-                                    .getPublicUrl(pdfPath);
-                                pdfUrl = publicUrlData ? publicUrlData.publicUrl : null;
-                            }
-                        } catch (err) {
-                            console.warn("⚠️ Exception Storage (PDF) :", err.message);
+                                .getPublicUrl(pdfPath);
+                            pdfUrl = publicUrlData ? publicUrlData.publicUrl : null;
                         }
-
-                        if (!pdfUrl) {
-                            pdfUrl = `data:${pdfFile.mimetype};base64,${pdfFile.buffer.toString('base64')}`;
-                        }
+                    } catch (err) {
+                        console.warn("⚠️ Exception Storage (PDF) :", err.message);
                     }
 
-                    const visuelFile = (req.files['visuel_produit'] && req.files['visuel_produit'][0]) 
-                                     || (req.files['visuel'] && req.files['visuel'][0])
-                                     || (req.files['image'] && req.files['image'][0]);
+                    if (!pdfUrl) {
+                        pdfUrl = `data:${pdfBufferData.mimetype};base64,${pdfBufferData.buffer.toString('base64')}`;
+                    }
+                }
 
-                    if (visuelFile) {
-                        try {
-                            const visuelPath = `${Date.now()}_${sanitizeFileName(visuelFile.originalname)}`;
-                            const { data: visuelData, error: visuelErr } = await supabase.storage
+                // Traitement du Visuel
+                if (visuelBufferData) {
+                    try {
+                        const visuelPath = `${Date.now()}_${sanitizeFileName(visuelBufferData.originalname)}`;
+                        const { data: visuelData, error: visuelErr } = await supabase.storage
+                            .from('Produits')
+                            .upload(visuelPath, visuelBufferData.buffer, { contentType: visuelBufferData.mimetype, upsert: true });
+
+                        if (!visuelErr && visuelData) {
+                            const { data: publicUrlData } = supabase.storage
                                 .from('Produits')
-                                .upload(visuelPath, visuelFile.buffer, { contentType: visuelFile.mimetype, upsert: true });
-
-                            if (!visuelErr && visuelData) {
-                                const { data: publicUrlData } = supabase.storage
-                                    .from('Produits')
-                                    .getPublicUrl(visuelPath);
-                                visuelUrl = publicUrlData ? publicUrlData.publicUrl : null;
-                            }
-                        } catch (err) {
-                            console.warn("⚠️ Exception Storage (Visuel) :", err.message);
+                                .getPublicUrl(visuelPath);
+                            visuelUrl = publicUrlData ? publicUrlData.publicUrl : null;
                         }
+                    } catch (err) {
+                        console.warn("⚠️ Exception Storage (Visuel) :", err.message);
+                    }
 
-                        if (!visuelUrl) {
-                            visuelUrl = `data:${visuelFile.mimetype};base64,${visuelFile.buffer.toString('base64')}`;
-                        }
+                    if (!visuelUrl) {
+                        visuelUrl = `data:${visuelBufferData.mimetype};base64,${visuelBufferData.buffer.toString('base64')}`;
                     }
                 }
 
@@ -423,19 +423,8 @@ app.post('/api/seals/generate-batch-seal', upload.fields([
 
                 let { data, error } = await supabase
                     .from('produits_certifies')
-                    .update(payloadDB)
-                    .eq('lot', lot)
+                    .upsert(payloadDB, { onConflict: 'lot' })
                     .select();
-
-                if (!data || data.length === 0) {
-                    const insertRes = await supabase
-                        .from('produits_certifies')
-                        .insert([payloadDB])
-                        .select();
-                    
-                    data = insertRes.data;
-                    error = insertRes.error;
-                }
 
                 if (error) throw error;
 
