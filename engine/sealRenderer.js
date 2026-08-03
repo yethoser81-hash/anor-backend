@@ -1,7 +1,7 @@
 /**
  * ====================================================================
  * ANOR CHECK
- * SEAL RENDERER V4.3 - Arc intérieur ajusté, Anneaux supérieurs complets & Texte optimisé
+ * SEAL RENDERER V4.4 - Anneaux extérieurs complets & Anneau interne court (10 glyphes)
  * ====================================================================
  */
 
@@ -23,7 +23,6 @@ const sealRenderer = {
         const centerX = width / 2;
         const centerY = height / 2;
         
-        // Couleur de la structure géométrique
         const GEOMETRY_COLOR = options.geometryColor || '#4A90E2';
 
         // ==========================================
@@ -82,7 +81,7 @@ const sealRenderer = {
                 ctx.drawImage(
                     img,
                     centerX - logoRadius,
-                    centerY - logoRadius - 35, // Ajusté pour une harmonie parfaite avec le texte
+                    centerY - logoRadius - 35,
                     logoSize,
                     logoSize
                 );
@@ -100,26 +99,32 @@ const sealRenderer = {
         const outerRingRadius = outerRadius - 30;               
         const midRingRadius = (innerRingRadius + outerRingRadius) / 2; 
 
-        const rings = [innerRingRadius, midRingRadius, outerRingRadius];
-        const numPerRing = 20;
+        // Définition explicite de chaque anneau : son rayon et son nombre de glyphes
+        const ringConfigs = [
+            { radius: innerRingRadius, count: 12, isInner: true },  // Anneau interne : ~10-12 glyphes, ouvert en bas
+            { radius: midRingRadius,   count: 24, isInner: false }, // Anneau médian : complet
+            { radius: outerRingRadius, count: 32, isInner: false }  // Anneau externe : complet
+        ];
 
         ctx.save();
         ctx.strokeStyle = GEOMETRY_COLOR;
         ctx.fillStyle = GEOMETRY_COLOR;
         ctx.lineWidth = 3.5;
 
-        rings.forEach((r, ringIdx) => {
+        let globalIndexOffset = 0;
+
+        ringConfigs.forEach((ringConfig, ringIdx) => {
+            const { radius: r, count: numPerRing, isInner } = ringConfig;
+
             for (let i = 0; i < numPerRing; i++) {
-                const globalIndex = (ringIdx * numPerRing) + i;
+                const globalIndex = globalIndexOffset + i;
                 const angle = (i / numPerRing) * Math.PI * 2;
                 const angleDeg = (angle * 180) / Math.PI;
 
-                // GESTION CIBLÉE DE LA ZONE D'EXCLUSION :
-                // On applique l'exclusion UNIQUEMENT sur le premier anneau (ringIdx === 0) 
-                // pour laisser un bel arc de cercle d'une dizaine de glyphes au-dessus 
-                // et libérer l'espace pour le texte en bas. Les anneaux du milieu et de l'extérieur restent riches.
-                if (ringIdx === 0) {
-                    if (angleDeg >= 35 && angleDeg <= 145) {
+                // SEUL l'anneau interne est filtré en bas pour ne garder que l'arc supérieur
+                if (isInner) {
+                    // On exclut la zone du bas (entre 20° et 160°) pour laisser place au texte et à l'harmonie
+                    if (angleDeg >= 20 && angleDeg <= 160) {
                         continue; 
                     }
                 }
@@ -149,6 +154,8 @@ const sealRenderer = {
 
                 ctx.restore();
             }
+
+            globalIndexOffset += numPerRing;
         });
 
         ctx.restore();
