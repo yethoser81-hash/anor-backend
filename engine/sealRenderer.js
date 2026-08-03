@@ -1,7 +1,7 @@
 /**
  * ====================================================================
  * ANOR CHECK
- * SEAL RENDERER V4.1 - Texte Géant et Lisible (Correction APK)
+ * SEAL RENDERER V4.2 - Fond Transparent, Zone d'Exclusion & Texte Haute Lisibilité
  * ====================================================================
  */
 
@@ -53,9 +53,8 @@ const sealRenderer = {
         const uniqueSeedSource = payload.productId || payload.id || payload.batchId || rawBatchName;
         const hashSeed = crypto.createHash('sha256').update(`ANOR_SEAL_${uniqueSeedSource}`).digest('hex');
 
-        // Nettoyage du canvas (Fond blanc opaque pour un contraste maximal anti-flou)
-        ctx.fillStyle = '#FFFFFF';
-        ctx.fillRect(0, 0, width, height);
+        // Nettoyage du canvas : Fond TOTALEMENT TRANSPARENT (pas de rect blanc global)
+        ctx.clearRect(0, 0, width, height);
 
         // ==========================================
         // 3. CERCLE EXTÉRIEUR DE CLÔTURE
@@ -71,7 +70,7 @@ const sealRenderer = {
         ctx.restore();
 
         // ==========================================
-        // 4. LOGO CENTRAL REDimensionné
+        // 4. LOGO CENTRAL
         // ==========================================
         const logoSize = 220;
         const logoRadius = logoSize / 2;
@@ -83,7 +82,7 @@ const sealRenderer = {
                 ctx.drawImage(
                     img,
                     centerX - logoRadius,
-                    centerY - logoRadius - 40, // Remonté légèrement pour faire de la place aux textes
+                    centerY - logoRadius - 40, // Remonté pour libérer la zone de texte en bas
                     logoSize,
                     logoSize
                 );
@@ -94,6 +93,7 @@ const sealRenderer = {
 
         // ==========================================
         // 5. ANNEAUX CONCENTRIQUES & GLYPHES DYNAMIQUES
+        // Zone d'exclusion active en bas pour ne pas polluer le texte
         // ==========================================
         const matrixData = payload.matrix || payload.glyph_payload?.matrix || [];
 
@@ -113,6 +113,13 @@ const sealRenderer = {
             for (let i = 0; i < numPerRing; i++) {
                 const globalIndex = (ringIdx * numPerRing) + i;
                 const angle = (i / numPerRing) * Math.PI * 2;
+
+                // ZONE D'EXCLUSION : On masque les glyphes dans la partie inférieure (entre 35° et 145° en bas)
+                // pour laisser un espace parfaitement vierge pour le lot et la série.
+                const angleDeg = (angle * 180) / Math.PI;
+                if (angleDeg >= 30 && angleDeg <= 150) {
+                    continue; 
+                }
 
                 const hashByte = parseInt(hashSeed.substring((globalIndex * 2) % 60, ((globalIndex * 2) % 60) + 2), 16) || globalIndex;
                 
@@ -144,32 +151,35 @@ const sealRenderer = {
         ctx.restore();
 
         // ==========================================
-        // 6. BLOC TEXTE GÉANT, HORIZONTAL ET HAUTE VISIBILITÉ (LOT & SÉRIE)
-        // Placé au centre/bas du sceau pour lecture instantanée par l'APK
+        // 6. BLOC TEXTE GÉANT, HORIZONTAL ET SANS FOND OPAQUE
+        // Écrit proprement avec contour de sécurité pour lisibilité sur tout support
         // ==========================================
         ctx.save();
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
 
-        // Zone de fond blanc semi-opaque derrière les textes pour éliminer les interférences des glyphes
-        const bannerY = centerY + 110;
-        ctx.fillStyle = 'rgba(255, 255, 255, 0.95)';
-        ctx.fillRect(centerX - 240, bannerY - 45, 480, 95);
+        const textY = centerY + 110;
 
-        // Bordure propre de la zone textuelle
-        ctx.strokeStyle = '#111111';
-        ctx.lineWidth = 2.5;
-        ctx.strokeRect(centerX - 240, bannerY - 45, 480, 95);
+        // Fonction d'aide interne pour dessiner du texte avec contour fort (anti-fond opaque)
+        const drawOutlinedText = (txt, x, y, fontStyle, textColor = '#FFFFFF') => {
+            ctx.font = fontStyle;
+            
+            // Contour noir large pour isoler le texte de n'importe quel fond (transparent ou coloré)
+            ctx.strokeStyle = '#000000';
+            ctx.lineWidth = 5.5;
+            ctx.lineJoin = 'round';
+            ctx.strokeText(txt, x, y);
 
-        // Ligne 1 : Numéro de Lot (Gros caractères bien lisibles)
-        ctx.font = 'bold 26px sans-serif';
-        ctx.fillStyle = '#000000';
-        ctx.fillText(batchText.toUpperCase(), centerX, bannerY - 18);
+            // Remplissage intérieur du texte
+            ctx.fillStyle = textColor;
+            ctx.fillText(txt, x, y);
+        };
 
-        // Ligne 2 : Numéro de Série / Article (Gros caractères bien lisibles)
-        ctx.font = 'bold 24px monospace';
-        ctx.fillStyle = '#1A365D'; // Bleu foncé institutionnel fort
-        ctx.fillText(itemText.toUpperCase(), centerX, bannerY + 22);
+        // Ligne 1 : Numéro de Lot (Bien visible et grand)
+        drawOutlinedText(batchText.toUpperCase(), centerX, textY - 18, 'bold 28px sans-serif', '#FFFFFF');
+
+        // Ligne 2 : Numéro de Série (Bien visible et grand)
+        drawOutlinedText(itemText.toUpperCase(), centerX, textY + 22, 'bold 26px monospace', '#E2E8F0');
 
         ctx.restore();
 
