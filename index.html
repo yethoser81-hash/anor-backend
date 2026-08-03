@@ -224,7 +224,7 @@
             </div>
             <div class="generationStatus">
                 <span>Version</span>
-                <code id="version">ANOR-V16-SOVEREIGN</code>
+                <code id="version">ANOR-V17-SOVEREIGN</code>
             </div>
         </div>
     </div>
@@ -331,89 +331,52 @@ document.addEventListener("DOMContentLoaded", async () => {
             }
 
             document.getElementById("status").textContent = "EN COURS";
-            document.getElementById("pipelineState").textContent = "Initialisation de la tâche sur le serveur...";
-            document.getElementById("progressFill").style.width = "20%";
-            document.getElementById("progressLabel").textContent = "20%";
+            document.getElementById("pipelineState").textContent = "Génération synchrone directe sur le serveur...";
+            document.getElementById("progressFill").style.width = "50%";
+            document.getElementById("progressLabel").textContent = "50%";
             ajouterJournal(`Transmission des données du lot [${lot}] au serveur...`);
 
             const formElement = document.getElementById("forgeForm");
             const formData = new FormData(formElement);
 
             try {
-                // 1. Démarrage de la tâche asynchrone
                 const response = await fetch('/api/seals/generate-batch-seal', {
                     method: 'POST',
                     body: formData
                 });
 
-                const initData = await response.json();
+                const resultData = await response.json();
 
-                if (!response.ok || !initData.success) {
-                    throw new Error(initData.error || initData.message || "Erreur lors de l'initialisation du traitement.");
+                if (!response.ok || !resultData.success) {
+                    throw new Error(resultData.error?.message || resultData.message || "Erreur lors de la génération du sceau.");
                 }
 
-                const jobId = initData.jobId;
-                document.getElementById("progressFill").style.width = "40%";
-                document.getElementById("progressLabel").textContent = "40%";
-                document.getElementById("pipelineState").textContent = "Forge du sceau en tâche de fond...";
-                ajouterJournal(`Tâche #${jobId} démarrée. Génération du Sceau en cours...`);
-
-                // 2. Polling de l'état de la tâche
-                let attempts = 0;
-                const maxAttempts = 45; // Max 30 secondes d'attente
-                let jobResult = null;
-
-                while (attempts < maxAttempts) {
-                    await new Promise(resolve => setTimeout(resolve, 1000));
-                    
-                    const statusRes = await fetch(`/api/seals/status/${jobId}`);
-                    const statusData = await statusRes.json();
-
-                    if (statusData.status === 'completed') {
-                        jobResult = statusData.result;
-                        break;
-                    } else if (statusData.status === 'failed') {
-                        throw new Error(statusData.error?.message || statusData.message ||"Échec du serveur durant la génération.");
-                    }
-
-                    // Incrément progressif visuel
-                    const currentProgress = Math.min(40 + (attempts * 2), 90);
-                    document.getElementById("progressFill").style.width = `${currentProgress}%`;
-                    document.getElementById("progressLabel").textContent = `${currentProgress}%`;
-                    attempts++;
-                }
-
-                if (!jobResult || !jobResult.imageUrl) {
-                    throw new Error("Délai d'attente dépassé ou image non générée.");
-                }
-
-                // 3. Traitement du résultat validé
-                ajouterJournal("Réception du Sceau transparent généré avec succès...");
+                ajouterJournal("Réception du sceau et du kit de certification...");
 
                 const sealImg = document.getElementById("seal-image");
-                if (jobResult.imageUrl && jobResult.imageUrl.startsWith("data:image/png;base64,")) {
-                    sealImg.src = jobResult.imageUrl;
+                if (resultData.imageUrl && resultData.imageUrl.startsWith("data:image/png;base64,")) {
+                    sealImg.src = resultData.imageUrl;
                     sealImg.style.display = "block";
                     document.getElementById("placeholder-seal").style.display = "none";
-                    window.derniereImageUrl = jobResult.imageUrl;
+                    window.derniereImageUrl = resultData.imageUrl;
                 } else {
                     throw new Error("Format d'image Base64 non reconnu.");
                 }
 
-                window.dernierKitZip = jobResult.zipUrl;
+                window.dernierKitZip = resultData.zipUrl;
 
                 document.getElementById("btnPNG").removeAttribute("disabled");
                 document.getElementById("btnKit").removeAttribute("disabled");
 
-                document.getElementById("identifiant").textContent = jobResult.lot;
-                document.getElementById("sha256").textContent = jobResult.sha256_hash ? jobResult.sha256_hash.substring(0, 16) + "..." : "Synchronisé Supabase";
+                document.getElementById("identifiant").textContent = resultData.lot;
+                document.getElementById("sha256").textContent = resultData.sha256_hash ? resultData.sha256_hash.substring(0, 16) + "..." : "Synchronisé Supabase";
                 document.getElementById("debug").textContent = "IA Validée (100%)";
 
                 document.getElementById("progressFill").style.width = "100%";
                 document.getElementById("progressLabel").textContent = "100%";
                 document.getElementById("status").textContent = "SUCCÈS";
                 document.getElementById("pipelineState").textContent = "Sceau de lot forgé et enregistré";
-                ajouterJournal(`Succès ! Lot [${jobResult.lot}] parfaitement enregistré.`);
+                ajouterJournal(`Succès ! Lot [${resultData.lot}] parfaitement enregistré.`);
 
             } catch (error) {
                 console.error(error);
