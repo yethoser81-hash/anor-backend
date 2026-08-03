@@ -1,7 +1,7 @@
 /**
  * ====================================================================
  * ANOR CHECK
- * SEAL RENDERER V4.2 - Fond Transparent, Zone d'Exclusion & Texte Haute Lisibilité
+ * SEAL RENDERER V4.3 - Arc intérieur ajusté, Anneaux supérieurs complets & Texte optimisé
  * ====================================================================
  */
 
@@ -53,13 +53,13 @@ const sealRenderer = {
         const uniqueSeedSource = payload.productId || payload.id || payload.batchId || rawBatchName;
         const hashSeed = crypto.createHash('sha256').update(`ANOR_SEAL_${uniqueSeedSource}`).digest('hex');
 
-        // Nettoyage du canvas : Fond TOTALEMENT TRANSPARENT (pas de rect blanc global)
+        // Nettoyage du canvas : Fond TOTALEMENT TRANSPARENT
         ctx.clearRect(0, 0, width, height);
 
         // ==========================================
         // 3. CERCLE EXTÉRIEUR DE CLÔTURE
         // ==========================================
-        const outerRadius = (Math.min(width, height) / 2) - 25; // 375px
+        const outerRadius = (Math.min(width, height) / 2) - 25; 
         
         ctx.save();
         ctx.strokeStyle = GEOMETRY_COLOR;
@@ -82,7 +82,7 @@ const sealRenderer = {
                 ctx.drawImage(
                     img,
                     centerX - logoRadius,
-                    centerY - logoRadius - 40, // Remonté pour libérer la zone de texte en bas
+                    centerY - logoRadius - 35, // Ajusté pour une harmonie parfaite avec le texte
                     logoSize,
                     logoSize
                 );
@@ -93,12 +93,11 @@ const sealRenderer = {
 
         // ==========================================
         // 5. ANNEAUX CONCENTRIQUES & GLYPHES DYNAMIQUES
-        // Zone d'exclusion active en bas pour ne pas polluer le texte
         // ==========================================
         const matrixData = payload.matrix || payload.glyph_payload?.matrix || [];
 
-        const innerRingRadius = logoRadius + 50;                
-        const outerRingRadius = outerRadius - 35;               
+        const innerRingRadius = logoRadius + 45;                
+        const outerRingRadius = outerRadius - 30;               
         const midRingRadius = (innerRingRadius + outerRingRadius) / 2; 
 
         const rings = [innerRingRadius, midRingRadius, outerRingRadius];
@@ -113,12 +112,16 @@ const sealRenderer = {
             for (let i = 0; i < numPerRing; i++) {
                 const globalIndex = (ringIdx * numPerRing) + i;
                 const angle = (i / numPerRing) * Math.PI * 2;
-
-                // ZONE D'EXCLUSION : On masque les glyphes dans la partie inférieure (entre 35° et 145° en bas)
-                // pour laisser un espace parfaitement vierge pour le lot et la série.
                 const angleDeg = (angle * 180) / Math.PI;
-                if (angleDeg >= 30 && angleDeg <= 150) {
-                    continue; 
+
+                // GESTION CIBLÉE DE LA ZONE D'EXCLUSION :
+                // On applique l'exclusion UNIQUEMENT sur le premier anneau (ringIdx === 0) 
+                // pour laisser un bel arc de cercle d'une dizaine de glyphes au-dessus 
+                // et libérer l'espace pour le texte en bas. Les anneaux du milieu et de l'extérieur restent riches.
+                if (ringIdx === 0) {
+                    if (angleDeg >= 35 && angleDeg <= 145) {
+                        continue; 
+                    }
                 }
 
                 const hashByte = parseInt(hashSeed.substring((globalIndex * 2) % 60, ((globalIndex * 2) % 60) + 2), 16) || globalIndex;
@@ -151,34 +154,30 @@ const sealRenderer = {
         ctx.restore();
 
         // ==========================================
-        // 6. BLOC TEXTE GÉANT, HORIZONTAL ET SANS FOND OPAQUE
-        // Écrit proprement avec contour de sécurité pour lisibilité sur tout support
+        // 6. BLOC TEXTE HORIZONTAL ET SANS FOND OPAQUE
         // ==========================================
         ctx.save();
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
 
-        const textY = centerY + 110;
+        const textY = centerY + 115;
 
-        // Fonction d'aide interne pour dessiner du texte avec contour fort (anti-fond opaque)
         const drawOutlinedText = (txt, x, y, fontStyle, textColor = '#FFFFFF') => {
             ctx.font = fontStyle;
             
-            // Contour noir large pour isoler le texte de n'importe quel fond (transparent ou coloré)
             ctx.strokeStyle = '#000000';
             ctx.lineWidth = 5.5;
             ctx.lineJoin = 'round';
             ctx.strokeText(txt, x, y);
 
-            // Remplissage intérieur du texte
             ctx.fillStyle = textColor;
             ctx.fillText(txt, x, y);
         };
 
-        // Ligne 1 : Numéro de Lot (Bien visible et grand)
+        // Ligne 1 : Numéro de Lot
         drawOutlinedText(batchText.toUpperCase(), centerX, textY - 18, 'bold 28px sans-serif', '#FFFFFF');
 
-        // Ligne 2 : Numéro de Série (Bien visible et grand)
+        // Ligne 2 : Numéro de Série
         drawOutlinedText(itemText.toUpperCase(), centerX, textY + 22, 'bold 26px monospace', '#E2E8F0');
 
         ctx.restore();
