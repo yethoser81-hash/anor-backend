@@ -1,3 +1,10 @@
+/**
+ * ====================================================================
+ * ANOR CHECK
+ * SEAL RENDERER V4.1 - Texte Géant et Lisible (Correction APK)
+ * ====================================================================
+ */
+
 const { createCanvas, loadImage } = require('canvas');
 const path = require('path');
 const fs = require('fs');
@@ -6,9 +13,6 @@ const crypto = require('crypto');
 const GlyphsLibrary = require('../library/glyphsLibrary');
 const AiBackendEngine = require('../engine/aiBackendEngine');
 
-/**
- * Moteur de rendu du Sceau ANOR
- */
 const sealRenderer = {
     renderSealToBuffer: async (payload = {}, options = {}) => {
         const width = options.width || 800;
@@ -31,7 +35,6 @@ const sealRenderer = {
             throw new Error("[sealRenderer] ERREUR : Aucun nom de lot ou produit n'a été fourni dans le payload.");
         }
 
-        // Formatage du texte du lot (ex: "LOT 89P-206" ou nom du produit)
         const batchText = rawBatchName.toUpperCase().startsWith("LOT") ? rawBatchName : `LOT ${rawBatchName}`;
 
         const rawItemNumber = payload.itemNumber ?? options.itemNumber ?? payload.serialNumber ?? options.serial;
@@ -41,19 +44,18 @@ const sealRenderer = {
             const hybridSerial = AiBackendEngine.toHybridSerial ? AiBackendEngine.toHybridSerial(rawItemNumber) : rawItemNumber;
             itemText = `N° ${hybridSerial}`;
         } else {
-            // Sceau Maître : affichage visuel 000 000
-            itemText = "SÉRIE : DM / 000 000";
+            itemText = "DM / 000 000";
         }
 
         // ==========================================
         // 2. GENERATION DE L'EMPREINTE UNIQUE (HASH SEED)
-        // Calculée directement depuis le lot / produit réel transmis
         // ==========================================
         const uniqueSeedSource = payload.productId || payload.id || payload.batchId || rawBatchName;
         const hashSeed = crypto.createHash('sha256').update(`ANOR_SEAL_${uniqueSeedSource}`).digest('hex');
 
-        // Nettoyage du canvas
-        ctx.clearRect(0, 0, width, height);
+        // Nettoyage du canvas (Fond blanc opaque pour un contraste maximal anti-flou)
+        ctx.fillStyle = '#FFFFFF';
+        ctx.fillRect(0, 0, width, height);
 
         // ==========================================
         // 3. CERCLE EXTÉRIEUR DE CLÔTURE
@@ -62,16 +64,16 @@ const sealRenderer = {
         
         ctx.save();
         ctx.strokeStyle = GEOMETRY_COLOR;
-        ctx.lineWidth = 4.0;
+        ctx.lineWidth = 5.0;
         ctx.beginPath();
         ctx.arc(centerX, centerY, outerRadius, 0, Math.PI * 2);
         ctx.stroke();
         ctx.restore();
 
         // ==========================================
-        // 4. LOGO CENTRAL
+        // 4. LOGO CENTRAL REDimensionné
         // ==========================================
-        const logoSize = 270;
+        const logoSize = 220;
         const logoRadius = logoSize / 2;
         const logoPath = options.logoPath || payload.logoPath || path.join(__dirname, "../assets/logo_anor_master.png");
 
@@ -81,7 +83,7 @@ const sealRenderer = {
                 ctx.drawImage(
                     img,
                     centerX - logoRadius,
-                    centerY - logoRadius,
+                    centerY - logoRadius - 40, // Remonté légèrement pour faire de la place aux textes
                     logoSize,
                     logoSize
                 );
@@ -95,9 +97,9 @@ const sealRenderer = {
         // ==========================================
         const matrixData = payload.matrix || payload.glyph_payload?.matrix || [];
 
-        const innerRingRadius = logoRadius + 40;                // 175px
-        const outerRingRadius = outerRadius - 35;               // 340px
-        const midRingRadius = (innerRingRadius + outerRingRadius) / 2; // 257.5px
+        const innerRingRadius = logoRadius + 50;                
+        const outerRingRadius = outerRadius - 35;               
+        const midRingRadius = (innerRingRadius + outerRingRadius) / 2; 
 
         const rings = [innerRingRadius, midRingRadius, outerRingRadius];
         const numPerRing = 20;
@@ -105,24 +107,13 @@ const sealRenderer = {
         ctx.save();
         ctx.strokeStyle = GEOMETRY_COLOR;
         ctx.fillStyle = GEOMETRY_COLOR;
-        ctx.lineWidth = 3.0;
+        ctx.lineWidth = 3.5;
 
         rings.forEach((r, ringIdx) => {
-            const isInnerRing = (ringIdx === 0);
-
             for (let i = 0; i < numPerRing; i++) {
                 const globalIndex = (ringIdx * numPerRing) + i;
                 const angle = (i / numPerRing) * Math.PI * 2;
 
-                // Zone d'exclusion bas pour le texte curviligne
-                if (isInnerRing) {
-                    const normalizedAngle = (angle + Math.PI * 2) % (Math.PI * 2);
-                    if (normalizedAngle > 0.75 && normalizedAngle < 2.39) {
-                        continue;
-                    }
-                }
-
-                // Hachage propre pour chaque forme basé sur l'identifiant unique réel
                 const hashByte = parseInt(hashSeed.substring((globalIndex * 2) % 60, ((globalIndex * 2) % 60) + 2), 16) || globalIndex;
                 
                 const item = matrixData[globalIndex] || {};
@@ -153,19 +144,33 @@ const sealRenderer = {
         ctx.restore();
 
         // ==========================================
-        // 6. TEXTE SÉRIALISÉ (Contours Noirs + Remplissage Blanc)
+        // 6. BLOC TEXTE GÉANT, HORIZONTAL ET HAUTE VISIBILITÉ (LOT & SÉRIE)
+        // Placé au centre/bas du sceau pour lecture instantanée par l'APK
         // ==========================================
         ctx.save();
-        ctx.font = 'bold 16px monospace';
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
 
-        // Ligne 1 : Nom exact du Lot / Produit
-        drawArcTextBottomHighContrast(ctx, batchText.toUpperCase(), centerX, centerY, innerRingRadius - 8, Math.PI / 2);
+        // Zone de fond blanc semi-opaque derrière les textes pour éliminer les interférences des glyphes
+        const bannerY = centerY + 110;
+        ctx.fillStyle = 'rgba(255, 255, 255, 0.95)';
+        ctx.fillRect(centerX - 240, bannerY - 45, 480, 95);
 
-        // Ligne 2 : Série / Numéro Sceau
-        drawArcTextBottomHighContrast(ctx, itemText.toUpperCase(), centerX, centerY, innerRingRadius + 14, Math.PI / 2);
-        
+        // Bordure propre de la zone textuelle
+        ctx.strokeStyle = '#111111';
+        ctx.lineWidth = 2.5;
+        ctx.strokeRect(centerX - 240, bannerY - 45, 480, 95);
+
+        // Ligne 1 : Numéro de Lot (Gros caractères bien lisibles)
+        ctx.font = 'bold 26px sans-serif';
+        ctx.fillStyle = '#000000';
+        ctx.fillText(batchText.toUpperCase(), centerX, bannerY - 18);
+
+        // Ligne 2 : Numéro de Série / Article (Gros caractères bien lisibles)
+        ctx.font = 'bold 24px monospace';
+        ctx.fillStyle = '#1A365D'; // Bleu foncé institutionnel fort
+        ctx.fillText(itemText.toUpperCase(), centerX, bannerY + 22);
+
         ctx.restore();
 
         return canvas.toBuffer("image/png");
@@ -177,13 +182,6 @@ function drawGlyphFromDefinition(ctx, type, def, isFilled) {
 
     switch (type) {
         case 'square':
-            if (isFilled) {
-                ctx.fillRect(-def.width / 2, -def.height / 2, def.width, def.height);
-            } else {
-                ctx.strokeRect(-def.width / 2, -def.height / 2, def.width, def.height);
-            }
-            break;
-
         case 'rect':
             if (isFilled) {
                 ctx.fillRect(-def.width / 2, -def.height / 2, def.width, def.height);
@@ -214,7 +212,6 @@ function drawGlyphFromDefinition(ctx, type, def, isFilled) {
             {
                 const hW = def.width / 2;
                 const hH = def.height / 2;
-                ctx.beginPath();
                 ctx.moveTo(-hW, 0); ctx.lineTo(hW, 0);
                 ctx.moveTo(0, -hH); ctx.lineTo(0, hH);
                 ctx.stroke();
@@ -228,30 +225,6 @@ function drawGlyphFromDefinition(ctx, type, def, isFilled) {
                 ctx.strokeRect(-def.width / 2, -def.height / 2, def.width, def.height);
             }
             break;
-    }
-}
-
-function drawArcTextBottomHighContrast(ctx, text, cx, cy, radius, centerAngle) {
-    const anglePerChar = 0.072;
-    const startAngle = centerAngle + ((text.length - 1) * anglePerChar) / 2;
-
-    for (let i = 0; i < text.length; i++) {
-        const char = text[i];
-        const angle = startAngle - i * anglePerChar;
-
-        ctx.save();
-        ctx.translate(cx + Math.cos(angle) * radius, cy + Math.sin(angle) * radius);
-        ctx.rotate(angle - Math.PI / 2);
-
-        ctx.strokeStyle = '#000000';
-        ctx.lineWidth = 4.5;
-        ctx.lineJoin = 'round';
-        ctx.strokeText(char, 0, 0);
-
-        ctx.fillStyle = '#FFFFFF';
-        ctx.fillText(char, 0, 0);
-
-        ctx.restore();
     }
 }
 
