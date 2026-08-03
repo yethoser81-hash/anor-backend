@@ -1,7 +1,7 @@
 /**
  * ======================================================
  * SYSTEME SOUVERAIN DE CERTIFICATION ANOR - SERVER CORE
- * Version: 17.2.0 (Security Hardened & Production Ready)
+ * Version: 17.2.1 (Security Hardened & Production Ready)
  * ======================================================
  */
 
@@ -16,7 +16,7 @@ const rateLimit = require('express-rate-limit');
 const helmet = require("helmet");
 
 // Constantes de versioning & environnement global
-const SERVER_VERSION = "17.2.0";
+const SERVER_VERSION = "17.2.1";
 const isProduction = process.env.NODE_ENV === "production";
 
 // Configuration sécurisée de Multer (Stockage en mémoire avec filtrage de fichiers)
@@ -462,18 +462,22 @@ app.post('/api/seals/generate-batch-seal', (req, res, next) => {
                 const printNoticeContent = 
 `================================================================================
            AGENCE NATIONALE DE NORMALISATION ET DE QUALITÉ (ANOR)
-             NOTICE D'INSTRUCTION TECHNIQUE ET D'IMPRESSION
+           NOTICE D'INSTRUCTION TECHNIQUE ET D'IMPRESSION
 ================================================================================
 
 DOCUMENT OFFICIEL DE SÉCURITÉ - À L'ATTENTION DE L'IMPRIMEUR ET DU FABRICANT
 ================================================================================
 
 1. IDENTIFICATION DU LOT ET DU PRODUIT :
-   - Numéro de Lot   : ${lot}
-   - Nom du Produit : ${nom_produit || 'N/A'}
-   - Producteur     : ${nom_producteur || 'N/A'}
-   - Quantité certifiée : ${parsedQuantite.toLocaleString('fr-FR')} unités
-   - Type d'emballage : ${type_emballage}
+   - Numéro de Lot         : ${lot}
+   - Nom du Produit        : ${nom_produit || 'N/A'}
+   - Producteur            : ${nom_producteur || 'N/A'}
+   - Pays d'origine        : ${pays_origine || 'N/A'}
+   - Quantité certifiée    : ${parsedQuantite.toLocaleString('fr-FR')} unités
+   - Type d'emballage      : ${type_emballage}
+   - Date de Conformité    : ${date_certificat_conformite || 'N/A'}
+   - Date de Fabrication   : ${date_fabrication || 'N/A'}
+   - Date de Péremption    : ${date_peremption || 'N/A'}
 
 2. CONSIGNES TECHNIQUES D'IMPRESSION DU SCEAU :
    - Le fichier 'sceau_ANOR_MASTER.png' inclus dans ce paquet est la matrice Mère.
@@ -499,7 +503,12 @@ Système Souverain de Certification - ANOR Engine ${SERVER_VERSION}
                     lot, 
                     nom_produit, 
                     nom_producteur,
+                    pays_origine,
                     quantite: parsedQuantite, 
+                    type_emballage,
+                    date_certificat_conformite,
+                    date_fabrication,
+                    date_peremption,
                     signature_ia: smartPayload.aiSignature,
                     created_at: new Date().toISOString() 
                 }, null, 4));
