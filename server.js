@@ -1,7 +1,7 @@
 /**
  * ======================================================
  * SYSTEME SOUVERAIN DE CERTIFICATION ANOR - SERVER CORE
- * Version: 17.0.0 (Production Ready)
+ * Version: 17.1.0 (Production Ready - Hardened)
  * ======================================================
  */
 
@@ -17,11 +17,22 @@ const rateLimit = require('express-rate-limit');
 const helmet = require("helmet");
 
 // Constantes de versioning & environnement global
-const SERVER_VERSION = "17.0.0";
+const SERVER_VERSION = "17.1.0";
 const isProduction = process.env.NODE_ENV === "production";
 
 // Limite stricte de taille de fichier téléversé (10MB)
-const upload = multer({ limits: { fileSize: 10 * 1024 * 1024 } }); 
+const upload = multer({ 
+    limits: { fileSize: 10 * 1024 * 1024 },
+    fileFilter: (req, file, cb) => {
+        // Validation basique du type Mime à la réception
+        const allowedMimes = ['application/pdf', 'image/jpeg', 'image/png', 'image/webp'];
+        if (allowedMimes.includes(file.mimetype)) {
+            cb(null, true);
+        } else {
+            cb(new Error('INVALID_FILE_TYPE'));
+        }
+    }
+}); 
 
 const supabase = require('./config/database');
 const AiBackendEngine = require('./engine/aiBackendEngine');
@@ -85,11 +96,13 @@ const scanLimiter = rateLimit({
 
 /**
  * ======================================================
- * Protection Anti-Rejeu (Replay Protection)
+ * Protection Anti-Rejeu Bornée (Bounded LRU Protection)
+ * Prevents Memory Leak / Memory DoS Attack
  * ======================================================
  */
 const recentRequests = new Map();
 const REQUEST_TTL = 30000; // 30 secondes
+const MAX_RECENT_REQUESTS = 10000; // Capacité maximale pour prévenir la saturation RAM
 
 setInterval(() => {
     const now = Date.now();
@@ -113,6 +126,12 @@ app.use((req, res, next) => {
             "DUPLICATE_REQUEST",
             "Cette requête a déjà été traitée."
         );
+    }
+
+    // Si la limite de stockage mémoire est atteinte, supprimer la plus ancienne entrée
+    if (recentRequests.size >= MAX_RECENT_REQUESTS) {
+        const oldestKey = recentRequests.keys().next().value;
+        recentRequests.delete(oldestKey);
     }
 
     recentRequests.set(id, Date.now());
@@ -160,6 +179,11 @@ function securityLog(req, event, details = {}) {
             details
         })
     );
+}
+
+function sanitizeFileName(filename) {
+    if (!filename) return 'unnamed_file';
+    return filename.replace(/[^a-zA-Z0-9._-]/g, '_');
 }
 
 function isValidUserAgent(agent) {
@@ -269,6 +293,11 @@ app.post('/api/seals/generate-batch-seal', upload.fields([
             return apiError(res, 400, "MISSING_PARAMETERS", "Les champs lot, quantite et type_emballage sont obligatoires.");
         }
 
+        const parsedQuantite = parseInt(quantite, 10);
+        if (isNaN(parsedQuantite) || parsedQuantite <= 0) {
+            return apiError(res, 400, "INVALID_QUANTITY", "La quantité doit être un nombre entier positif.");
+        }
+
         const jobId = `job_${Date.now()}_${crypto.randomBytes(4).toString('hex')}`;
 
         taskQueue.addJob(jobId, async () => {
@@ -279,13 +308,13 @@ app.post('/api/seals/generate-batch-seal', upload.fields([
                     smartPayload,
                     {
                         lot,
-                        quantite,
+                        quantite: parsedQuantite,
                         type_emballage,
                         productName: nom_produit,
                         nom_produit,
                         nom_producteur,
                         isMasterSeal: true,
-                        masterSerialLabel: `SÉRIE : DM / ${parseInt(quantite, 10).toLocaleString('fr-FR')}`
+                        masterSerialLabel: `SÉRIE : DM / ${parsedQuantite.toLocaleString('fr-FR')}`
                     }
                 );
 
@@ -308,7 +337,7 @@ app.post('/api/seals/generate-batch-seal', upload.fields([
 
                     if (pdfFile) {
                         try {
-                            const pdfPath = `${Date.now()}_${pdfFile.originalname.replace(/[^a-zA-Z0-9.]/g, '_')}`;
+                            const pdfPath = `${Date.now()}_${sanitizeFileName(pdfFile.originalname)}`;
                             const { data: pdfData, error: pdfErr } = await supabase.storage
                                 .from('certificat-pdf')
                                 .upload(pdfPath, pdfFile.buffer, { contentType: pdfFile.mimetype, upsert: true });
@@ -334,7 +363,7 @@ app.post('/api/seals/generate-batch-seal', upload.fields([
 
                     if (visuelFile) {
                         try {
-                            const visuelPath = `${Date.now()}_${visuelFile.originalname.replace(/[^a-zA-Z0-9.]/g, '_')}`;
+                            const visuelPath = `${Date.now()}_${sanitizeFileName(visuelFile.originalname)}`;
                             const { data: visuelData, error: visuelErr } = await supabase.storage
                                 .from('Produits')
                                 .upload(visuelPath, visuelFile.buffer, { contentType: visuelFile.mimetype, upsert: true });
@@ -367,7 +396,7 @@ app.post('/api/seals/generate-batch-seal', upload.fields([
                 const payloadDB = {
                     certificate_code: certificateCode,
                     lot: lot,
-                    quantite: parseInt(quantite, 10),
+                    quantite: parsedQuantite,
                     type_emballage: type_emballage,
                     nom_produit: nom_produit || null,
                     nom_producteur: nom_producteur || null,
@@ -417,7 +446,7 @@ app.post('/api/seals/generate-batch-seal', upload.fields([
                 const printNoticeContent = 
 `================================================================================
            AGENCE NATIONALE DE NORMALISATION ET DE QUALITÉ (ANOR)
-              NOTICE D'INSTRUCTION TECHNIQUE ET D'IMPRESSION
+             NOTICE D'INSTRUCTION TECHNIQUE ET D'IMPRESSION
 ================================================================================
 
 DOCUMENT OFFICIEL DE SÉCURITÉ - À L'ATTENTION DE L'IMPRIMEUR ET DU FABRICANT
@@ -427,7 +456,7 @@ DOCUMENT OFFICIEL DE SÉCURITÉ - À L'ATTENTION DE L'IMPRIMEUR ET DU FABRICANT
    - Numéro de Lot   : ${lot}
    - Nom du Produit : ${nom_produit || 'N/A'}
    - Producteur     : ${nom_producteur || 'N/A'}
-   - Quantité certifiée : ${parseInt(quantite, 10).toLocaleString('fr-FR')} unités
+   - Quantité certifiée : ${parsedQuantite.toLocaleString('fr-FR')} unités
    - Type d'emballage : ${type_emballage}
 
 2. CONSIGNES TECHNIQUES D'IMPRESSION DU SCEAU :
@@ -454,7 +483,7 @@ Système Souverain de Certification - ANOR Engine ${SERVER_VERSION}
                     lot, 
                     nom_produit, 
                     nom_producteur,
-                    quantite: parseInt(quantite, 10), 
+                    quantite: parsedQuantite, 
                     signature_ia: smartPayload.aiSignature,
                     created_at: new Date().toISOString() 
                 }, null, 4));
@@ -651,7 +680,7 @@ app.post('/api/seals/verify', scanLimiter, async (req, res) => {
             }
         }
 
-        // Mise à jour de la télémétrie en arrière-plan
+        // Mise à jour de la télémétrie en arrière-plan avec gestion des erreurs async
         supabase
             .from('produits_certifies')
             .update({ 
@@ -664,7 +693,8 @@ app.post('/api/seals/verify', scanLimiter, async (req, res) => {
             .eq('lot', row.lot)
             .then(({ error: updateErr }) => {
                 if (updateErr) console.error("⚠️ Erreur mise à jour télémétrie scan_count:", updateErr.message);
-            });
+            })
+            .catch(err => console.error("⚠️ Exception non capturée lors de la télémétrie :", err.message));
 
         const confidenceScoreStr = (evaluation.confidence * 100).toFixed(1) + "%";
 
@@ -759,6 +789,9 @@ app.post('/api/seals/feedback', scanLimiter, async (req, res) => {
  * ======================================================
  */
 app.use((err, req, res, next) => {
+    if (err && err.message === 'INVALID_FILE_TYPE') {
+        return apiError(res, 400, "INVALID_FILE_TYPE", "Le format de fichier téléversé n'est pas autorisé.");
+    }
     console.error("[GLOBAL ERROR]", err);
     return apiError(
         res,
