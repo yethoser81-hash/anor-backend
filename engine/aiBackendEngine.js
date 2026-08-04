@@ -66,36 +66,41 @@ const AiBackendEngine = {
             .digest("hex");
 
         // ----------------------------------------------------
-        // Configuration générale
+        // Configuration générale des anneaux (Synchronisée avec le Renderer)
+        // Anneau 0 (interne) : 12 positions de base dont 7 effectives (excluant le bas)
+        // Anneau 1 (médian)  : 24 positions (complet)
+        // Anneau 2 (externe) : 32 positions (complet)
         // ----------------------------------------------------
 
-        const rings = [
-            {
-                radius: 305,
-                count: 38
-            },
-            {
-                radius: 248,
-                count: 32
-            },
-            {
-                radius: 190,
-                count: 26
-            }
+        const ringConfigs = [
+            { radius: 190, count: 12, isInner: true },  // Interne : 7 glyphes affichés
+            { radius: 248, count: 24, isInner: false }, // Médian : complet
+            { radius: 305, count: 32, isInner: false }  // Externe : complet
         ];
 
         let cursor = 0;
         const matrix = [];
+        let globalIndexOffset = 0;
 
         //-----------------------------------------------------
         // Construction de la bibliothèque géométrique
         //-----------------------------------------------------
 
-        rings.forEach((ring, ringIndex) => {
+        ringConfigs.forEach((ringConfig, ringIndex) => {
+            const { radius: baseRadius, count: numPerRing, isInner } = ringConfig;
+            const step = (Math.PI * 2) / numPerRing;
 
-            const step = (Math.PI * 2) / ring.count;
+            for (let i = 0; i < numPerRing; i++) {
+                const globalIndex = globalIndexOffset + i;
+                const angle = (i / numPerRing) * Math.PI * 2;
+                const angleDeg = (angle * 180) / Math.PI;
 
-            for (let i = 0; i < ring.count; i++) {
+                // Application stricte de la même règle d'exclusion que sealRenderer.js pour l'anneau interne
+                if (isInner) {
+                    if (angleDeg >= 20 && angleDeg <= 160) {
+                        continue; // On saute les glyphes de la zone inférieure pour correspondre exactement aux 7 affichés
+                    }
+                }
 
                 //----------------------------------------------
                 // lecture pseudo-aléatoire
@@ -115,15 +120,15 @@ const AiBackendEngine = {
                 const jitterAngle =
                     ((a / 255) - 0.5) * 0.08;
 
-                const angle =
-                    i * step + jitterAngle;
+                const finalAngle =
+                    angle + jitterAngle;
 
                 //----------------------------------------------
                 // rayon légèrement variable
                 //----------------------------------------------
 
                 const radius =
-                    ring.radius +
+                    baseRadius +
                     ((b / 255) - 0.5) * 18;
 
                 //----------------------------------------------
@@ -223,7 +228,7 @@ const AiBackendEngine = {
 
                     radius,
 
-                    angle,
+                    angle: finalAngle,
 
                     glyph,
 
@@ -244,6 +249,8 @@ const AiBackendEngine = {
                 });
 
             }
+
+            globalIndexOffset += numPerRing;
 
         });
 
