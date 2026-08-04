@@ -341,6 +341,35 @@ const AiBackendEngine = {
     },
 
     //--------------------------------------------------------
+    // Évaluation prioritaire du Cœur (Premier Anneau / Anneau 0)
+    //--------------------------------------------------------
+
+    evaluateCoreRing(scannedMatrix, referenceMatrix) {
+        if (!Array.isArray(scannedMatrix) || !Array.isArray(referenceMatrix)) {
+            return { coreMatchScore: 0, validCore: false };
+        }
+
+        const scanCore = scannedMatrix.filter(g => g.ring === 0);
+        const refCore = referenceMatrix.filter(g => g.ring === 0);
+
+        if (refCore.length === 0 || scanCore.length === 0) {
+            return { coreMatchScore: 1.0, validCore: true };
+        }
+
+        let matches = 0;
+        for (const scanG of scanCore) {
+            const found = refCore.some(refG => refG.glyph === scanG.glyph && Math.abs(refG.angle - scanG.angle) < 0.15);
+            if (found) matches++;
+        }
+
+        const coreMatchScore = matches / Math.max(scanCore.length, 1);
+        return {
+            coreMatchScore,
+            validCore: coreMatchScore >= 0.50
+        };
+    },
+
+    //--------------------------------------------------------
     // Recherche du meilleur correspondant géométrique (Livraison IA-5)
     //--------------------------------------------------------
 
@@ -684,7 +713,7 @@ const AiBackendEngine = {
     },
 
     //--------------------------------------------------------
-    // Vérification IA multi-rotation & adaptative (Livraison IA-6)
+    // ÉVALUATION SÉQUENTIELLE EN ENTONNOIR (NOUVELLE LOGIQUE MÉTIER)
     //--------------------------------------------------------
 
     evaluateScanConfidence(scannedMatrix, referenceMatrix) {
@@ -743,34 +772,53 @@ const AiBackendEngine = {
         let bestCoverage = 0;
         let bestDetails = null;
 
+        // ÉTAPE 1 : Filtrage prioritaire strict basé sur le numéro de lot / cœur (Anneau 0)
+        let coreValidatedRotations = [];
+
         for (const deg of rotations) {
+            const rotatedReference = this.normalizeGeometry(
+                this.rotateMatrix(referenceMatrix, deg * Math.PI / 180)
+            );
+            const normalizedScan = this.normalizeGeometry(scannedMatrix);
 
-            const rotatedReference =
-                this.normalizeGeometry(
-                    this.rotateMatrix(
-                        referenceMatrix,
-                        deg * Math.PI / 180
-                    )
-                );
+            const coreCheck = this.evaluateCoreRing(normalizedScan, rotatedReference);
+            
+            // Si le cœur / premier saut correspond, on garde cette rotation comme candidate prioritaire
+            if (coreCheck.validCore) {
+                coreValidatedRotations.push({ deg, coreMatchScore: coreCheck.coreMatchScore, rotatedReference, normalizedScan });
+            }
+        }
 
-            const normalizedScan =
-                this.normalizeGeometry(
-                    scannedMatrix
-                );
+        // Si aucune rotation ne valide le cœur de premier niveau, on bascule en mode "secours global" (fallback)
+        // en prenant l'ensemble du saut pour ne laisser passer aucune anomalie subtile.
+        const targetRotations = coreValidatedRotations.length > 0 
+            ? coreValidatedRotations 
+            : rotations.map(deg => ({
+                deg,
+                coreMatchScore: 0.5,
+                rotatedReference: this.normalizeGeometry(this.rotateMatrix(referenceMatrix, deg * Math.PI / 180)),
+                normalizedScan: this.normalizeGeometry(scannedMatrix)
+              }));
 
-            const result =
-                this.evaluateWeighted(
-                    normalizedScan,
-                    rotatedReference
-                );
+        // ÉTAPE 2 : Analyse approfondie des glyphes environnants sur les candidats retenus
+        for (const candidate of targetRotations) {
+            const { rotatedReference, normalizedScan, coreMatchScore } = candidate;
+
+            const result = this.evaluateWeighted(
+                normalizedScan,
+                rotatedReference
+            );
+
+            // Pondération de la confiance intégrant la précision du cœur initial
+            const adjustedConfidence = result.confidence * (0.8 + (coreMatchScore * 0.2));
 
             if (
-                result.confidence >
+                adjustedConfidence >
                 bestConfidence
             ) {
 
                 bestConfidence =
-                    result.confidence;
+                    adjustedConfidence;
 
                 bestCoverage =
                     result.coverage;

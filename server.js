@@ -374,8 +374,8 @@ app.post('/api/seals/generate-batch-seal', upload.fields([
 
         const printNoticeContent = 
 `================================================================================
-           AGENCE NATIONALE DE NORMALISATION ET DE QUALITÉ (ANOR)
-             NOTICE D'INSTRUCTION TECHNIQUE ET D'IMPRESSION
+            AGENCE Nationale de NORMALISATION ET DE QUALITÉ (ANOR)
+               NOTICE D'INSTRUCTION TECHNIQUE ET D'IMPRESSION
 ================================================================================
 
 DOCUMENT OFFICIEL DE SÉCURITÉ - À L'ATTENTION DE L'IMPRIMEUR ET DU FABRICANT
@@ -446,6 +446,7 @@ app.post('/api/seals/verify', scanLimiter, async (req, res) => {
     const MAX_PROCESSING_TIME = 5000;
 
     try {
+        // COUCHE 1 : Validation stricte du client et de l'en-tête
         if (!isValidUserAgent(req.headers["user-agent"])) {
             securityLog(req, "INVALID_USER_AGENT", { agent: req.headers["user-agent"] });
             return apiError(res, 400, "INVALID_CLIENT", "Client non valide.");
@@ -457,7 +458,7 @@ app.post('/api/seals/verify', scanLimiter, async (req, res) => {
             return apiError(res, 413, "PAYLOAD_TOO_LARGE", "Charge utile trop volumineuse.");
         }
 
-        const { scannedMatrix, lot, location, locationMethod, deviceMetadata } = req.body;
+        const { scannedMatrix, lot, location, locationMethod, deviceMetadata, clientSignature } = req.body;
 
         if (!lot && !scannedMatrix) {
             return apiError(res, 400, "MISSING_SCAN", "Données de scan insuffisantes. Une matrice ou un lot est requis.");
@@ -469,6 +470,13 @@ app.post('/api/seals/verify', scanLimiter, async (req, res) => {
 
         if (scannedMatrix && !isValidMatrix(scannedMatrix)) {
             return apiError(res, 400, "INVALID_MATRIX", "La matrice reçue est invalide.");
+        }
+
+        // COUCHE 2 : Vérification de l'intégrité contextuelle et anti-fraude matérielle
+        if (deviceMetadata && typeof deviceMetadata === 'object') {
+            if (deviceMetadata.isEmulator || deviceMetadata.isRooted) {
+                securityLog(req, "SUSPICIOUS_DEVICE_ENVIRONMENT", { deviceMetadata });
+            }
         }
 
         let row = null;
@@ -486,6 +494,7 @@ app.post('/api/seals/verify', scanLimiter, async (req, res) => {
             }
         }
 
+        // COUCHE 3 : Moteur d'évaluation multicouche (Matrice + IA Engine)
         if (!row && scannedMatrix) {
             const scannedHash = crypto.createHash('sha256').update(JSON.stringify(scannedMatrix)).digest('hex');
 
@@ -538,6 +547,7 @@ app.post('/api/seals/verify', scanLimiter, async (req, res) => {
         }
 
         if (!row) {
+            securityLog(req, "UNKNOWN_SEAL_ATTEMPT", { lot: lot || 'N/A' });
             return apiError(res, 404, "UNKNOWN_SEAL", "Sceau de lot inconnu ou contrefait.", {
                 status: "CONTREFAÇON_REJETEE",
                 processingTime: Date.now() - startTime,
@@ -546,6 +556,7 @@ app.post('/api/seals/verify', scanLimiter, async (req, res) => {
             });
         }
 
+        // COUCHE 4 : Validation croisée de la signature IA et du hash global
         const storedPayload = row.glyph_payload;
         const scannedHash = scannedMatrix ? crypto.createHash('sha256').update(JSON.stringify(scannedMatrix)).digest('hex') : null;
         let evaluation;
@@ -560,6 +571,7 @@ app.post('/api/seals/verify', scanLimiter, async (req, res) => {
         }
 
         if (!evaluation.isValid) {
+            securityLog(req, "INVALID_SEAL_GEOMETRY", { lot: row.lot, confidence: evaluation.confidence });
             return apiError(res, 401, "INVALID_SEAL", "Alerte : Incohérence géométrique détectée par le moteur IA.", {
                 status: "CONTREFAÇON_DETECTEE",
                 confidence: evaluation.confidence,
@@ -569,6 +581,7 @@ app.post('/api/seals/verify', scanLimiter, async (req, res) => {
             });
         }
 
+        // COUCHE 5 : Analyse comportementale et détection de duplication géographique
         const currentScanCount = (row.scan_count || 0) + 1;
         const currentLocation = location || "Inconnue";
         let warningFlag = null;
@@ -580,7 +593,8 @@ app.post('/api/seals/verify', scanLimiter, async (req, res) => {
                 securityLog(req, "SEAL_DUPLICATION", {
                     lot: row.lot,
                     previous: row.last_scan_location,
-                    current: currentLocation
+                    current: currentLocation,
+                    timeDiffMinutes
                 });
             }
         }
