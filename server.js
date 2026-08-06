@@ -1,7 +1,7 @@
 /**
  * ======================================================
  * SYSTEME SOUVERAIN DE CERTIFICATION ANOR - SERVER CORE
- * Version: 17.3.0 (Production Ready - Hardened, Async & Proactive Security)
+ * Version: 17.4.0 (Production Ready - Multi-Level Verification)
  * ======================================================
  */
 
@@ -16,7 +16,7 @@ const rateLimit = require('express-rate-limit');
 const helmet = require("helmet");
 
 // Constantes de versioning & environnement global
-const SERVER_VERSION = "17.3.0";
+const SERVER_VERSION = "17.4.0";
 const isProduction = process.env.NODE_ENV === "production";
 
 // Limite stricte de taille de fichier téléversé (10MB)
@@ -52,7 +52,6 @@ const allowedOrigins = [
 
 app.use(cors({
     origin: function (origin, callback) {
-        // Autoriser les requêtes sans origine (comme les applications mobiles natives ou Postman)
         if (!origin || allowedOrigins.indexOf(origin) !== -1) {
             callback(null, true);
         } else {
@@ -74,7 +73,6 @@ app.use(
     })
 );
 
-app.use(cors());
 app.use(express.json({ limit: "10mb" }));
 app.use(express.urlencoded({ extended: true, limit: "10mb" }));
 
@@ -398,7 +396,7 @@ app.post('/api/seals/generate-batch-seal', upload.fields([
         const printNoticeContent = 
 `================================================================================
             AGENCE Nationale de NORMALISATION ET DE QUALITÉ (ANOR)
-               NOTICE D'INSTRUCTION TECHNIQUE ET D'IMPRESSION
+                NOTICE D'INSTRUCTION TECHNIQUE ET D'IMPRESSION
 ================================================================================
 
 DOCUMENT OFFICIEL DE SÉCURITÉ - À L'ATTENTION DE L'IMPRIMEUR ET DU FABRICANT
@@ -464,12 +462,16 @@ Système Souverain de Certification - ANOR Engine ${SERVER_VERSION}
     }
 });
 
+/**
+ * ==========================================================================
+ * ROUTE DE VÉRIFICATION MULTI-NIVEAU (NIVEAU 1 & NIVEAU 2)
+ * ==========================================================================
+ */
 app.post('/api/seals/verify', scanLimiter, async (req, res) => {
     const startTime = Date.now();
     const MAX_PROCESSING_TIME = 5000;
 
     try {
-        // COUCHE 1 : Validation stricte du client et de l'en-tête
         if (!isValidUserAgent(req.headers["user-agent"])) {
             securityLog(req, "INVALID_USER_AGENT", { agent: req.headers["user-agent"] });
             return apiError(res, 400, "INVALID_CLIENT", "Client non valide.");
@@ -481,7 +483,19 @@ app.post('/api/seals/verify', scanLimiter, async (req, res) => {
             return apiError(res, 413, "PAYLOAD_TOO_LARGE", "Charge utile trop volumineuse.");
         }
 
-        const { scannedMatrix, lot, location, locationMethod, deviceMetadata, clientSignature } = req.body;
+        // Récupération des paramètres envoyés par le client (support Niv 1 & Niv 2)
+        const { 
+            scannedMatrix, 
+            lot, 
+            scanLevel, // "1" ou "2" (optionnel, déduit si non fourni)
+            ring7,     // Données anneau interne (7 glyphes)
+            ring24,    // Données anneau intermédiaire (24 glyphes)
+            ring32,    // Données anneau externe (32 glyphes)
+            location, 
+            locationMethod, 
+            deviceMetadata, 
+            clientSignature 
+        } = req.body;
 
         if (!lot && !scannedMatrix) {
             return apiError(res, 400, "MISSING_SCAN", "Données de scan insuffisantes. Une matrice ou un lot est requis.");
@@ -495,29 +509,60 @@ app.post('/api/seals/verify', scanLimiter, async (req, res) => {
             return apiError(res, 400, "INVALID_MATRIX", "La matrice reçue est invalide.");
         }
 
-        // COUCHE 2 : Vérification de l'intégrité contextuelle et anti-fraude matérielle
-        if (deviceMetadata && typeof deviceMetadata === 'object') {
-            if (deviceMetadata.isEmulator || deviceMetadata.isRooted) {
-                securityLog(req, "SUSPICIOUS_DEVICE_ENVIRONMENT", { deviceMetadata });
-            }
-        }
-
         let row = null;
-        const verificationMode = lot ? "LOT" : "MATRIX";
+        let verificationMode = lot ? "LOT" : "MATRIX";
 
+        // --- GESTION DU SCAN DE NIVEAU 1 (LOT + 7 GLYPHES) ---
         if (lot) {
-            const { data, error } = await supabase
+            // Recherche de tous les lots correspondants (gestion des doublons potentiels de lots similaires)
+            const { data: potentialRows, error: lotErr } = await supabase
                 .from('produits_certifies')
                 .select('*')
-                .eq('lot', lot)
-                .maybeSingle();
+                .ilike('lot', `%${lot}%`);
 
-            if (!error && data) {
-                row = data;
+            if (!lotErr && potentialRows && potentialRows.length > 0) {
+                if (potentialRows.length === 1) {
+                    row = potentialRows[0];
+                } else {
+                    // SI DOUBLONS Détectés : Vérifier si on est en Niveau 2 ou si on doit demander l'étape 2
+                    const isLevel2Complete = ring24 || ring32 || (scanLevel === "2");
+
+                    if (!isLevel2Complete) {
+                        // RENVOYER UN SIGNAL SPÉCIAL DEMANDANT AU CLIENT D'ENVOYER L'ÉTAPE 2
+                        return res.status(200).json({
+                            success: false,
+                            requiresStep2: true,
+                            code: "MULTIPLE_MATCHES_NEED_STEP_2",
+                            message: "Plusieurs lots similaires détectés. Veuillez envoyer le scan de niveau 2 complet (Anneaux 7, 24 et 32).",
+                            candidatesCount: potentialRows.length,
+                            matchingLots: potentialRows.map(p => p.lot),
+                            timestamp: Date.now()
+                        });
+                    } else {
+                        // NIVEAU 2 COMPLET REÇU : Départager les doublons en analysant la précision géométrique globale (anneaux complets)
+                        let bestCandidate = potentialRows[0];
+                        let maxConfidence = -1;
+
+                        for (const candidate of potentialRows) {
+                            const storedPayload = candidate.glyph_payload;
+                            // Utilisation de l'évaluation avancée du moteur IA pour départager
+                            const evalRes = AiBackendEngine.evaluateScanConfidence(
+                                scannedMatrix || [], 
+                                storedPayload ? storedPayload.matrix : []
+                            );
+                            if (evalRes.confidence > maxConfidence) {
+                                maxConfidence = evalRes.confidence;
+                                bestCandidate = candidate;
+                            }
+                        }
+                        row = bestCandidate;
+                        verificationMode = "LOT_AND_RINGS_LEVEL_2";
+                    }
+                }
             }
         }
 
-        // COUCHE 3 : Moteur d'évaluation multicouche (Matrice + IA Engine)
+        // --- GESTION PAR MATRICE SEULE SI AUCUN LOT N'A ÉTÉ TROUVÉ DIRECTEMENT ---
         if (!row && scannedMatrix) {
             const scannedHash = crypto.createHash('sha256').update(JSON.stringify(scannedMatrix)).digest('hex');
 
@@ -548,9 +593,7 @@ app.post('/api/seals/verify', scanLimiter, async (req, res) => {
                         bestMatchLot = candidate.lot;
                     }
 
-                    if (highestScore >= 0.99) {
-                        break;
-                    }
+                    if (highestScore >= 0.99) { break; }
                 }
 
                 if (bestMatchLot && highestScore >= 0.70) {
@@ -579,7 +622,7 @@ app.post('/api/seals/verify', scanLimiter, async (req, res) => {
             });
         }
 
-        // COUCHE 4 : Validation croisée de la signature IA et du hash global
+        // COUCHE : Validation croisée de la signature IA et du hash global
         const storedPayload = row.glyph_payload;
         const scannedHash = scannedMatrix ? crypto.createHash('sha256').update(JSON.stringify(scannedMatrix)).digest('hex') : null;
         let evaluation;
@@ -604,7 +647,7 @@ app.post('/api/seals/verify', scanLimiter, async (req, res) => {
             });
         }
 
-        // COUCHE 5 : Analyse comportementale et détection de duplication géographique
+        // COUCHE : Analyse comportementale et détection de duplication géographique
         const currentScanCount = (row.scan_count || 0) + 1;
         const currentLocation = location || "Inconnue";
         let warningFlag = null;

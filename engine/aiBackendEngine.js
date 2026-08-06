@@ -202,6 +202,39 @@ const AiBackendEngine = {
         };
     },
 
+    /**
+     * ==========================================================================
+     * NOUVELLE FONCTION : ÉVALUATION RAPIDE DE L'ANNEAU INTERNE (ÉTAPE 1)
+     * ==========================================================================
+     * Permet de matcher rapidement les glyphes de l'anneau interne (ring 0) 
+     * pour filtrer les candidats potentiels en base sans exécuter l'algorithme lourd.
+     */
+    evaluateStep1Ring0(scannedRing0, candidateReferenceMatrix) {
+        if (!Array.isArray(scannedRing0) || !Array.isArray(candidateReferenceMatrix)) {
+            return { matchScore: 0, isMatch: false };
+        }
+
+        const refRing0 = candidateReferenceMatrix.filter(g => g.ring === 0);
+        if (refRing0.length === 0 || scannedRing0.length === 0) {
+            return { matchScore: 1.0, isMatch: true };
+        }
+
+        let matches = 0;
+        for (const scanG of scannedRing0) {
+            const found = refRing0.some(refG => 
+                refG.glyph === scanG.glyph && 
+                Math.abs(refG.angle - scanG.angle) < 0.20
+            );
+            if (found) matches++;
+        }
+
+        const matchScore = matches / Math.max(scannedRing0.length, 1);
+        return {
+            matchScore,
+            isMatch: matchScore >= 0.60
+        };
+    },
+
     findBestMatch(scanGlyph, referenceMatrix, usedIndexes) {
         let bestIndex = -1;
         let bestScore = -Infinity;
@@ -256,8 +289,6 @@ const AiBackendEngine = {
             }
 
             const dr = Math.abs(scan.radius - ref.radius);
-
-            // CORRECTION 1 : Tolérance de rayon élargie pour le mobile
             const radiusTolerance = ref.radius > 0.70 ? 0.060 : 0.090;
 
             if (dr <= radiusTolerance) {
@@ -268,219 +299,87 @@ const AiBackendEngine = {
                 obtainedScore += 12;
             }
 
-//--------------------------------
-
-            const da =
-                Math.abs(
-                    scan.angle -
-                    ref.angle
-                );
-
+            const da = Math.abs(scan.angle - ref.angle);
             if (da <= 0.03) {
-
                 obtainedScore += 15;
-
                 angleMatches++;
-
             }
             else if (da <= 0.08) {
-
                 obtainedScore += 8;
-
             }
 
-            //--------------------------------
-
-            const drot =
-                Math.abs(
-                    scan.rotation -
-                    ref.rotation
-                );
-
+            const drot = Math.abs(scan.rotation - ref.rotation);
             if (drot <= 0.10) {
-
                 obtainedScore += 15;
-
                 rotationMatches++;
-
             }
             else if (drot <= 0.25) {
-
                 obtainedScore += 8;
-
             }
 
-            //--------------------------------
-
-            if (
-                scan.filled ===
-                ref.filled
-            ) {
-
+            if (scan.filled === ref.filled) {
                 obtainedScore += 10;
-
                 fillMatches++;
-
             }
 
-            //--------------------------------
+            const dw = Math.abs(scan.width - ref.width);
+            const dh = Math.abs(scan.height - ref.height);
 
-            const dw =
-                Math.abs(
-                    scan.width -
-                    ref.width
-                );
-
-            const dh =
-                Math.abs(
-                    scan.height -
-                    ref.height
-                );
-
-            if (
-                dw <= 0.06 &&
-                dh <= 0.06
-            ) {
-
+            if (dw <= 0.06 && dh <= 0.06) {
                 obtainedScore += 10;
-
                 sizeMatches++;
-
             }
-            else if (
-                dw <= 0.12 &&
-                dh <= 0.12
-            ) {
-
+            else if (dw <= 0.12 && dh <= 0.12) {
                 obtainedScore += 5;
-
             }
-
         }
 
-        // Pénalité sur les glyphes manquants
-        const unmatched =
-            referenceMatrix.length -
-            usedIndexes.size;
-
+        const unmatched = referenceMatrix.length - usedIndexes.size;
         obtainedScore -= unmatched * 5;
 
-        if (obtainedScore < 0)
-            obtainedScore = 0;
+        if (obtainedScore < 0) obtainedScore = 0;
 
-        const total = Math.min(
-            scannedMatrix.length,
-            referenceMatrix.length
-        );
+        const total = Math.min(scannedMatrix.length, referenceMatrix.length);
 
         return {
-
-            confidence:
-                maximumScore === 0
-                    ? 0
-                    : obtainedScore /
-                      maximumScore,
-
-            coverage:
-                usedIndexes.size /
-                referenceMatrix.length,
-
+            confidence: maximumScore === 0 ? 0 : obtainedScore / maximumScore,
+            coverage: usedIndexes.size / referenceMatrix.length,
             details: {
-
                 glyphMatches,
-
                 radiusMatches,
-
                 angleMatches,
-
                 rotationMatches,
-
                 fillMatches,
-
                 sizeMatches,
-
                 total
-
             }
-
         };
-
     },
-
-    //--------------------------------------------------------
-    // Calcul dynamique du seuil de validation (Livraison IA-6)
-    //--------------------------------------------------------
 
     computeAdaptiveThreshold(metrics) {
-
         let threshold = 0.88;
 
-        //---------------------------------------
-        // couverture
-        //---------------------------------------
+        if (metrics.coverage > 0.98) threshold -= 0.03;
+        else if (metrics.coverage < 0.92) threshold += 0.04;
 
-        if (metrics.coverage > 0.98)
-            threshold -= 0.03;
+        const glyphRatio = metrics.details.glyphMatches / Math.max(metrics.details.total, 1);
+        if (glyphRatio > 0.95) threshold -= 0.02;
+        else if (glyphRatio < 0.80) threshold += 0.03;
 
-        else if (metrics.coverage < 0.92)
-            threshold += 0.04;
+        const rotationRatio = metrics.details.rotationMatches / Math.max(metrics.details.total, 1);
+        if (rotationRatio < 0.70) threshold += 0.02;
 
-        //---------------------------------------
-        // reconnaissance des glyphes
-        //---------------------------------------
+        threshold = Math.max(0.68, Math.min(threshold, 0.95));
 
-        const glyphRatio =
-            metrics.details.glyphMatches /
-            Math.max(metrics.details.total, 1);
-
-        if (glyphRatio > 0.95)
-            threshold -= 0.02;
-
-        else if (glyphRatio < 0.80)
-            threshold += 0.03;
-
-        //---------------------------------------
-        // rotation
-        //---------------------------------------
-
-        const rotationRatio =
-            metrics.details.rotationMatches /
-            Math.max(metrics.details.total, 1);
-
-        if (rotationRatio < 0.70)
-            threshold += 0.02;
-
-        //---------------------------------------
-        // borne finale
-        //---------------------------------------
-
-        // CORRECTION 2 : Seuil plancher abaissé à 0.68 pour éliminer les faux négatifs en conditions réelles
-        threshold =
-            Math.max(
-                0.68,
-                Math.min(
-                    threshold,
-                    0.95
-                )
-            );
-
-        return Number(
-            threshold.toFixed(3)
-        );
-
+        return Number(threshold.toFixed(3));
     },
 
-    //--------------------------------------------------------
-    // ÉVALUATION SÉQUENTIELLE EN ENTONNOIR (NOUVELLE LOGIQUE MÉTIER)
-    //--------------------------------------------------------
-
+    /**
+     * ÉVALUATION SÉQUENTIELLE LOURDE (ÉTAPE 2 - ENTONNOIR IA-6)
+     * Conserve l'intégralité du système de rotations et d'analyse fine multi-anneaux (24 & 32 glyphes).
+     */
     evaluateScanConfidence(scannedMatrix, referenceMatrix) {
-
-        if (
-            !Array.isArray(scannedMatrix) ||
-            !Array.isArray(referenceMatrix)
-        ) {
-
+        if (!Array.isArray(scannedMatrix) || !Array.isArray(referenceMatrix)) {
             return {
                 isValid: false,
                 confidence: 0,
@@ -492,16 +391,10 @@ const AiBackendEngine = {
                 rotationCorrection: true,
                 details: {}
             };
-
         }
 
-        const total = Math.min(
-            scannedMatrix.length,
-            referenceMatrix.length
-        );
-
+        const total = Math.min(scannedMatrix.length, referenceMatrix.length);
         if (total === 0) {
-
             return {
                 isValid: false,
                 confidence: 0,
@@ -513,24 +406,14 @@ const AiBackendEngine = {
                 rotationCorrection: true,
                 details: {}
             };
-
         }
 
-        const rotations = [
-            -15,
-            -10,
-            -5,
-            0,
-            5,
-            10,
-            15
-        ];
+        const rotations = [-15, -10, -5, 0, 5, 10, 15];
 
         let bestConfidence = 0;
         let bestCoverage = 0;
         let bestDetails = null;
 
-        // ÉTAPE 1 : Filtrage prioritaire strict basé sur le numéro de lot / cœur (Anneau 0)
         let coreValidatedRotations = [];
 
         for (const deg of rotations) {
@@ -541,14 +424,11 @@ const AiBackendEngine = {
 
             const coreCheck = this.evaluateCoreRing(normalizedScan, rotatedReference);
             
-            // Si le cœur / premier saut correspond, on garde cette rotation comme candidate prioritaire
             if (coreCheck.validCore) {
                 coreValidatedRotations.push({ deg, coreMatchScore: coreCheck.coreMatchScore, rotatedReference, normalizedScan });
             }
         }
 
-        // Si aucune rotation ne valide le cœur de premier niveau, on bascule en mode "secours global" (fallback)
-        // en prenant l'ensemble du saut pour ne laisser passer aucune anomalie subtile.
         const targetRotations = coreValidatedRotations.length > 0 
             ? coreValidatedRotations 
             : rotations.map(deg => ({
@@ -558,102 +438,45 @@ const AiBackendEngine = {
                 normalizedScan: this.normalizeGeometry(scannedMatrix)
               }));
 
-        // ÉTAPE 2 : Analyse approfondie des glyphes environnants sur les candidats retenus
         for (const candidate of targetRotations) {
             const { rotatedReference, normalizedScan, coreMatchScore } = candidate;
 
-            const result = this.evaluateWeighted(
-                normalizedScan,
-                rotatedReference
-            );
-
-            // Pondération de la confiance intégrant la précision du cœur initial
+            const result = this.evaluateWeighted(normalizedScan, rotatedReference);
             const adjustedConfidence = result.confidence * (0.8 + (coreMatchScore * 0.2));
 
-            if (
-                adjustedConfidence >
-                bestConfidence
-            ) {
-
-                bestConfidence =
-                    adjustedConfidence;
-
-                bestCoverage =
-                    result.coverage;
-
-                bestDetails =
-                    result.details;
-
+            if (adjustedConfidence > bestConfidence) {
+                bestConfidence = adjustedConfidence;
+                bestCoverage = result.coverage;
+                bestDetails = result.details;
             }
-
         }
 
-        //--------------------------------------------------------
-        // Calculs décisionnels IA-6
-        //--------------------------------------------------------
+        const adaptiveThreshold = this.computeAdaptiveThreshold({
+            confidence: bestConfidence,
+            coverage: bestCoverage,
+            details: bestDetails
+        });
 
-        const adaptiveThreshold =
-            this.computeAdaptiveThreshold({
-                confidence: bestConfidence,
-                coverage: bestCoverage,
-                details: bestDetails
-            });
-
-        const qualityIndex =
-            Math.round(
-                (
-                    bestConfidence * 0.6 +
-                    bestCoverage * 0.4
-                ) * 100
-            );
+        const qualityIndex = Math.round((bestConfidence * 0.6 + bestCoverage * 0.4) * 100);
 
         let confidenceClass = "LOW";
+        if (bestConfidence >= 0.96) confidenceClass = "EXCELLENT";
+        else if (bestConfidence >= 0.92) confidenceClass = "HIGH";
+        else if (bestConfidence >= 0.88) confidenceClass = "MEDIUM";
 
-        if (bestConfidence >= 0.96)
-            confidenceClass = "EXCELLENT";
-
-        else if (bestConfidence >= 0.92)
-            confidenceClass = "HIGH";
-
-        else if (bestConfidence >= 0.88)
-            confidenceClass = "MEDIUM";
-
-        const anomalyDetected =
-            bestCoverage < 0.80 ||
-            bestDetails.glyphMatches <
-            bestDetails.total * 0.65;
-
-        //--------------------------------------------------------
-        // Retour final avec métriques décisionnelles
-        //--------------------------------------------------------
+        const anomalyDetected = bestCoverage < 0.80 || bestDetails.glyphMatches < bestDetails.total * 0.65;
 
         return {
-
-            isValid:
-                bestConfidence >= adaptiveThreshold,
-
-            confidence: Number(
-                bestConfidence.toFixed(4)
-            ),
-
+            isValid: bestConfidence >= adaptiveThreshold,
+            confidence: Number(bestConfidence.toFixed(4)),
             adaptiveThreshold,
-
             qualityIndex,
-
             confidenceClass,
-
             anomalyDetected,
-
-            coverage: Number(
-                bestCoverage.toFixed(3)
-            ),
-
+            coverage: Number(bestCoverage.toFixed(3)),
             rotationCorrection: true,
-
             details: bestDetails
-
         };
-
     }
 
 };
