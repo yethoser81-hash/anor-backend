@@ -1,7 +1,7 @@
 /**
  * ======================================================
  * SYSTEME SOUVERAIN DE CERTIFICATION ANOR - SERVER CORE
- * Version: 17.4.0 (Production Ready - Hardened, Async & Native Crypto)
+ * Version: 17.4.1 (Production Ready - Hardened, Async, Native Crypto & CORS Fix)
  * ======================================================
  */
 
@@ -16,7 +16,7 @@ const rateLimit = require('express-rate-limit');
 const helmet = require("helmet");
 
 // Constantes de versioning & environnement global
-const SERVER_VERSION = "17.4.0";
+const SERVER_VERSION = "17.4.1";
 const isProduction = process.env.NODE_ENV === "production";
 
 // Limite stricte de taille de fichier téléversé (10MB)
@@ -40,7 +40,7 @@ const app = express();
 // Désactivation de l'en-tête de révélation Express
 app.disable("x-powered-by");
 
-// Configuration CORS renforcée pour accepter l'application mobile Capacitor & le web
+// Configuration CORS renforcée (élargie pour accepter les IPs locales de développement et Capacitor)
 const allowedOrigins = [
     'http://localhost:3000',
     'https://anor-backend.onrender.com',
@@ -51,7 +51,15 @@ const allowedOrigins = [
 
 app.use(cors({
     origin: function (origin, callback) {
-        if (!origin || allowedOrigins.indexOf(origin) !== -1) {
+        // Autorise les requêtes sans origine (comme les applications mobiles natives, Postman ou curl)
+        if (!origin) {
+            return callback(null, true);
+        }
+        
+        // Autorise explicitement les origines de la liste blanche OU toute IP locale (ex: 192.168.x.x ou 10.x.x.x sur le port 3000 ou autre)
+        const isLocalDevIP = /^http:\/\/(192\.168\.\d{1,3}\.\d{1,3}|10\.\d{1,3}\.\d{1,3}\.\d{1,3}|172\.(1[6-9]|2\d|3[0-1])\.\d{1,3}\.\d{1,3}):\d+$/.test(origin);
+
+        if (allowedOrigins.indexOf(origin) !== -1 || isLocalDevIP || !isProduction) {
             callback(null, true);
         } else {
             callback(new Error('Bloqué par la politique CORS (NotSameOrigin)'));
