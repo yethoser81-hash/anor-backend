@@ -1,7 +1,7 @@
 /**
  * ======================================================
  * SYSTEME SOUVERAIN DE CERTIFICATION ANOR - SERVER CORE
- * Version: 17.4.0 (Production Ready - Multi-Level Verification)
+ * Version: 17.4.1 (Production Ready - Multi-Level Verification)
  * ======================================================
  */
 
@@ -16,7 +16,7 @@ const rateLimit = require('express-rate-limit');
 const helmet = require("helmet");
 
 // Constantes de versioning & environnement global
-const SERVER_VERSION = "17.4.0";
+const SERVER_VERSION = "17.4.1";
 const isProduction = process.env.NODE_ENV === "production";
 
 // Limite stricte de taille de fichier téléversé (10MB)
@@ -211,11 +211,7 @@ function isValidMatrix(matrix) {
     return true;
 }
 
-setInterval(() => {
-    if (global.gc) {
-        global.gc();
-    }
-}, 600000);
+// NOTE: Le bloc setInterval global.gc() a été supprimé car il faisait crasher le conteneur Render.
 
 app.use(express.static(__dirname));
 
@@ -483,14 +479,13 @@ app.post('/api/seals/verify', scanLimiter, async (req, res) => {
             return apiError(res, 413, "PAYLOAD_TOO_LARGE", "Charge utile trop volumineuse.");
         }
 
-        // Récupération des paramètres envoyés par le client (support Niv 1 & Niv 2)
         const { 
             scannedMatrix, 
             lot, 
-            scanLevel, // "1" ou "2" (optionnel, déduit si non fourni)
-            ring7,     // Données anneau interne (7 glyphes)
-            ring24,    // Données anneau intermédiaire (24 glyphes)
-            ring32,    // Données anneau externe (32 glyphes)
+            scanLevel, 
+            ring7,     
+            ring24,    
+            ring32,    
             location, 
             locationMethod, 
             deviceMetadata, 
@@ -514,7 +509,6 @@ app.post('/api/seals/verify', scanLimiter, async (req, res) => {
 
         // --- GESTION DU SCAN DE NIVEAU 1 (LOT + 7 GLYPHES) ---
         if (lot) {
-            // Recherche de tous les lots correspondants (gestion des doublons potentiels de lots similaires)
             const { data: potentialRows, error: lotErr } = await supabase
                 .from('produits_certifies')
                 .select('*')
@@ -524,11 +518,9 @@ app.post('/api/seals/verify', scanLimiter, async (req, res) => {
                 if (potentialRows.length === 1) {
                     row = potentialRows[0];
                 } else {
-                    // SI DOUBLONS Détectés : Vérifier si on est en Niveau 2 ou si on doit demander l'étape 2
                     const isLevel2Complete = ring24 || ring32 || (scanLevel === "2");
 
                     if (!isLevel2Complete) {
-                        // RENVOYER UN SIGNAL SPÉCIAL DEMANDANT AU CLIENT D'ENVOYER L'ÉTAPE 2
                         return res.status(200).json({
                             success: false,
                             requiresStep2: true,
@@ -539,13 +531,11 @@ app.post('/api/seals/verify', scanLimiter, async (req, res) => {
                             timestamp: Date.now()
                         });
                     } else {
-                        // NIVEAU 2 COMPLET REÇU : Départager les doublons en analysant la précision géométrique globale (anneaux complets)
                         let bestCandidate = potentialRows[0];
                         let maxConfidence = -1;
 
                         for (const candidate of potentialRows) {
                             const storedPayload = candidate.glyph_payload;
-                            // Utilisation de l'évaluation avancée du moteur IA pour départager
                             const evalRes = AiBackendEngine.evaluateScanConfidence(
                                 scannedMatrix || [], 
                                 storedPayload ? storedPayload.matrix : []
