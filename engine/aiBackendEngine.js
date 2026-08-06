@@ -11,31 +11,22 @@ const AiBackendEngine = {
     /**
      * Sérialisation Souveraine ANOR
      * Adaptée aux grands volumes industriels.
-     * 
-     * RÈGLES ANOR :
-     * - Unités (1 à 9) : Chiffres arabes
-     * - 10 : X  |  50 : L  |  100 : C  |  500 : D
-     * - 1 000 : M  |  10 000 : DM (Dix Mille)  |  100 000 : CM (Cent Mille)
-     * 
-     * @param {number|string} num - Numéro de série dans le lot (ex: 1, 12, 10005, 100012)
-     * @returns {string} Sérialisation personnalisée (ex: "1", "X-2", "DM-5", "CM-X-2")
      */
     toHybridSerial(num) {
         const n = parseInt(num, 10);
         if (isNaN(n) || n <= 0) return '0';
 
-        // Unités simples (1 à 9)
         if (n < 10) return n.toString();
 
         const anorMapping = [
-            { val: 100000, symbol: 'CM' }, // Cent Mille
-            { val: 50000,  symbol: 'LM' }, // Cinquante Mille
-            { val: 10000,  symbol: 'DM' }, // Dix Mille
-            { val: 1000,   symbol: 'M'  }, // Mille
-            { val: 500,    symbol: 'D'  }, // Cinq Cents
-            { val: 100,    symbol: 'C'  }, // Cent
-            { val: 50,     symbol: 'L'  }, // Cinquante
-            { val: 10,     symbol: 'X'  }  // Dix
+            { val: 100000, symbol: 'CM' },
+            { val: 50000,  symbol: 'LM' },
+            { val: 10000,  symbol: 'DM' },
+            { val: 1000,   symbol: 'M'  },
+            { val: 500,    symbol: 'D'  },
+            { val: 100,    symbol: 'C'  },
+            { val: 50,     symbol: 'L'  },
+            { val: 10,     symbol: 'X'  }
         ];
 
         let result = '';
@@ -48,7 +39,6 @@ const AiBackendEngine = {
             }
         }
 
-        // Ajout du reste en chiffre arabe (1 à 9)
         if (remainder > 0) {
             result += `-${remainder}`;
         }
@@ -57,7 +47,6 @@ const AiBackendEngine = {
     },
 
     generateSmartMatrix(certificateCode) {
-
         const SECRET = "ANOR_SOVEREIGN_AI_SALT_2026";
 
         const hash = crypto
@@ -65,46 +54,28 @@ const AiBackendEngine = {
             .update(String(certificateCode))
             .digest("hex");
 
-        // ----------------------------------------------------
-        // Configuration générale des anneaux (Synchronisée avec le Renderer)
-        // Anneau 0 (interne) : 12 positions de base dont 7 effectives (excluant le bas)
-        // Anneau 1 (médian)  : 24 positions (complet)
-        // Anneau 2 (externe) : 32 positions (complet)
-        // ----------------------------------------------------
-
         const ringConfigs = [
             { radius: 190, count: 12, isInner: true },  // Interne : 7 glyphes affichés
             { radius: 248, count: 24, isInner: false }, // Médian : complet
-            { radius: 305, count: 32, isInner: false }  // Externe : complet
+            { radius: 305, count: 32, isInner: false }   // Externe : complet
         ];
 
         let cursor = 0;
         const matrix = [];
         let globalIndexOffset = 0;
 
-        //-----------------------------------------------------
-        // Construction de la bibliothèque géométrique
-        //-----------------------------------------------------
-
         ringConfigs.forEach((ringConfig, ringIndex) => {
             const { radius: baseRadius, count: numPerRing, isInner } = ringConfig;
-            const step = (Math.PI * 2) / numPerRing;
 
             for (let i = 0; i < numPerRing; i++) {
-                const globalIndex = globalIndexOffset + i;
                 const angle = (i / numPerRing) * Math.PI * 2;
                 const angleDeg = (angle * 180) / Math.PI;
 
-                // Application stricte de la même règle d'exclusion que sealRenderer.js pour l'anneau interne
                 if (isInner) {
                     if (angleDeg >= 20 && angleDeg <= 160) {
-                        continue; // On saute les glyphes de la zone inférieure pour correspondre exactement aux 7 affichés
+                        continue; 
                     }
                 }
-
-                //----------------------------------------------
-                // lecture pseudo-aléatoire
-                //----------------------------------------------
 
                 const a = parseInt(hash.substr(cursor % 120, 2), 16);
                 const b = parseInt(hash.substr((cursor + 2) % 120, 2), 16);
@@ -113,236 +84,98 @@ const AiBackendEngine = {
 
                 cursor += 8;
 
-                //----------------------------------------------
-                // angle légèrement irrégulier
-                //----------------------------------------------
+                const jitterAngle = ((a / 255) - 0.5) * 0.08;
+                const finalAngle = angle + jitterAngle;
+                const radius = baseRadius + ((b / 255) - 0.5) * 18;
+                const glyph = GlyphsLibrary.resolveGlyph(c);
 
-                const jitterAngle =
-                    ((a / 255) - 0.5) * 0.08;
-
-                const finalAngle =
-                    angle + jitterAngle;
-
-                //----------------------------------------------
-                // rayon légèrement variable
-                //----------------------------------------------
-
-                const radius =
-                    baseRadius +
-                    ((b / 255) - 0.5) * 18;
-
-                //----------------------------------------------
-                // type
-                //----------------------------------------------
-
-                const glyph =
-                    GlyphsLibrary.resolveGlyph(c);
-
-                //----------------------------------------------
-                // taille
-                //----------------------------------------------
-
-                let width;
-                let height;
-
+                let width, height;
                 switch (glyph) {
-
                     case "circle":
-
                         width = 10 + (d % 5);
                         height = width;
                         break;
-
                     case "square":
-
                         width = 11 + (d % 5);
                         height = width;
                         break;
-
                     case "diamond":
-
                         width = 12 + (d % 4);
                         height = width;
                         break;
-
                     case "plus":
-
                         width = 11 + (d % 3);
                         height = 11 + (d % 3);
                         break;
-
                     case "rect":
-
                         width = 5 + (d % 3);
                         height = 20 + (a % 18);
                         break;
-
                     default:
-
                         width = 10;
                         height = 10;
-
                 }
 
-                //----------------------------------------------
-                // orientation indépendante
-                //----------------------------------------------
-
-                const rotation =
-                    (d / 255) * Math.PI * 2;
-
-                //----------------------------------------------
-                // contour ou plein
-                //----------------------------------------------
-
+                const rotation = (d / 255) * Math.PI * 2;
                 const filled = (a % 3) !== 0;
-
-                //----------------------------------------------
-                // épaisseur
-                //----------------------------------------------
-
-                const strokeWidth =
-                    1 + (b % 3);
-
-                //----------------------------------------------
-                // opacité
-                //----------------------------------------------
-
-                const opacity =
-                    0.88 + ((c % 12) / 100);
-
-                //----------------------------------------------
-                // poids IA
-                //----------------------------------------------
-
-                const weight =
-                    (a + b + c + d) % 256;
-
-                //----------------------------------------------
+                const strokeWidth = 1 + (b % 3);
+                const opacity = 0.88 + ((c % 12) / 100);
+                const weight = (a + b + c + d) % 256;
 
                 matrix.push({
-
                     id: ringIndex + "_" + i,
-
                     ring: ringIndex,
-
                     radius,
-
                     angle: finalAngle,
-
                     glyph,
-
                     rotation,
-
                     width,
-
                     height,
-
                     filled,
-
                     strokeWidth,
-
                     opacity,
-
                     weight
-
                 });
-
             }
-
             globalIndexOffset += numPerRing;
-
         });
 
-        //----------------------------------------------------
-        // Signature IA
-        //----------------------------------------------------
-
-        const aiSignature =
-            crypto
-                .createHash("sha256")
-                .update(JSON.stringify(matrix))
-                .digest("hex");
+        const aiSignature = crypto
+            .createHash("sha256")
+            .update(JSON.stringify(matrix))
+            .digest("hex");
 
         return {
             matrix,
             aiSignature
         };
-
     },
-
-    //--------------------------------------------------------
-    // Rotation virtuelle d'une matrice géométrique (Livraison IA-2)
-    //--------------------------------------------------------
 
     rotateMatrix(matrix, angleOffset) {
-
-        if (!Array.isArray(matrix)) {
-            return [];
-        }
-
+        if (!Array.isArray(matrix)) return [];
         const twoPi = Math.PI * 2;
-
         return matrix.map(item => ({
-
             ...item,
-
-            angle:
-                (
-                    item.angle +
-                    angleOffset +
-                    twoPi
-                ) % twoPi
-
+            angle: (item.angle + angleOffset + twoPi) % twoPi
         }));
-
     },
 
-    //--------------------------------------------------------
-    // Correction légère de perspective (Livraison IA-3)
-    //--------------------------------------------------------
-
     normalizeGeometry(matrix) {
-
-        if (!Array.isArray(matrix) || matrix.length === 0) {
-            return [];
-        }
-
+        if (!Array.isArray(matrix) || matrix.length === 0) return [];
         const radii = matrix.map(g => g.radius);
-
         const minRadius = Math.min(...radii);
         const maxRadius = Math.max(...radii);
-
         const radiusRange = Math.max(maxRadius - minRadius, 1);
 
         return matrix.map(item => ({
-
             ...item,
-
-            radius:
-                (
-                    item.radius - minRadius
-                ) / radiusRange,
-
-            angle:
-                item.angle % (Math.PI * 2),
-
-            width:
-                item.width / 20,
-
-            height:
-                item.height / 20,
-
-            rotation:
-                item.rotation % (Math.PI * 2)
-
+            radius: (item.radius - minRadius) / radiusRange,
+            angle: item.angle % (Math.PI * 2),
+            width: item.width / 20,
+            height: item.height / 20,
+            rotation: item.rotation % (Math.PI * 2)
         }));
-
     },
-
-    //--------------------------------------------------------
-    // Évaluation prioritaire du Cœur (Premier Anneau / Anneau 0)
-    //--------------------------------------------------------
 
     evaluateCoreRing(scannedMatrix, referenceMatrix) {
         if (!Array.isArray(scannedMatrix) || !Array.isArray(referenceMatrix)) {
@@ -369,149 +202,73 @@ const AiBackendEngine = {
         };
     },
 
-    //--------------------------------------------------------
-    // Recherche du meilleur correspondant géométrique (Livraison IA-5)
-    //--------------------------------------------------------
-
     findBestMatch(scanGlyph, referenceMatrix, usedIndexes) {
-
         let bestIndex = -1;
-
         let bestScore = -Infinity;
 
         for (let i = 0; i < referenceMatrix.length; i++) {
-
-            if (usedIndexes.has(i))
-                continue;
+            if (usedIndexes.has(i)) continue;
 
             const ref = referenceMatrix[i];
-
             let score = 0;
 
-            if (scanGlyph.glyph === ref.glyph)
-                score += 40;
+            if (scanGlyph.glyph === ref.glyph) score += 40;
 
-            score -=
-                Math.abs(scanGlyph.radius - ref.radius) * 400;
+            score -= Math.abs(scanGlyph.radius - ref.radius) * 400;
+            score -= Math.abs(scanGlyph.angle - ref.angle) * 120;
+            score -= Math.abs(scanGlyph.rotation - ref.rotation) * 80;
+            score -= Math.abs(scanGlyph.width - ref.width) * 25;
+            score -= Math.abs(scanGlyph.height - ref.height) * 25;
 
-            score -=
-                Math.abs(scanGlyph.angle - ref.angle) * 120;
-
-            score -=
-                Math.abs(scanGlyph.rotation - ref.rotation) * 80;
-
-            score -=
-                Math.abs(scanGlyph.width - ref.width) * 25;
-
-            score -=
-                Math.abs(scanGlyph.height - ref.height) * 25;
-
-            if (scanGlyph.filled === ref.filled)
-                score += 15;
+            if (scanGlyph.filled === ref.filled) score += 15;
 
             if (score > bestScore) {
-
                 bestScore = score;
-
                 bestIndex = i;
-
             }
-
         }
-
         return bestIndex;
-
     },
 
-    //--------------------------------------------------------
-    // Comparaison pondérée normalisée (Livraison IA-5)
-    //--------------------------------------------------------
-
     evaluateWeighted(scannedMatrix, referenceMatrix) {
-
         let obtainedScore = 0;
-
         let maximumScore = 0;
-
         let glyphMatches = 0;
-
         let radiusMatches = 0;
-
         let angleMatches = 0;
-
         let rotationMatches = 0;
-
         let fillMatches = 0;
-
         let sizeMatches = 0;
 
         const usedIndexes = new Set();
 
         for (const scan of scannedMatrix) {
-
-            const bestIndex =
-                this.findBestMatch(
-                    scan,
-                    referenceMatrix,
-                    usedIndexes
-                );
-
-            if (bestIndex === -1)
-                continue;
+            const bestIndex = this.findBestMatch(scan, referenceMatrix, usedIndexes);
+            if (bestIndex === -1) continue;
 
             usedIndexes.add(bestIndex);
-
             const ref = referenceMatrix[bestIndex];
-
             maximumScore += 100;
 
-            //--------------------------------
-
             if (scan.glyph === ref.glyph) {
-
                 obtainedScore += 30;
-
                 glyphMatches++;
-
             }
 
-            //--------------------------------
+            const dr = Math.abs(scan.radius - ref.radius);
 
-            const dr =
-                Math.abs(
-                    scan.radius -
-                    ref.radius
-                );
+            // CORRECTION 1 : Tolérance de rayon élargie pour le mobile
+            const radiusTolerance = ref.radius > 0.70 ? 0.060 : 0.090;
 
-            /*
-            Tolérance progressive
-            */
-
-            const radiusTolerance =
-                ref.radius > 0.70
-                ? 0.030
-                : 0.045;
-
-            if (
-                dr <=
-                radiusTolerance
-            ) {
-
+            if (dr <= radiusTolerance) {
                 obtainedScore += 20;
-
                 radiusMatches++;
-
             }
-            else if (
-                dr <=
-                radiusTolerance * 2
-            ) {
-
-                obtainedScore += 10;
-
+            else if (dr <= radiusTolerance * 2) {
+                obtainedScore += 12;
             }
 
-            //--------------------------------
+//--------------------------------
 
             const da =
                 Math.abs(
@@ -697,9 +454,10 @@ const AiBackendEngine = {
         // borne finale
         //---------------------------------------
 
+        // CORRECTION 2 : Seuil plancher abaissé à 0.68 pour éliminer les faux négatifs en conditions réelles
         threshold =
             Math.max(
-                0.82,
+                0.68,
                 Math.min(
                     threshold,
                     0.95
