@@ -743,9 +743,9 @@ app.use((req, res, next) => {
     );
 });
 
-const PORT = process.env.PORT || 3000;
-const server = app.listen(PORT, () => {
-    console.log(`[EXPERT BACKEND] Serveur Souverain ANOR v${SERVER_VERSION} sécurisé prêt sur http://localhost:${PORT}`);
+const PORT = process.env.PORT || 10000;
+const server = app.listen(PORT, '0.0.0.0', () => {
+    console.log(`[EXPERT BACKEND] Serveur Souverain ANOR v${SERVER_VERSION} sécurisé prêt sur http://0.0.0.0:${PORT}`);
 });
 
 function shutdown(signal) {
