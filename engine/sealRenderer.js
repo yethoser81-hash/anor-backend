@@ -11,7 +11,6 @@ const fs = require('fs');
 const crypto = require('crypto');
 
 const GlyphsLibrary = require('../library/glyphsLibrary');
-const AiBackendEngine = require('../engine/aiBackendEngine');
 
 const sealRenderer = {
     renderSealToBuffer: async (payload = {}, options = {}) => {
@@ -40,7 +39,7 @@ const sealRenderer = {
         
         let itemText = "";
         if (rawItemNumber !== undefined && rawItemNumber !== null && !options.isMasterSeal && !payload.isMasterSeal) {
-            const hybridSerial = AiBackendEngine.toHybridSerial ? AiBackendEngine.toHybridSerial(rawItemNumber) : rawItemNumber;
+            const hybridSerial = rawItemNumber;
             itemText = `N° ${hybridSerial}`;
         } else {
             itemText = "DM / 000 000";
@@ -95,8 +94,8 @@ const sealRenderer = {
         // ==========================================
         const matrixData = payload.matrix || payload.glyph_payload?.matrix || [];
 
-        const innerRingRadius = logoRadius + 45;                
-        const outerRingRadius = outerRadius - 30;               
+        const innerRingRadius = logoRadius + 45;               
+        const outerRingRadius = outerRadius - 30;              
         const midRingRadius = (innerRingRadius + outerRingRadius) / 2; 
 
         // Définition explicite de chaque anneau : son rayon et son nombre de glyphes
@@ -113,7 +112,7 @@ const sealRenderer = {
 
         let globalIndexOffset = 0;
 
-        ringConfigs.forEach((ringConfig, ringIdx) => {
+        ringConfigs.forEach((ringConfig) => {
             const { radius: r, count: numPerRing, isInner } = ringConfig;
 
             for (let i = 0; i < numPerRing; i++) {
@@ -123,7 +122,6 @@ const sealRenderer = {
 
                 // SEUL l'anneau interne est filtré en bas pour ne garder que l'arc supérieur
                 if (isInner) {
-                    // On exclut la zone du bas (entre 20° et 160°) pour laisser place au texte et à l'harmonie
                     if (angleDeg >= 20 && angleDeg <= 160) {
                         continue; 
                     }
