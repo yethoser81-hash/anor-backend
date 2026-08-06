@@ -41,6 +41,29 @@ const app = express();
 // Désactivation de l'en-tête de révélation Express
 app.disable("x-powered-by");
 
+// Configuration CORS renforcée pour accepter l'application mobile Capacitor & le web
+const allowedOrigins = [
+    'http://localhost:3000',
+    'https://anor-backend.onrender.com',
+    'capacitor://localhost',
+    'http://localhost',
+    'https://localhost'
+];
+
+app.use(cors({
+    origin: function (origin, callback) {
+        // Autoriser les requêtes sans origine (comme les applications mobiles natives ou Postman)
+        if (!origin || allowedOrigins.indexOf(origin) !== -1) {
+            callback(null, true);
+        } else {
+            callback(new Error('Bloqué par la politique CORS (NotSameOrigin)'));
+        }
+    },
+    credentials: true,
+    methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'X-API-Version', 'X-Request-Id']
+}));
+
 // ==========================================
 // 🛡️ SÉCURITÉ & MIDDLEWARES GLOBAUX
 // ==========================================
