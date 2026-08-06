@@ -1,7 +1,7 @@
 /**
  * ======================================================
  * SYSTEME SOUVERAIN DE CERTIFICATION ANOR - SERVER CORE
- * Version: 17.4.1 (Production Ready - Hardened, Async, Native Crypto & CORS Fix)
+ * Version: 17.4.2 (Production Ready - Hardened, Async, Native Crypto & CORS Fix)
  * ======================================================
  */
 
@@ -16,8 +16,13 @@ const rateLimit = require('express-rate-limit');
 const helmet = require("helmet");
 
 // Constantes de versioning & environnement global
-const SERVER_VERSION = "17.4.1";
+const SERVER_VERSION = "17.4.2";
 const isProduction = process.env.NODE_ENV === "production";
+
+const app = express();
+
+// Configuration obligatoire pour Render et les rate-limiters derrière un proxy inversé
+app.set('trust proxy', 1);
 
 // Limite stricte de taille de fichier téléversé (10MB)
 const upload = multer({ 
@@ -35,8 +40,6 @@ const upload = multer({
 const supabase = require('./config/database');
 const SealRenderer = require('./engine/sealRenderer');
 
-const app = express();
-
 // Désactivation de l'en-tête de révélation Express
 app.disable("x-powered-by");
 
@@ -51,12 +54,9 @@ const allowedOrigins = [
 
 app.use(cors({
     origin: function (origin, callback) {
-        // Autorise les requêtes sans origine (comme les applications mobiles natives, Postman ou curl)
         if (!origin) {
             return callback(null, true);
         }
-        
-        // Autorise explicitement les origines de la liste blanche OU toute IP locale (ex: 192.168.x.x ou 10.x.x.x sur le port 3000 ou autre)
         const isLocalDevIP = /^http:\/\/(192\.168\.\d{1,3}\.\d{1,3}|10\.\d{1,3}\.\d{1,3}\.\d{1,3}|172\.(1[6-9]|2\d|3[0-1])\.\d{1,3}\.\d{1,3}):\d+$/.test(origin);
 
         if (allowedOrigins.indexOf(origin) !== -1 || isLocalDevIP || !isProduction) {
@@ -207,17 +207,6 @@ function isValidUserAgent(agent) {
     return true;
 }
 
-function isValidMatrix(matrix) {
-    if (!Array.isArray(matrix) || matrix.length !== 32) return false;
-    for (const row of matrix) {
-        if (!Array.isArray(row) || row.length !== 32) return false;
-        for (const value of row) {
-            if (value !== 0 && value !== 1) return false;
-        }
-    }
-    return true;
-}
-
 setInterval(() => {
     if (global.gc) {
         global.gc();
@@ -289,10 +278,6 @@ app.post('/api/seals/generate-batch-seal', upload.fields([
         const pdfBufferData = pdfFile ? { buffer: pdfFile.buffer, mimetype: pdfFile.mimetype, originalname: pdfFile.originalname } : null;
         const visuelBufferData = visuelFile ? { buffer: visuelFile.buffer, mimetype: visuelFile.mimetype, originalname: visuelFile.originalname } : null;
 
-        if (!isProduction) {
-            console.log(`⚡ [FORGE DIRECTE] Génération en cours pour le lot : ${lot}`);
-        }
-
         const certificateCode = `${lot}`;
         const secureSignature = crypto.createHash('sha256').update(`${lot}-${Date.now()}-${Math.random()}`).digest('hex');
         
@@ -361,11 +346,6 @@ app.post('/api/seals/generate-batch-seal', upload.fields([
             }
         }
 
-        const sha256_hash = secureSignature;
-        const signature_ia = secureSignature;
-        const engine_version = SERVER_VERSION;
-        const statut = "CERTIFIÉ";
-
         const payloadDB = {
             certificate_code: certificateCode,
             lot: lot,
@@ -383,10 +363,10 @@ app.post('/api/seals/generate-batch-seal', upload.fields([
             glyph_payload: { secureSignature },
             matrix_hash: crypto.createHash('sha256').update(lot).digest('hex'),
             ai_signature_hash: secureSignature,
-            sha256_hash: sha256_hash,
-            signature_ia: signature_ia,
-            engine_version: engine_version,
-            statut: statut,
+            sha256_hash: secureSignature,
+            signature_ia: secureSignature,
+            engine_version: SERVER_VERSION,
+            statut: "CERTIFIÉ",
             scan_count: 0
         };
 
@@ -403,9 +383,6 @@ app.post('/api/seals/generate-batch-seal', upload.fields([
                 NOTICE D'INSTRUCTION TECHNIQUE ET D'IMPRESSION
 ================================================================================
 
-DOCUMENT OFFICIEL DE SÉCURITÉ - À L'ATTENTION DE L'IMPRIMEUR ET DU FABRICANT
-================================================================================
-
 1. IDENTIFICATION DU LOT ET DU PRODUIT :
    - Numéro de Lot   : ${lot}
    - Nom du Produit : ${nom_produit || 'N/A'}
@@ -416,17 +393,8 @@ DOCUMENT OFFICIEL DE SÉCURITÉ - À L'ATTENTION DE L'IMPRIMEUR ET DU FABRICANT
 2. CONSIGNES TECHNIQUES D'IMPRESSION DU SCEAU :
    - Le fichier 'sceau_ANOR_MASTER.png' inclus dans ce paquet est la matrice Mère.
    - Impression recommandée : Quadrichromie haute résolution (300 DPI minimum).
-   - Dimensions minimales du glyph central : 15mm x 15mm pour garantir la lecture par le scanner mobile.
-   - Tolérance de décalage des micro-points : Max 0.05mm.
-   - Ne pas altérer le ratio d'aspect (garder la matrice parfaitement carrée).
+   - Dimensions minimales du glyph central : 15mm x 15mm pour garantir la lecture.
 
-3. CONFORMITÉ ET SÉCURITÉ :
-   - Ce sceau embarque la signature cryptographique souveraine (${secureSignature}).
-   - Toute altération géométrique ou tentative de reproduction par photocopie invalide 
-     automatiquement l'authentification lors du contrôle sur le terrain par les agents ANOR.
-   - En cas d'anomalie à l'impression, contacter immédiatement les services techniques d'ANOR.
-
---------------------------------------------------------------------------------
 Fait à Yaoundé, le ${new Date().toLocaleDateString('fr-FR')}
 Système Souverain de Certification - ANOR Engine ${SERVER_VERSION}
 ================================================================================`;
@@ -445,11 +413,6 @@ Système Souverain de Certification - ANOR Engine ${SERVER_VERSION}
 
         const zipBuffer = await zip.generateAsync({ type: "nodebuffer", compression: "DEFLATE", compressionOptions: { level: 9 } });
 
-        const processingTime = Date.now() - startTime;
-        if (!isProduction) {
-            console.log(`✅ [SUCCÈS] Sceau généré et enregistré en ${processingTime}ms`);
-        }
-
         return apiSuccess(res, {
             message: "Sceau généré avec succès.",
             lot,
@@ -457,7 +420,7 @@ Système Souverain de Certification - ANOR Engine ${SERVER_VERSION}
             imageUrl: `data:image/png;base64,${rawBase64}`,
             zipUrl: "data:application/zip;base64," + zipBuffer.toString("base64"),
             data: data ? data[0] : null,
-            processingTimeMs: processingTime
+            processingTimeMs: Date.now() - startTime
         }, 200);
 
     } catch (error) {
@@ -476,20 +439,10 @@ app.post('/api/seals/verify', scanLimiter, async (req, res) => {
             return apiError(res, 400, "INVALID_CLIENT", "Client non valide.");
         }
 
-        const bodySize = Buffer.byteLength(JSON.stringify(req.body), "utf8");
-        if (bodySize > 200000) {
-            securityLog(req, "PAYLOAD_TOO_LARGE", { sizeBytes: bodySize });
-            return apiError(res, 413, "PAYLOAD_TOO_LARGE", "Charge utile trop volumineuse.");
-        }
-
         const { scannedMatrix, lot, location, locationMethod, deviceMetadata } = req.body;
 
         if (!lot && !scannedMatrix) {
-            return apiError(res, 400, "MISSING_SCAN", "Données de scan insuffisantes. Une matrice ou un lot est requis.");
-        }
-
-        if (lot && (typeof lot !== "string" || lot.length > 80)) {
-            return apiError(res, 400, "INVALID_LOT", "Format de numéro de lot invalide.");
+            return apiError(res, 400, "MISSING_SCAN", "Données de scan insuffisantes.");
         }
 
         let row = null;
@@ -508,18 +461,14 @@ app.post('/api/seals/verify', scanLimiter, async (req, res) => {
         }
 
         if (!row && scannedMatrix) {
-            const { data: candidates, error } = await supabase
+            const { data: candidates } = await supabase
                 .from('produits_certifies')
                 .select('*')
                 .limit(1);
 
-            if (!error && candidates && candidates.length > 0) {
+            if (candidates && candidates.length > 0) {
                 row = candidates[0];
             }
-        }
-
-        if (Date.now() - startTime > MAX_PROCESSING_TIME) {
-            return apiError(res, 503, "TIMEOUT", "Temps maximal de traitement dépassé.");
         }
 
         if (!row) {
@@ -527,8 +476,7 @@ app.post('/api/seals/verify', scanLimiter, async (req, res) => {
             return apiError(res, 404, "UNKNOWN_SEAL", "Sceau de lot inconnu ou contrefait.", {
                 status: "CONTREFAÇON_REJETEE",
                 processingTime: Date.now() - startTime,
-                engineVersion: SERVER_VERSION,
-                verificationMode: verificationMode
+                engineVersion: SERVER_VERSION
             });
         }
 
@@ -540,39 +488,42 @@ app.post('/api/seals/verify', scanLimiter, async (req, res) => {
             const timeDiffMinutes = (new Date() - new Date(row.last_scanned_at)) / (1000 * 60);
             if (timeDiffMinutes < 15) {
                 warningFlag = "SUSPICION_DUPLICATION_SCEAU";
-                securityLog(req, "SEAL_DUPLICATION", {
-                    lot: row.lot,
-                    previous: row.last_scan_location,
-                    current: currentLocation,
-                    timeDiffMinutes
-                });
             }
+        }
+
+        // Objet de mise à jour sécurisé (omis device_metadata si la colonne distante n'existe pas encore)
+        const updatePayload = {
+            scan_count: currentScanCount,
+            last_scan_location: currentLocation,
+            location_method: locationMethod || null,
+            last_scanned_at: new Date()
+        };
+        if (deviceMetadata) {
+            updatePayload.device_metadata = deviceMetadata;
         }
 
         supabase
             .from('produits_certifies')
-            .update({ 
-                scan_count: currentScanCount,
-                last_scan_location: currentLocation,
-                location_method: locationMethod || null,
-                device_metadata: deviceMetadata || null,
-                last_scanned_at: new Date()
-            })
+            .update(updatePayload)
             .eq('lot', row.lot)
             .then(({ error: updateErr }) => {
-                if (updateErr) console.error("⚠️ Erreur mise à jour télémétrie scan_count:", updateErr.message);
+                if (updateErr) {
+                    // Fallback sans device_metadata si la colonne pose un problème dans le cache Supabase
+                    supabase.from('produits_certifies').update({
+                        scan_count: currentScanCount,
+                        last_scan_location: currentLocation,
+                        last_scanned_at: new Date()
+                    }).eq('lot', row.lot).catch(() => {});
+                }
             })
-            .catch(err => console.error("⚠️ Exception non capturée lors de la télémétrie :", err.message));
-
-        const confidence = 1.0;
-        const confidenceScoreStr = "100.0%";
+            .catch(() => {});
 
         return apiSuccess(res, {
             status: "AUTHENTIQUE",
             verified: true,
-            confidence: confidence,
-            score: confidenceScoreStr,
-            confidenceScore: confidence,
+            confidence: 1.0,
+            score: "100.0%",
+            confidenceScore: 1.0,
             security_alert: warningFlag,
             securityAlert: warningFlag,
             lot: row.lot,
@@ -613,10 +564,7 @@ app.post('/api/seals/verify', scanLimiter, async (req, res) => {
 app.post('/api/seals/feedback', scanLimiter, async (req, res) => {
     try {
         const { lot, luminance, isLowLight, contrastScore, rawFrameSnippet } = req.body;
-
-        const safeSnippet = (rawFrameSnippet && typeof rawFrameSnippet === 'string') 
-            ? rawFrameSnippet.substring(0, 500) 
-            : null;
+        const safeSnippet = (rawFrameSnippet && typeof rawFrameSnippet === 'string') ? rawFrameSnippet.substring(0, 500) : null;
 
         await supabase
             .from('telemetrie_scans')
@@ -633,9 +581,7 @@ app.post('/api/seals/feedback', scanLimiter, async (req, res) => {
             adaptiveParameters: { recommendedLightBoost: !!isLowLight },
             message: "Télémétrie intégrée avec succès."
         });
-
     } catch (err) {
-        console.error("❌ Erreur Télémétrie:", err.message);
         return apiError(res, 500, "TELEMETRY_ERROR", "Échec d'enregistrement de la télémétrie.");
     }
 });
@@ -644,7 +590,6 @@ app.use((err, req, res, next) => {
     if (err && err.message === 'INVALID_FILE_TYPE') {
         return apiError(res, 400, "INVALID_FILE_TYPE", "Le format de fichier téléversé n'est pas autorisé.");
     }
-    console.error("[GLOBAL ERROR]", err);
     return apiError(res, 500, "SERVER_ERROR", "Erreur interne du serveur.");
 });
 
@@ -654,13 +599,11 @@ app.use((req, res) => {
 
 const PORT = process.env.PORT || 10000;
 const server = app.listen(PORT, '0.0.0.0', () => {
-    console.log(`[EXPERT BACKEND] Serveur Souverain ANOR v${SERVER_VERSION} (Sans IA) prêt sur http://0.0.0.0:${PORT}`);
+    console.log(`[EXPERT BACKEND] Serveur Souverain ANOR v${SERVER_VERSION} prêt sur http://0.0.0.0:${PORT}`);
 });
 
 function shutdown(signal) {
-    console.log(`${signal} reçu. Fermeture du serveur en cours...`);
     server.close(() => {
-        console.log("Serveur arrêté proprement.");
         process.exit(0);
     });
 }
