@@ -1,7 +1,7 @@
 /**
  * ====================================================================
  * ANOR CHECK
- * SEAL RENDERER V4.5 - Anneaux & Mires de positionnement fixes (Calibration CV)
+ * SEAL RENDERER V4.6 - Mires d'ancrage cardinales & Isolation optique CV
  * ====================================================================
  */
 
@@ -98,19 +98,19 @@ const sealRenderer = {
         const outerRingRadius = outerRadius - 30;              
         const midRingRadius = (innerRingRadius + outerRingRadius) / 2; 
 
-        // Définition des mires de positionnement fixes sur l'anneau extérieur (Angles en radians)
-        // 3 mires triangulaires pour la calibration d'orientation (Haut, Bas-Droite, Bas-Gauche)
-        const finderTargetsAngles = [
-            -Math.PI / 2,         // 12 heures (Haut)
-            Math.PI / 6,          // 4 heures (Bas-Droite)
-            (5 * Math.PI) / 6     // 8 heures (Bas-Gauche)
+        // 4 Mires de positionnement fixes aux 4 points cardinaux exacts (0°, 90°, 180°, 270°)
+        const finderCardinals = [
+            0,             // 3 heures (Droite)
+            Math.PI / 2,   // 6 heures (Bas)
+            Math.PI,       // 9 heures (Gauche)
+            (3 * Math.PI) / 2 // 12 heures (Haut)
         ];
 
-        // Définition explicite de chaque anneau : son rayon et son nombre de glyphes
+        // Définition explicite de chaque anneau
         const ringConfigs = [
             { radius: innerRingRadius, count: 12, isInner: true },  // Anneau interne : ouvert en bas
             { radius: midRingRadius,   count: 24, isInner: false }, // Anneau médian : complet
-            { radius: outerRingRadius, count: 32, isInner: false, isOuterWithFinders: true } // Anneau externe : avec mires fixes
+            { radius: outerRingRadius, count: 32, isInner: false, hasFinders: true } // Anneau externe : avec mires cardinales
         ];
 
         ctx.save();
@@ -121,7 +121,7 @@ const sealRenderer = {
         let globalIndexOffset = 0;
 
         ringConfigs.forEach((ringConfig) => {
-            const { radius: r, count: numPerRing, isInner, isOuterWithFinders } = ringConfig;
+            const { radius: r, count: numPerRing, isInner, hasFinders } = ringConfig;
 
             for (let i = 0; i < numPerRing; i++) {
                 const globalIndex = globalIndexOffset + i;
@@ -135,20 +135,20 @@ const sealRenderer = {
                     }
                 }
 
-                // Si c'est l'anneau externe, on vérifie si l'angle tombe sur une mire de positionnement fixe
-                if (isOuterWithFinders) {
-                    let isCollidingWithFinder = false;
-                    for (const targetAngle of finderTargetsAngles) {
-                        // Normalisation de la différence angulaire (< 0.15 radians / ~8.5°)
+                // Si c'est l'anneau externe, on évite de dessiner un glyphe si on est proche d'une mire cardinale
+                if (hasFinders) {
+                    let collidesWithFinder = false;
+                    for (const targetAngle of finderCardinals) {
                         let diff = Math.abs(angle - targetAngle);
                         if (diff > Math.PI) diff = (Math.PI * 2) - diff;
-                        if (diff < 0.18) {
-                            isCollidingWithFinder = true;
+                        // Tolérance d'environ 12° (~0.21 rad) pour laisser une "quiet zone" propre autour de la mire
+                        if (diff < 0.22) {
+                            collidesWithFinder = true;
                             break;
                         }
                     }
-                    if (isCollidingWithFinder) {
-                        continue; // On saute l'emplacement du glyphe pour laisser la place nette à la mire
+                    if (collidesWithFinder) {
+                        continue; 
                     }
                 }
 
@@ -182,24 +182,22 @@ const sealRenderer = {
         });
 
         // ==========================================
-        // 5.2. DESSIN DES MIRES DE POSITIONNEMENT FIXES (Cibles CV)
+        // 5.2. DESSIN DES 4 MIRES CARDINALES DE CALIBRATION
         // ==========================================
-        finderTargetsAngles.forEach((targetAngle) => {
+        finderCardinals.forEach((targetAngle) => {
             const px = centerX + outerRingRadius * Math.cos(targetAngle);
             const py = centerY + outerRingRadius * Math.sin(targetAngle);
 
             ctx.save();
             ctx.translate(px, py);
-            ctx.rotate(targetAngle);
-
-            // Dessin d'une mire souveraine de calibration (Carré concentrique ou cible carrée ANOR)
+            // Pas de rotation de la mire elle-même pour qu'elle reste parfaitement alignée sur les axes X/Y de la caméra
+            
             ctx.lineWidth = 3.0;
             ctx.strokeStyle = GEOMETRY_COLOR;
             ctx.fillStyle = GEOMETRY_COLOR;
 
-            // Carré externe de la mire
-            ctx.strokeRect(-9, -9, 18, 18);
-            // Point/carré plein central pour ancrage optique robuste
+            // Dessin d'une mire de type "Cible Carrée Concentrique" (très robuste pour la détection OpenCV)
+            ctx.strokeRect(-10, -10, 20, 20);
             ctx.fillRect(-4, -4, 8, 8);
 
             ctx.restore();
