@@ -1,7 +1,7 @@
 /**
  * ====================================================================
  * ANOR CHECK
- * SEAL RENDERER V4.6 - Mires d'ancrage cardinales & Isolation optique CV
+ * SEAL RENDERER V4.7 - Mires cardinales XXL & Zone de silence élargie (CV Max)
  * ====================================================================
  */
 
@@ -98,19 +98,19 @@ const sealRenderer = {
         const outerRingRadius = outerRadius - 30;              
         const midRingRadius = (innerRingRadius + outerRingRadius) / 2; 
 
-        // 4 Mires de positionnement fixes aux 4 points cardinaux exacts (0°, 90°, 180°, 270°)
+        // 4 Mires de positionnement fixes aux 4 points cardinaux exacts
         const finderCardinals = [
-            0,             // 3 heures (Droite)
-            Math.PI / 2,   // 6 heures (Bas)
-            Math.PI,       // 9 heures (Gauche)
-            (3 * Math.PI) / 2 // 12 heures (Haut)
+            0,                 // 3 heures (Droite)
+            Math.PI / 2,       // 6 heures (Bas)
+            Math.PI,           // 9 heures (Gauche)
+            (3 * Math.PI) / 2  // 12 heures (Haut)
         ];
 
         // Définition explicite de chaque anneau
         const ringConfigs = [
             { radius: innerRingRadius, count: 12, isInner: true },  // Anneau interne : ouvert en bas
             { radius: midRingRadius,   count: 24, isInner: false }, // Anneau médian : complet
-            { radius: outerRingRadius, count: 32, isInner: false, hasFinders: true } // Anneau externe : avec mires cardinales
+            { radius: outerRingRadius, count: 32, isInner: false, hasFinders: true } // Anneau externe : avec mires XXL
         ];
 
         ctx.save();
@@ -135,14 +135,14 @@ const sealRenderer = {
                     }
                 }
 
-                // Si c'est l'anneau externe, on évite de dessiner un glyphe si on est proche d'une mire cardinale
+                // Sur l'anneau externe : Évitement renforcé (Quiet zone élargie pour la mire XXL)
                 if (hasFinders) {
                     let collidesWithFinder = false;
                     for (const targetAngle of finderCardinals) {
                         let diff = Math.abs(angle - targetAngle);
                         if (diff > Math.PI) diff = (Math.PI * 2) - diff;
-                        // Tolérance d'environ 12° (~0.21 rad) pour laisser une "quiet zone" propre autour de la mire
-                        if (diff < 0.22) {
+                        // Zone de silence passe à ~17° (0.30 rad)
+                        if (diff < 0.30) {
                             collidesWithFinder = true;
                             break;
                         }
@@ -182,7 +182,7 @@ const sealRenderer = {
         });
 
         // ==========================================
-        // 5.2. DESSIN DES 4 MIRES CARDINALES DE CALIBRATION
+        // 5.2. DESSIN DES 4 MIRES CARDINALES XXL (Calibration CV)
         // ==========================================
         finderCardinals.forEach((targetAngle) => {
             const px = centerX + outerRingRadius * Math.cos(targetAngle);
@@ -190,15 +190,14 @@ const sealRenderer = {
 
             ctx.save();
             ctx.translate(px, py);
-            // Pas de rotation de la mire elle-même pour qu'elle reste parfaitement alignée sur les axes X/Y de la caméra
             
-            ctx.lineWidth = 3.0;
+            ctx.lineWidth = 4.0; // Trait plus fort
             ctx.strokeStyle = GEOMETRY_COLOR;
             ctx.fillStyle = GEOMETRY_COLOR;
 
-            // Dessin d'une mire de type "Cible Carrée Concentrique" (très robuste pour la détection OpenCV)
-            ctx.strokeRect(-10, -10, 20, 20);
-            ctx.fillRect(-4, -4, 8, 8);
+            // Mire XXL : 30x30px externe, 12x12px plein au centre
+            ctx.strokeRect(-15, -15, 30, 30);
+            ctx.fillRect(-6, -6, 12, 12);
 
             ctx.restore();
         });
