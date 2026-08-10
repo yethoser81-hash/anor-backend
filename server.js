@@ -19,6 +19,30 @@ const helmet = require("helmet");
 const SERVER_VERSION = "17.6.0";
 const isProduction = process.env.NODE_ENV === "production";
 
+// [AJOUT A] Constantes ANOR Visual Matrix
+const VISUAL_VERSION = 1;
+const VISUAL_BITS_LENGTH = 51;
+
+// [AJOUT B] Fonctions utilitaires ANOR Visual Matrix
+
+function normalizeVisualBits(bits) {
+    if (
+        typeof bits === "string" &&
+        /^[01]{51}$/.test(bits)
+    ) {
+        return bits;
+    }
+
+    return null;
+}
+
+function sha256Hex(value) {
+    return crypto
+        .createHash("sha256")
+        .update(String(value))
+        .digest("hex");
+}
+
 const app = express();
 
 // Configuration obligatoire pour Render et les rate-limiters derrière un proxy inversé
@@ -98,12 +122,10 @@ app.use((req, res, next) => {
     req.requestId = requestId;
     res.setHeader("X-Request-Id", requestId);
 
-    res.on("finish", () => {
-        const duration = Date.now() - startTime;
+    res.on("finish", () => {        const duration = Date.now() - startTime;
         if (!isProduction) {
             console.log(`[${new Date().toISOString()}] ${req.method} ${req.originalUrl} - ${res.statusCode} (${duration}ms) [ID: ${requestId}]`);
-        }
-    });
+        }    });
 
     next();
 });
@@ -120,10 +142,8 @@ const MAX_RECENT_REQUESTS = 10000;
 
 setInterval(() => {
     const now = Date.now();
-    for (const [id, time] of recentRequests.entries()) {
-        if (now - time > REQUEST_TTL) {
-            recentRequests.delete(id);
-        }
+    for (const [id, time] of recentRequests.entries()) {    if (now - time > REQUEST_TTL) {
+            recentRequests.delete(id);        }
     }
 }, 10000);
 
@@ -133,9 +153,7 @@ app.use((req, res, next) => {
     }
 
     const id = req.headers["x-request-id"];
-    if (!id) {
-        return next();
-    }
+    if (!id) {        return next();    }
 
     const replayKey = `${req.method}:${req.path}:${id}`;
 
@@ -150,12 +168,9 @@ app.use((req, res, next) => {
 
     if (recentRequests.size >= MAX_RECENT_REQUESTS) {
         const oldestKey = recentRequests.keys().next().value;
-        recentRequests.delete(oldestKey);
-    }
+        recentRequests.delete(oldestKey);    }
 
-    recentRequests.set(replayKey, Date.now());
-    next();
-});
+    recentRequests.set(replayKey, Date.now());    next();   });
 
 function apiSuccess(res, data = {}, status = 200) {
     return res
@@ -190,10 +205,8 @@ function securityLog(req, event, details = {}) {
             requestId: req.headers["x-request-id"] || req.requestId || null,
             ip: req.ip,
             event,
-            details
-        })
-    );
-}
+            details        })
+    );   }
 
 function sanitizeFileName(filename) {
     if (!filename) return 'unnamed_file';
@@ -250,12 +263,32 @@ app.get("/health", async (req, res) => {
  * Permet de comparer la signature binaire reçue du terrain avec tolérance d'erreur
  * ======================================================
  */
+// [MODIFICATION 6] Remplacement de l'ancien moteur Hamming par le nouveau standard ANOR 51-bits
 function calculateHammingDistance(str1, str2) {
-    if (!str1 || !str2 || str1.length !== str2.length) return Infinity;
-    let distance = 0;
-    for (let i = 0; i < str1.length; i++) {
-        if (str1[i] !== str2[i]) distance++;
+
+    if (
+        !str1 ||
+        !str2 ||
+        str1.length !== str2.length
+    ) {
+        return Infinity;
     }
+
+    let distance = 0;
+
+    for (
+        let i = 0;
+        i < str1.length;
+        i++
+    ) {
+
+        if (
+            str1[i] !== str2[i]
+        ) {
+            distance++;
+        }
+    }
+
     return distance;
 }
 
@@ -265,31 +298,129 @@ function calculateHammingDistance(str1, str2) {
  * Analyse l'image du sceau ou la matrice pour extraire le lot / la signature
  * ======================================================
  */
-async function intelligentVisualAnalysis(scannedMatrix) {
-    if (!scannedMatrix) return { lot: null, signature: null, confidence: 0 };
+// [MODIFICATION 7] Remplacement complet de intelligentVisualAnalysis
+async function intelligentVisualAnalysis(
+    scannedMatrix
+) {
 
-    // Si le client envoie une chaîne textuelle ou un identifiant direct
-    if (typeof scannedMatrix === 'string') {
-        const trimmed = scannedMatrix.trim();
-        if (trimmed.length < 50 && (trimmed.includes('-') || trimmed.length < 25)) {
-            return { lot: trimmed, signature: null, confidence: 0.95 };
-        }
-        return { lot: null, signature: trimmed, confidence: 0.85 };
-    }
+    if (!scannedMatrix) {
 
-    // Si le client envoie un objet structuré (matrice du scan circulaire du SealDecoder)
-    if (typeof scannedMatrix === 'object') {
-        const extractedLot = scannedMatrix.lot || scannedMatrix.batch || scannedMatrix.certificate_code || null;
-        const extractedSig = scannedMatrix.secureSignature || scannedMatrix.signature || scannedMatrix.hash || scannedMatrix.visualHash || null;
-        
         return {
-            lot: extractedLot,
-            signature: extractedSig,
-            confidence: extractedLot || extractedSig ? 0.90 : 0.50
+            lot: null,
+            signature: null,
+            visualBits: null,
+            visualCandidates: [],
+            confidence: 0
         };
     }
 
-    return { lot: null, signature: null, confidence: 0.10 };
+    // =========================================================
+    // LOT TEXTE
+    // =========================================================
+
+    if (
+        typeof scannedMatrix === "string"
+    ) {
+
+        const trimmed =
+            scannedMatrix.trim();
+
+        if (!trimmed) {
+
+            return {
+                lot: null,
+                signature: null,
+                visualBits: null,
+                visualCandidates: [],
+                confidence: 0
+            };
+        }
+
+        return {
+
+            lot: trimmed,
+
+            signature: null,
+
+            visualBits: null,
+
+            visualCandidates: [],
+
+            confidence: 0.95
+        };
+    }
+
+    // =========================================================
+    // MATRICE VISUELLE
+    // =========================================================
+
+    if (
+        typeof scannedMatrix === "object"
+    ) {
+
+        const visualBits =
+            normalizeVisualBits(
+                scannedMatrix.bits ||
+                scannedMatrix.visualBits
+            );
+
+        const candidates =
+            Array.isArray(
+                scannedMatrix.candidates
+            )
+                ? scannedMatrix.candidates
+                    .map(normalizeVisualBits)
+                    .filter(Boolean)
+                : [];
+
+        const uniqueCandidates =
+            [
+                ...(visualBits
+                    ? [visualBits]
+                    : []),
+                ...candidates
+            ].filter(
+                (value, index, array) =>
+                    array.indexOf(value) === index
+            );
+
+        return {
+
+            lot:
+                scannedMatrix.lot ||
+                scannedMatrix.batch ||
+                null,
+
+            signature:
+                scannedMatrix.secureSignature ||
+                scannedMatrix.signature ||
+                scannedMatrix.hash ||
+                null,
+
+            visualBits,
+
+            visualCandidates:
+                uniqueCandidates,
+
+            confidence:
+                visualBits
+                    ? 0.90
+                    : 0.20
+        };
+    }
+
+    return {
+
+        lot: null,
+
+        signature: null,
+
+        visualBits: null,
+
+        visualCandidates: [],
+
+        confidence: 0
+    };
 }
 
 app.post('/api/seals/generate-batch-seal', upload.fields([
@@ -327,21 +458,48 @@ app.post('/api/seals/generate-batch-seal', upload.fields([
         const visuelBufferData = visuelFile ? { buffer: visuelFile.buffer, mimetype: visuelFile.mimetype, originalname: visuelFile.originalname } : null;
 
         const certificateCode = `${lot}`;
-        const secureSignature = crypto.createHash('sha256').update(`${lot}-${Date.now()}-${Math.random()}`).digest('hex');
         
-        const imageBuffer = await SealRenderer.renderSealToBuffer(
-            { secureSignature },
-            {
-                lot,
-                quantite: parsedQuantite,
-                type_emballage,
-                productName: nom_produit,
-                nom_produit,
-                nom_producteur,
-                isMasterSeal: true,
-                masterSerialLabel: `SÉRIE : DM / ${parsedQuantite.toLocaleString('fr-FR')}`
-            }
-        );
+        // [MODIFICATION 8] Dérivation des 51 bits visuels ANOR
+        const secureSignature =
+            crypto
+                .createHash('sha256')
+                .update(
+                    `${lot}-${Date.now()}-${Math.random()}`
+                )
+                .digest('hex');
+
+        const visualBits =
+            SealRenderer.deriveVisualBits(
+                secureSignature
+            );
+
+        if (
+            !visualBits ||
+            visualBits.length !== 51
+        ) {
+            throw new Error(
+                "La matrice visuelle ANOR doit contenir exactement 51 bits."
+            );
+        }
+        
+        // [MODIFICATION 9] Passage des visualBits au renderer
+        const imageBuffer =
+            await SealRenderer.renderSealToBuffer(
+                {
+                    secureSignature,
+                    visualBits
+                },
+                {
+                    lot,
+                    quantite: parsedQuantite,
+                    type_emballage,
+                    productName: nom_produit,
+                    nom_produit,
+                    nom_producteur,
+                    isMasterSeal: true,
+                    masterSerialLabel: `SÉRIE : DM / ${parsedQuantite.toLocaleString('fr-FR')}`
+                }
+            );
 
         if (!Buffer.isBuffer(imageBuffer)) {
             throw new Error("Le renderer n'a pas renvoyé un Buffer valide.");
@@ -386,14 +544,11 @@ app.post('/api/seals/generate-batch-seal', upload.fields([
                         .getPublicUrl(visuelPath);
                     visuelUrl = publicUrlData ? publicUrlData.publicUrl : null;
                 }
-            } catch (err) {
-                console.warn("⚠️ Exception Storage (Visuel) :", err.message);
-            }
-            if (!visuelUrl) {
-                visuelUrl = `data:${visuelBufferData.mimetype};base64,${visuelBufferData.buffer.toString('base64')}`;
-            }
+            } catch (err) {      console.warn("⚠️ Exception Storage (Visuel) :", err.message);            }
+            if (!visuelUrl) {     visuelUrl = `data:${visuelBufferData.mimetype};base64,${visuelBufferData.buffer.toString('base64')}`;            }
         }
 
+        // [MODIFICATION 10] Mise à jour du payloadDB avec versioning et matrix_hash sur les 51 bits
         const payloadDB = {
             certificate_code: certificateCode,
             lot: lot,
@@ -408,11 +563,26 @@ app.post('/api/seals/generate-batch-seal', upload.fields([
             date_peremption: date_peremption || null,
             certificat_pdf_url: pdfUrl,
             visuel_produit_url: visuelUrl,
-            glyph_payload: { secureSignature, lot },
-            matrix_hash: crypto.createHash('sha256').update(lot).digest('hex'),
-            ai_signature_hash: secureSignature,
-            sha256_hash: secureSignature,
-            signature_ia: secureSignature,
+            
+            glyph_payload: {
+                visualVersion: VISUAL_VERSION,
+                secureSignature,
+                visualBits,
+                lot
+            },
+            
+            matrix_hash:
+                sha256Hex(visualBits),
+                
+            ai_signature_hash:
+                secureSignature,
+                
+            sha256_hash:
+                secureSignature,
+                
+            signature_ia:
+                secureSignature,
+                
             engine_version: SERVER_VERSION,
             statut: "CERTIFIÉ",
             scan_count: 0
@@ -449,14 +619,26 @@ Système Souverain de Certification - ANOR Engine ${SERVER_VERSION}
 
         const zip = new JSZip();
         zip.file("NOTICE_DIMPRESSION_ET_INSTRUCTIONS.txt", printNoticeContent);
-        zip.file("certification.json", JSON.stringify({ 
-            lot, 
-            nom_produit, 
-            nom_producteur,
-            quantite: parsedQuantite, 
-            signature_ia: secureSignature,
-            created_at: new Date().toISOString() 
-        }, null, 4));
+        
+        // [MODIFICATION 11] Ajout visualVersion et visualBits dans certification.json
+        zip.file(
+            "certification.json",
+            JSON.stringify(
+                {
+                    lot,
+                    nom_produit,
+                    nom_producteur,
+                    quantite: parsedQuantite,
+                    visualVersion: VISUAL_VERSION,
+                    visualBits,
+                    signature_ia: secureSignature,
+                    created_at:
+                        new Date().toISOString()
+                },
+                null,
+                4
+            )
+        );
         zip.file("sceau_ANOR_MASTER.png", imageBuffer);
 
         const zipBuffer = await zip.generateAsync({ type: "nodebuffer", compression: "DEFLATE", compressionOptions: { level: 9 } });
@@ -471,201 +653,631 @@ Système Souverain de Certification - ANOR Engine ${SERVER_VERSION}
             processingTimeMs: Date.now() - startTime
         }, 200);
 
-    } catch (error) {
-        console.error("❌ Erreur Forge Backend Directe:", error);
-        return apiError(res, 500, "FORGE_ERROR", error.message);
-    }
-});
+    } catch (error) {        console.error("❌ Erreur Forge Backend Directe:", error);
+        return apiError(res, 500, "FORGE_ERROR", error.message);    }     });
 
-app.post('/api/seals/verify', scanLimiter, async (req, res) => {
-    const startTime = Date.now();
+// [MODIFICATION 12] Remplacement ENTIER du endpoint /api/seals/verify
+app.post(
+    '/api/seals/verify',
+    scanLimiter,
+    async (req, res) => {
 
-    try {
-        if (!isValidUserAgent(req.headers["user-agent"])) {
-            securityLog(req, "INVALID_USER_AGENT", { agent: req.headers["user-agent"] });
-            return apiError(res, 400, "INVALID_CLIENT", "Client non valide.");
-        }
+        const startTime =
+            Date.now();
 
-        const { scannedMatrix, lot, location, locationMethod, deviceMetadata } = req.body;
+        try {
 
-        if (!lot && !scannedMatrix) {
-            return apiError(res, 400, "MISSING_SCAN", "Données de scan insuffisantes.");
-        }
+            if (
+                !isValidUserAgent(
+                    req.headers["user-agent"]
+                )
+            ) {
 
-        let row = null;
-        let verificationMode = "LOT";
-        let matchConfidence = 1.0;
+                securityLog(
+                    req,
+                    "INVALID_USER_AGENT"
+                );
 
-        // Étape 1 : Si un lot explicite est transmis
-        if (lot) {
-            const cleanLot = lot.trim();
-            const { data, error } = await supabase
-                .from('produits_certifies')
-                .select('*')
-                .ilike('lot', cleanLot)
-                .maybeSingle();
-
-            if (!error && data) {
-                row = data;
+                return apiError(
+                    res,
+                    400,
+                    "INVALID_CLIENT",
+                    "Client non valide."
+                );
             }
-        }
 
-        // Étape 2 : Analyse visuelle intelligente et correspondance floue (Fuzzy Matching)
-        if (!row && scannedMatrix) {
-            verificationMode = "INTELLIGENT_VISUAL_SCAN";
-            const analysis = await intelligentVisualAnalysis(scannedMatrix);
+            const {
+                scannedMatrix,
+                lot,
+                location,
+                locationMethod,
+                deviceMetadata
+            } = req.body;
 
-            if (analysis.lot) {
-                const { data } = await supabase
-                    .from('produits_certifies')
+            if (
+                !lot &&
+                !scannedMatrix
+            ) {
+
+                return apiError(
+                    res,
+                    400,
+                    "MISSING_SCAN",
+                    "Données de scan insuffisantes."
+                );
+            }
+
+            let row = null;
+
+            let verificationMode =
+                "LOT";
+
+            let matchConfidence =
+                1.0;
+
+            // =====================================================
+            // 1. VÉRIFICATION PAR LOT (Recherche exacte insensible à la casse)
+            // =====================================================
+
+            if (lot) {
+
+                const cleanLot =
+                    String(lot).trim();
+
+                const {
+                    data,
+                    error
+                } = await supabase
+                    .from(
+                        'produits_certifies'
+                    )
                     .select('*')
-                    .ilike('lot', analysis.lot.trim())
+                    .ilike(
+                        'lot',
+                        cleanLot
+                    )
                     .maybeSingle();
-                if (data) row = data;
+
+                if (
+                    !error &&
+                    data
+                ) {
+
+                    row = data;
+                }
             }
 
-            // Correspondance stricte par hachage de signature si disponible
-            if (!row && analysis.signature) {
-                const { data } = await supabase
-                    .from('produits_certifies')
-                    .select('*')
-                    .or(`ai_signature_hash.eq.${analysis.signature},sha256_hash.eq.${analysis.signature}`)
-                    .maybeSingle();
-                if (data) row = data;
-            }
+            // =====================================================
+            // 2. LECTURE VISUELLE (Si pas de lot ou lot non trouvé)
+            // =====================================================
 
-            // Étape 3 : Tolérance d'erreur par distance de Hamming (si le client envoie une signature binaire/visuelle brute)
-            if (!row && typeof scannedMatrix === 'object' && scannedMatrix.bits) {
-                const { data: allProducts } = await supabase
-                    .from('produits_certifies')
-                    .select('*')
-                    .limit(50);
+            if (
+                !row &&
+                scannedMatrix
+            ) {
 
-                if (allProducts && allProducts.length > 0) {
-                    let bestMatch = null;
-                    let lowestDistance = Infinity;
-                    const maxAllowedErrors = 10; // Tolérance d'environ 15-20% d'erreur sur les bits
+                verificationMode =
+                    "VISUAL_SCAN";
 
-                    for (const product of allProducts) {
-                        const targetSig = product.ai_signature_hash || product.sha256_hash;
-                        if (targetSig && scannedMatrix.bits.length === targetSig.length) {
-                            const dist = calculateHammingDistance(scannedMatrix.bits, targetSig);
-                            if (dist < lowestDistance) {
-                                lowestDistance = dist;
-                                bestMatch = product;
+                const analysis =
+                    await intelligentVisualAnalysis(
+                        scannedMatrix
+                    );
+
+                // -------------------------------------------------
+                // 2A. Si le decoder a aussi obtenu le lot par OCR/fallback
+                // -------------------------------------------------
+
+                if (
+                    analysis.lot
+                ) {
+
+                    const {
+                        data
+                    } = await supabase
+                        .from(
+                            'produits_certifies'
+                        )
+                        .select('*')
+                        .ilike(
+                            'lot',
+                            analysis.lot.trim()
+                        )
+                        .maybeSingle();
+
+                    if (data) {
+                        row = data;
+                        verificationMode =
+                            "VISUAL_LOT_MATCH";
+                    }
+                }
+
+                // -------------------------------------------------
+                // 2B. MATCH EXACT DES 51 BITS (Optimisation par Hash)
+                // -------------------------------------------------
+
+                if (
+                    !row &&
+                    analysis.visualCandidates &&
+                    analysis.visualCandidates.length
+                ) {
+
+                    for (
+                        const bits
+                        of analysis.visualCandidates
+                    ) {
+
+                        // On recalcule le hash des bits lus pour recherche rapide
+                        const visualHash =
+                            sha256Hex(bits);
+
+                        const {
+                            data
+                        } = await supabase
+                            .from(
+                                'produits_certifies'
+                            )
+                            .select('*')
+                            .eq(
+                                'matrix_hash',
+                                visualHash
+                            )
+                            .maybeSingle();
+
+                        // Double vérification de sécurité sur les bits bruts
+                        if (
+                            data &&
+                            data.glyph_payload &&
+                            data.glyph_payload.visualBits === bits
+                        ) {
+
+                            row = data;
+
+                            matchConfidence =
+                                1.0;
+
+                            verificationMode =
+                                "VISUAL_EXACT_MATCH";
+
+                            break; // Match trouvé, on arrête
+                        }
+                    }
+                }
+
+                // -------------------------------------------------
+                // 2C. MATCH FUZZY (Distance de Hamming sur les 51 bits)
+                // -------------------------------------------------
+
+                if (
+                    !row &&
+                    analysis.visualCandidates &&
+                    analysis.visualCandidates.length
+                ) {
+
+                    // Récupération des sceaux récents/actifs pour comparaison (limite de performance)
+                    // TODO: Optimiser via une procédure stockée SQL pour gros volumes
+                    const {
+                        data: allProducts
+                    } = await supabase
+                        .from(
+                            'produits_certifies'
+                        )
+                        .select('*')
+                        .not(
+                            'matrix_hash',
+                            'is',
+                            null
+                        )
+                        .limit(2000);
+
+                    let bestMatch =
+                        null;
+
+                    let lowestDistance =
+                        Infinity;
+
+                    let secondLowestDistance =
+                        Infinity;
+
+                    let bestCandidateBits =
+                        null;
+
+                    // Pour chaque candidat visuel retourné par l'analyse
+                    for (
+                        const candidateBits
+                        of analysis.visualCandidates
+                    ) {
+
+                        // On compare avec chaque produit en base
+                        for (
+                            const product
+                            of (allProducts || [])
+                        ) {
+
+                            const targetBits =
+                                normalizeVisualBits(
+                                    product
+                                        .glyph_payload
+                                        ?.visualBits
+                                );
+
+                            if (!targetBits) {
+                                continue;
+                            }
+
+                            const distance =
+                                calculateHammingDistance(
+                                    candidateBits,
+                                    targetBits
+                                );
+
+                            // Suivi du meilleur et second meilleur match pour exclusion d'ambiguïté
+                            if (
+                                distance <
+                                lowestDistance
+                            ) {
+
+                                secondLowestDistance =
+                                    lowestDistance;
+
+                                lowestDistance =
+                                    distance;
+
+                                bestMatch =
+                                    product;
+
+                                bestCandidateBits =
+                                    candidateBits;
+
+                            } else if (
+                                distance <
+                                secondLowestDistance
+                            ) {
+
+                                secondLowestDistance =
+                                    distance;
                             }
                         }
                     }
 
-                    if (bestMatch && lowestDistance <= maxAllowedErrors) {
-                        row = bestMatch;
-                        matchConfidence = Math.max(0.70, parseFloat((1 - (lowestDistance / scannedMatrix.bits.length)).toFixed(2)));
-                        verificationMode = "FUZZY_HAMMING_MATCH";
+                    /*
+                     * Critères de décision ANOR Core v17 :
+                     * Sur une matrice de 51 bits.
+                     *
+                     * Maximum tolérance :
+                     * 6 erreurs ≈ 11.8 % du signal total (robuste aux dégradations légères d'impression).
+                     *
+                     * Critère d'ambiguïté :
+                     * On exige aussi une marge d'au moins 2 bits entre
+                     * le meilleur et le second candidat pour éviter les faux positifs sur lots proches.
+                     */
+
+                    const MAX_ALLOWED_ERRORS = 6;
+
+                    const sufficientMargin =
+                        secondLowestDistance === Infinity ||
+                        (
+                            secondLowestDistance -
+                            lowestDistance
+                        ) >= 2;
+
+                    if (
+                        bestMatch &&
+                        lowestDistance <=
+                            MAX_ALLOWED_ERRORS &&
+                        sufficientMargin
+                    ) {
+
+                        row =
+                            bestMatch;
+
+                        // Calcul du score de confiance basé sur la distance
+                        // Un match fuzzy dégrade la confiance initiale.
+                        matchConfidence =
+                            Math.max(
+                                0.70, // Confiance plancher pour un match fuzzy valide
+                                1 -
+                                (
+                                    lowestDistance /
+                                    VISUAL_BITS_LENGTH
+                                )
+                            );
+
+                        verificationMode =
+                            "VISUAL_FUZZY_MATCH";
                     }
                 }
             }
 
-            // Dernier repli de sécurité en phase de test si aucun élément trouvé
+            // =====================================================
+            // 3. AUCUN MATCH = REJET (Contrefaçon ou Sceau inconnu)
+            // =====================================================
+
+            // [MODIFICATION 13] Suppression explicite de l'ancien FALLBACK_TEST_MODE ici.
+            // Si 'row' est null, c'est un rejet définitif.
+
             if (!row) {
-                const { data: candidates } = await supabase
-                    .from('produits_certifies')
-                    .select('*')
-                    .limit(1);
-                if (candidates && candidates.length > 0) {
-                    row = candidates[0];
-                    matchConfidence = 0.50;
-                    verificationMode = "FALLBACK_TEST_MODE";
+
+                securityLog(
+                    req,
+                    "UNKNOWN_SEAL_ATTEMPT",
+                    {
+                        lot:
+                            lot || "N/A"
+                    }
+                );
+
+                return apiError(
+                    res,
+                    404,
+                    "UNKNOWN_SEAL",
+                    "Sceau inconnu ou non authentifié.",
+                    {
+                        status:
+                            "CONTREFAÇON_REJETEE",
+
+                        processingTime:
+                            Date.now() -
+                            startTime,
+
+                        engineVersion:
+                            SERVER_VERSION
+                    }
+                );
+            }
+
+            // =====================================================
+            // 4. ENREGISTREMENT DU SCAN & LOGIQUE ANTI-DUPLICATION
+            // =====================================================
+
+            const currentScanCount =
+                (row.scan_count || 0) + 1;
+
+            const currentLocation =
+                location || "Inconnue";
+
+            let warningFlag =
+                null;
+
+            // Détection de duplication basée sur la vélocité géographique
+            if (
+                row.last_scan_location &&
+                row.last_scan_location !==
+                    currentLocation &&
+                row.last_scanned_at
+            ) {
+
+                const timeDiffMinutes =
+                    (
+                        new Date() -
+                        new Date(
+                            row.last_scanned_at
+                        )
+                    ) /
+                    (1000 * 60);
+
+                // Si scan à deux endroits différents en moins de 15 minutes
+                if (
+                    timeDiffMinutes < 15
+                ) {
+
+                    warningFlag =
+                        "SUSPICION_DUPLICATION_SCEAU";
                 }
             }
-        }
 
-        if (!row) {
-            securityLog(req, "UNKNOWN_SEAL_ATTEMPT", { lot: lot || 'N/A' });
-            return apiError(res, 404, "UNKNOWN_SEAL", "Sceau de lot inconnu ou contrefait.", {
-                status: "CONTREFAÇON_REJETEE",
-                processingTime: Date.now() - startTime,
-                engineVersion: SERVER_VERSION
-            });
-        }
+            const updatePayload = {
 
-        const currentScanCount = (row.scan_count || 0) + 1;
-        const currentLocation = location || "Inconnue";
-        let warningFlag = null;
+                scan_count:
+                    currentScanCount,
 
-        if (row.last_scan_location && row.last_scan_location !== currentLocation) {
-            const timeDiffMinutes = (new Date() - new Date(row.last_scanned_at)) / (1000 * 60);
-            if (timeDiffMinutes < 15) {
-                warningFlag = "SUSPICION_DUPLICATION_SCEAU";
+                last_scan_location:
+                    currentLocation,
+
+                location_method:
+                    locationMethod ||
+                    null,
+
+                last_scanned_at:
+                    new Date()
+            };
+
+            if (deviceMetadata) {
+
+                updatePayload.device_metadata =
+                    deviceMetadata;
             }
-        }
 
-        const updatePayload = {
-            scan_count: currentScanCount,
-            last_scan_location: currentLocation,
-            location_method: locationMethod || null,
-            last_scanned_at: new Date()
-        };
-        if (deviceMetadata) {
-            updatePayload.device_metadata = deviceMetadata;
-        }
+            // Mise à jour asynchrone (non bloquante pour la réponse)
+            supabase
+                .from(
+                    'produits_certifies'
+                )
+                .update(
+                    updatePayload
+                )
+                .eq(
+                    'lot',
+                    row.lot
+                )
+                .then(
+                    ({
+                        error: updateErr
+                    }) => {
 
-        supabase
-            .from('produits_certifies')
-            .update(updatePayload)
-            .eq('lot', row.lot)
-            .then(({ error: updateErr }) => {
-                if (updateErr) {
-                    supabase.from('produits_certifies').update({
-                        scan_count: currentScanCount,
-                        last_scan_location: currentLocation,
-                        last_scanned_at: new Date()
-                    }).eq('lot', row.lot).catch(() => {});
+                        if (updateErr) {
+
+                            console.warn(
+                                "⚠️ Mise à jour scan échouée:",
+                                updateErr.message
+                            );
+                        }
+                    }
+                )
+                .catch(() => {});
+
+            // =====================================================
+            // 5. RÉPONSE UNIQUE ET COHÉRENTE
+            // =====================================================
+
+            return apiSuccess(
+                res,
+                {
+
+                    status:
+                        "AUTHENTIQUE",
+
+                    verified:
+                        true,
+
+                    confidence:
+                        matchConfidence,
+
+                    score:
+                        `${(
+                            matchConfidence *
+                            100
+                        ).toFixed(1)}%`,
+
+                    confidenceScore:
+                        matchConfidence,
+
+                    security_alert:
+                        warningFlag,
+
+                    securityAlert:
+                        warningFlag,
+
+                    lot:
+                        row.lot,
+
+                    batch:
+                        row.lot,
+
+                    nom_produit:
+                        row.nom_produit ||
+                        "Produit Certifié Conforme",
+
+                    nomProduit:
+                        row.nom_produit ||
+                        "Produit Certifié Conforme",
+
+                    nom_producteur:
+                        row.nom_producteur ||
+                        "Producteur Agréé",
+
+                    nomProducteur:
+                        row.nom_producteur ||
+                        "Producteur Agréé",
+
+                    pays:
+                        row.pays_origine ||
+                        "Cameroun",
+
+                    pays_origine:
+                        row.pays_origine ||
+                        "Cameroun",
+
+                    quantite:
+                        row.quantite,
+
+                    type_emballage:
+                        row.type_emballage,
+
+                    typeEmballage:
+                        row.type_emballage,
+
+                    composition:
+                        row.composition ||
+                        null,
+
+                    packaging:
+                        row.type_emballage ||
+                        null,
+
+                    visualUrl:
+                        row.visuel_produit_url ||
+                        null,
+
+                    visuel_produit_url:
+                        row.visuel_produit_url ||
+                        null,
+
+                    visualProduitUrl:
+                        row.visuel_produit_url ||
+                        null,
+
+                    certificat_pdf_url:
+                        row.certificat_pdf_url ||
+                        null,
+
+                    certificatPdfUrl:
+                        row.certificat_pdf_url ||
+                        null,
+
+                    scan_count:
+                        currentScanCount,
+
+                    scanCount:
+                        currentScanCount,
+
+                    certified_at:
+                        row.created_at ||
+                        row.date_certificat_conformite,
+
+                    certDate:
+                        row.date_certificat_conformite ||
+                        row.created_at,
+
+                    prodDate:
+                        row.date_fabrication ||
+                        "N/A",
+
+                    expDate:
+                        row.date_peremption ||
+                        "N/A",
+
+                    norme:
+                        "ANOR NC-ISO",
+
+                    processingTime:
+                        Date.now() -
+                        startTime,
+
+                    processingTimeMs:
+                        Date.now() -
+                        startTime,
+
+                    engineVersion:
+                        SERVER_VERSION,
+
+                    visualVersion:
+                        VISUAL_VERSION,
+
+                    verificationMode:
+                        verificationMode,
+
+                    serverTimestamp:
+                        Date.now()
                 }
-            })
-            .catch(() => {});
+            );
 
-        return apiSuccess(res, {
-            status: "AUTHENTIQUE",
-            verified: true,
-            confidence: matchConfidence,
-            score: `${(matchConfidence * 100).toFixed(1)}%`,
-            confidenceScore: matchConfidence,
-            security_alert: warningFlag,
-            securityAlert: warningFlag,
-            lot: row.lot,
-            batch: row.lot,
-            nom_produit: row.nom_produit || "Produit Certifié Conforme",
-            nomProduit: row.nom_produit || "Produit Certifié Conforme",
-            nom_producteur: row.nom_producteur || "Producteur Agréé",
-            nomProducteur: row.nom_producteur || "Producteur Agréé",
-            pays: row.pays_origine || "Cameroun",
-            pays_origine: row.pays_origine || "Cameroun",
-            quantite: row.quantite,
-            type_emballage: row.type_emballage,
-            typeEmballage: row.type_emballage,
-            visuel_produit_url: row.visuel_produit_url,
-            visuelProduitUrl: row.visuel_produit_url,
-            certificat_pdf_url: row.certificat_pdf_url,
-            certificatPdfUrl: row.certificat_pdf_url,
-            scan_count: currentScanCount,
-            scanCount: currentScanCount,
-            certified_at: row.created_at || row.date_certificat_conformite,
-            certDate: row.date_certificat_conformite || row.created_at,
-            prodDate: row.date_fabrication || "N/A",
-            expDate: row.date_peremption || "N/A",
-            norme: "ANOR NC-ISO",
-            processingTime: Date.now() - startTime,
-            processingTimeMs: Date.now() - startTime,
-            engineVersion: SERVER_VERSION,
-            verificationMode: verificationMode,
-            serverTimestamp: Date.now()
-        });
+        } catch (error) {
 
-    } catch (error) {
-        console.error("Erreur lors de la vérification:", error);
-        return apiError(res, 500, "SERVER_ERROR", "Une erreur interne s'est produite lors de la vérification.");
+            console.error(
+                "❌ Erreur vérification:",
+                error
+            );
+
+            return apiError(
+                res,
+                500,
+                "SERVER_ERROR",
+                "Erreur interne pendant la vérification."
+            );
+        }
     }
-});
+);
 
 app.post('/api/seals/feedback', scanLimiter, async (req, res) => {
     try {
