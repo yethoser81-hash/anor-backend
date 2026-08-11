@@ -129,7 +129,11 @@ const defaultAllowedOrigins = [
     "http://localhost:8080",
     "http://localhost",
     "https://localhost",
-    "capacitor://localhost"];
+    "capacitor://localhost",
+
+    // Production Render
+    "https://anor-backend.onrender.com"
+];
 
 const configuredOrigins = String(
     process.env.FRONTEND_URLS ||
