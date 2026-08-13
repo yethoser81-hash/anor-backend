@@ -1156,14 +1156,37 @@ app.post(
             const {
                 scannedMatrix,
                 lot,
+                visualBits: requestVisualBits,
+                visualSignature: requestVisualSignature,
                 location,
                 locationMethod,
                 deviceMetadata
             } = req.body;
 
+            // Le LOT/OCR est facultatif : la preuve primaire est ANOR51.
+            const normalizedRequestBits =
+                normalizeVisualBits(
+                    requestVisualBits ||
+                    scannedMatrix?.bits ||
+                    scannedMatrix?.visualBits
+                );
+
+            const requestSignature =
+                typeof requestVisualSignature === "string"
+                    ? requestVisualSignature.trim()
+                    : (
+                        typeof scannedMatrix?.signature === "string"
+                            ? scannedMatrix.signature.trim()
+                            : (normalizedRequestBits
+                                ? `ANOR51:${normalizedRequestBits}`
+                                : null)
+                    );
+
             if (
                 !lot &&
-                !scannedMatrix
+                !scannedMatrix &&
+                !normalizedRequestBits &&
+                !requestSignature
             ) {
                 return apiError(
                     res,
@@ -1221,7 +1244,11 @@ app.post(
 
                 const analysis =
                     await intelligentVisualAnalysis(
-                        scannedMatrix
+                        scannedMatrix || {
+                            bits: normalizedRequestBits,
+                            visualBits: normalizedRequestBits,
+                            signature: requestSignature
+                        }
                     );
 
                 // --------------------------------------
@@ -1263,35 +1290,91 @@ app.post(
                 }
 
                 // --------------------------------------
-                // SIGNATURE EXACTE
+                // SIGNATURE / MATRICE VISUELLE
                 // --------------------------------------
 
                 if (
                     !row &&
-                    analysis.signature
+                    (analysis.signature || normalizedRequestBits)
                 ) {
-                    const {
-                        data
-                    } =
-                        await supabase
-                            .from(
-                                "produits_certifies"
-                            )
-                            .select("*")
-                            .eq(
-                                "visual_signature",
-                                analysis.signature
-                            )
-                            .maybeSingle();
+                    const signatureToMatch =
+                        analysis.signature || requestSignature;
+                    const bitsToMatch =
+                        normalizeVisualBits(
+                            analysis.bits || normalizedRequestBits
+                        );
 
-                    if (data) {
-                        row = data;
+                    // Match exact sur la colonne canonique.
+                    if (signatureToMatch) {
+                        const { data } =
+                            await supabase
+                                .from("produits_certifies")
+                                .select("*")
+                                .eq("visual_signature", signatureToMatch)
+                                .maybeSingle();
 
-                        matchConfidence =
-                            0.99;
+                        if (data) {
+                            row = data;
+                            matchConfidence = 0.99;
+                            verificationMode = "VISUAL_SIGNATURE_EXACT";
+                        }
+                    }
 
-                        verificationMode =
-                            "VISUAL_SIGNATURE_EXACT";
+                    // Compatibilité : certains anciens sceaux ont leur
+                    // signature uniquement dans glyph_payload.
+                    if (!row && bitsToMatch) {
+                        const { data: candidates, error } =
+                            await supabase
+                                .from("produits_certifies")
+                                .select("*")
+                                .limit(1000);
+
+                        if (!error && Array.isArray(candidates)) {
+                            let bestMatch = null;
+                            let bestDistance = Infinity;
+
+                            for (const candidate of candidates) {
+                                const storedSignature =
+                                    typeof candidate.visual_signature === "string"
+                                        ? candidate.visual_signature
+                                        : candidate.glyph_payload?.visualSignature;
+
+                                const storedBits =
+                                    normalizeVisualBits(
+                                        candidate.visual_bits ||
+                                        candidate.glyph_payload?.visualBits ||
+                                        (typeof storedSignature === "string" && storedSignature.startsWith("ANOR51:")
+                                            ? storedSignature.substring(7)
+                                            : null)
+                                    );
+
+                                if (!storedBits) continue;
+
+                                if (storedBits === bitsToMatch) {
+                                    bestMatch = candidate;
+                                    bestDistance = 0;
+                                    break;
+                                }
+
+                                const distance =
+                                    calculateHammingDistance(bitsToMatch, storedBits);
+
+                                if (distance < bestDistance) {
+                                    bestDistance = distance;
+                                    bestMatch = candidate;
+                                }
+                            }
+
+                            if (bestMatch && bestDistance <= 6) {
+                                row = bestMatch;
+                                matchConfidence =
+                                    Number((1 - bestDistance / VISUAL_BITS_LENGTH).toFixed(3));
+                                verificationMode =
+                                    bestDistance === 0
+                                        ? "VISUAL_BITS_EXACT_COMPAT"
+                                        : "VISUAL_HAMMING_MATCH_COMPAT";
+                            }
+                        }
                     }
                 }
 
@@ -1305,7 +1388,8 @@ app.post(
                 ) {
                     const normalizedBits =
                         normalizeVisualBits(
-                            analysis.bits
+                            analysis.bits ||
+                            normalizedRequestBits
                         );
 
                     if (normalizedBits) {
@@ -1404,8 +1488,10 @@ app.post(
                     req,
                     "UNKNOWN_SEAL_ATTEMPT",
                     {
-                        lot:
-                            lot || "N/A"
+                        lot: lot || "N/A",
+                        visualSignature: requestSignature || "N/A",
+                        visualBitsLength: normalizedRequestBits?.length || 0,
+                        verificationMode
                     }
                 );
 
