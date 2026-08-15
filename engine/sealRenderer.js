@@ -538,11 +538,19 @@ const sealRenderer = {
             CANONICAL_OUTER_RADIUS;
 
 
+        /*
+         * Marqueur central du protocole visuel.
+         *
+         * 12 px à l'échelle canonique 800x800.
+         * Il reste suffisamment petit pour conserver le glyphe,
+         * mais est nettement plus robuste à la caméra qu'un marqueur
+         * de 8 px. Le bit encodé ne change absolument pas.
+         */
         const markerSize =
             Math.max(
-                4,
+                6,
                 Math.round(
-                    8 * scale
+                    12 * scale
                 )
             );
 
