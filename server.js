@@ -177,7 +177,6 @@ app.use(
 // ======================================================
 
 app.use(helmet({ crossOriginEmbedderPolicy: false, contentSecurityPolicy: false }));
-// Augmentation de la limite à 50mb pour autoriser l'envoi d'images base64 par l'APK
 app.use(express.json({ limit: "50mb" }));
 app.use(express.urlencoded({ extended: true, limit: "50mb" }));
 
@@ -570,7 +569,6 @@ app.post(
                 verificationMode = "INTELLIGENT_VISUAL_SCAN";
 
                 // --- DEBUT MODULE GEMINI VISION IA ---
-                // Si scannedMatrix est une image envoyée par l'application mobile en base64
                 if (typeof scannedMatrix === "string" && scannedMatrix.startsWith("data:image")) {
                     const matches = scannedMatrix.match(/^data:(.+);base64,(.+)$/);
                     if (matches) {
@@ -596,7 +594,6 @@ app.post(
                 }
                 // --- FIN MODULE GEMINI VISION IA ---
 
-                // Si Gemini n'a pas trouvé ou si ce n'est pas une image base64, on fallback sur l'analyse classique
                 if (!row) {
                     const analysis = await intelligentVisualAnalysis(
                         scannedMatrix || { bits: normalizedRequestBits, visualBits: normalizedRequestBits, signature: requestSignature }
