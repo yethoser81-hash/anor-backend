@@ -326,7 +326,7 @@ async function analyzeSealWithGemini(imageBuffer, mimeType = "image/jpeg") {
         };
 
         const response = await ai.models.generateContent({
-            model: "gemini-2.5-flash", 
+            model: "gemini-3.6-flash", 
             contents: [
                 imagePart,
                 "Analyse cette image de sceau de certification ANOR. Extrais textuellement et fidèlement le numéro de lot (ex: LOT 54P-2026) et toute référence additionnelle visible (ex: DM / 000 000). Réponds STRICTEMENT au format JSON pur sans balises markdown, avec les clés suivantes : 'lot' (string ou null), 'reference' (string ou null), 'confidence' (nombre entre 0 et 1)."
