@@ -27,7 +27,7 @@ const app = express();
 // ======================================================
 let ai = null;
 if (process.env.GEMINI_API_KEY) {
-    ai = new GoogleGenAI();
+    ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
 } else {
     console.warn("[ANOR CORE] Avertissement : Clé GEMINI_API_KEY absente. Le module Vision IA sera inactif.");
 }
