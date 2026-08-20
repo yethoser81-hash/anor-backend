@@ -1,8 +1,8 @@
 /**
  * ======================================================
  * SYSTEME SOUVERAIN DE CERTIFICATION ANOR
- * SERVER CORE
- * Version: 17.7.0 (Avec Module Vision Gemini IA)
+ * SERVER CORE (VERSION ARCHITECTURE HAUTE SÉCURITÉ)
+ * Version: 17.8.0 (Blindage Avancé, Forensic & Vision IA)
  * ======================================================
  */
 
@@ -18,7 +18,7 @@ const rateLimit = require("express-rate-limit");
 const helmet = require("helmet");
 const supabase = require("./config/database");
 const SealRenderer = require("./engine/sealRenderer");
-const { GoogleGenAI } = require("@google/genai"); // <--- Importation Gemini
+const { GoogleGenAI } = require("@google/genai");
 
 const app = express();
 
@@ -28,6 +28,7 @@ const app = express();
 let ai = null;
 if (process.env.GEMINI_API_KEY) {
     ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+    console.log("[ANOR CORE] Module Vision IA initialisé avec succès.");
 } else {
     console.warn("[ANOR CORE] Avertissement : Clé GEMINI_API_KEY absente. Le module Vision IA sera inactif.");
 }
@@ -36,21 +37,21 @@ if (process.env.GEMINI_API_KEY) {
 // VERSION / CONFIGURATION
 // ======================================================
 
-const SERVER_VERSION = "17.7.0";
+const SERVER_VERSION = "17.8.0";
 const VISUAL_VERSION = 1;
 const VISUAL_BITS_LENGTH = 51;
 const isProduction = process.env.NODE_ENV === "production";
 const PORT = process.env.PORT || 10000;
 
 // ======================================================
-// EXPRESS
+// EXPRESS & TRUST PROXY
 // ======================================================
 
 app.set("trust proxy", 1);
 app.disable("x-powered-by");
 
 // ======================================================
-// UTILITAIRES
+// UTILITAIRES DE SÉCURITÉ & NORMALISATION AVANCÉS
 // ======================================================
 
 function normalizeVisualBits(bits) {
@@ -88,11 +89,43 @@ function sanitizeFileName(filename) {
 }
 
 function isValidUserAgent(agent) {
-    return (typeof agent === "string" && agent.length > 0 && agent.length <= 400);
+    if (!agent || typeof agent !== "string") return false;
+    if (agent.length > 400 || agent.length === 0) return false;
+    // Blocage additionnel des scrapers bas niveau connus
+    const blacklistedBots = ["sqlmap", "nikto", "burpsuite", "acunetix", "zgrab", "gobuster"];
+    const lowerAgent = agent.toLowerCase();
+    for (const bot of blacklistedBots) {
+        if (lowerAgent.includes(bot)) return false;
+    }
+    return true;
 }
 
 // ======================================================
-// REPONSES API
+// FILTRAGE STRICT DES CHARGES UTILES (PAYLOAD SANITIZER)
+// ======================================================
+
+function deepSanitizeInput(obj) {
+    if (obj && typeof obj === "object") {
+        for (const key of Object.keys(obj)) {
+            if (key.startsWith("$") || key.includes(".")) {
+                delete obj[key]; // Neutralisation des injections NoSQL / opérateurs cachés
+            } else {
+                deepSanitizeInput(obj[key]);
+            }
+        }
+    }
+    return obj;
+}
+
+app.use((req, res, next) => {
+    if (req.body) {
+        req.body = deepSanitizeInput(req.body);
+    }
+    next();
+});
+
+// ======================================================
+// REPONSES API STANDARDISÉES
 // ======================================================
 
 function apiSuccess(res, data = {}, status = 200) {
@@ -112,16 +145,18 @@ function apiError(res, status = 500, code = "SERVER_ERROR", message = "Une erreu
         error: { code, message },
         timestamp: Date.now()
     };
-    if (details) { payload.error.details = details; }
+    if (details && !isProduction) { payload.error.details = details; }
     return res.status(status).json(payload);
 }
 
 function securityLog(req, event, details = {}) {
     console.warn(
         JSON.stringify({
+            severity: "SECURITY_ALERT",
             time: new Date().toISOString(),
             requestId: req.headers["x-request-id"] || req.requestId || null,
             ip: req.ip,
+            userAgent: req.headers["user-agent"] || "N/A",
             event,
             details
         })
@@ -129,7 +164,7 @@ function securityLog(req, event, details = {}) {
 }
 
 // ======================================================
-// CORS
+// CORS POLITIQUE SOUVERAINE
 // ======================================================
 
 const defaultAllowedOrigins = [
@@ -139,7 +174,6 @@ const defaultAllowedOrigins = [
     "http://localhost",
     "https://localhost",
     "capacitor://localhost",
-    // Production Render
     "https://anor-backend.onrender.com"
 ];
 
@@ -163,7 +197,7 @@ app.use(
             if (!isProduction && isPrivateNetworkOrigin(origin)) { return callback(null, true); }
             if (!isProduction) { return callback(null, true); }
             
-            console.warn(`[CORS] Origine refusée: ${origin}`);
+            console.warn(`[CORS] Origine refusée par la politique de sécurité: ${origin}`);
             return callback(new Error("CORS_ORIGIN_NOT_ALLOWED"));
         },
         credentials: true,
@@ -173,7 +207,7 @@ app.use(
 );
 
 // ======================================================
-// SECURITE
+// SÉCURITÉ HTTP (HELMET & CSP)
 // ======================================================
 
 app.use(helmet({ crossOriginEmbedderPolicy: false, contentSecurityPolicy: false }));
@@ -192,7 +226,7 @@ app.use((req, res, next) => {
 });
 
 // ======================================================
-// REQUEST ID / LOGGING
+// REQUEST ID / LOGGING FORENSIC
 // ======================================================
 
 app.use((req, res, next) => {
@@ -204,25 +238,35 @@ app.use((req, res, next) => {
     
     res.on("finish", () => {
         const duration = Date.now() - startTime;
-        console.log(`[ANOR] ${req.method} ${req.originalUrl} -> ${res.statusCode} (${duration}ms) [${requestId}]`);
+        if (res.statusCode >= 400) {
+            console.warn(`[ANOR-WARN] ${req.method} ${req.originalUrl} -> ${res.statusCode} (${duration}ms) [${requestId}]`);
+        } else {
+            console.log(`[ANOR] ${req.method} ${req.originalUrl} -> ${res.statusCode} (${duration}ms) [${requestId}]`);
+        }
     });
     next();
 });
 
 // ======================================================
-// RATE LIMIT
+// RATE LIMITING DURCI
 // ======================================================
 
 const scanLimiter = rateLimit({
     windowMs: 60 * 1000,
-    max: 60,
+    max: 30, // Durci à 30 req/min pour bloquer les robots de force brute
     standardHeaders: true,
     legacyHeaders: false,
-    message: { status: 429, error: "TROP_DE_REQUETES", message: "Trop de requêtes de scan. Veuillez ralentir." }
+    handler: (req, res) => {
+        securityLog(req, "RATE_LIMIT_EXCEEDED", { ip: req.ip });
+        return res.status(429).json({
+            success: false,
+            error: { code: "TROP_DE_REQUETES", message: "Trop de requêtes de scan. Veuillez patienter avant un nouveau essai." }
+        });
+    }
 });
 
 // ======================================================
-// ANTI-REPLAY
+// ANTI-REPLAY AVANCÉ
 // ======================================================
 
 const recentRequests = new Map();
@@ -245,7 +289,8 @@ app.use((req, res, next) => {
     const replayKey = `${req.method}:${req.path}:${id}`;
     
     if (recentRequests.has(replayKey)) {
-        return apiError(res, 409, "DUPLICATE_REQUEST", "Cette requête a déjà été traitée.");
+        securityLog(req, "REPLAY_ATTACK_DETECTED", { replayKey });
+        return apiError(res, 409, "DUPLICATE_REQUEST", "Cette requête a déjà été traitée (protection anti-replay).");
     }
     
     if (recentRequests.size >= MAX_RECENT_REQUESTS) {
@@ -258,7 +303,7 @@ app.use((req, res, next) => {
 });
 
 // ======================================================
-// UPLOAD
+// UPLOAD SÉCURISÉ
 // ======================================================
 
 const upload = multer({
@@ -266,12 +311,13 @@ const upload = multer({
     fileFilter: (req, file, cb) => {
         const allowedMimes = ["application/pdf", "image/jpeg", "image/png", "image/webp"];
         if (allowedMimes.includes(file.mimetype)) { return cb(null, true); }
+        securityLog(req, "INVALID_FILE_TYPE_ATTEMPT", { mimetype: file.mimetype });
         return cb(new Error("INVALID_FILE_TYPE"));
     }
 });
 
 // ======================================================
-// ANALYSE VISUELLE CLASSIQUE ET GEMINI
+// ANALYSE VISUELLE CLASSIQUE ET GEMINI IA
 // ======================================================
 
 async function intelligentVisualAnalysis(scannedMatrix) {
@@ -331,7 +377,7 @@ async function analyzeSealWithGemini(imageBuffer, mimeType = "image/jpeg") {
                 imagePart,
                 "Analyse cette image de sceau de certification ANOR. Extrais textuellement et fidèlement le numéro de lot (ex: LOT 54P-2026) et toute référence additionnelle visible (ex: DM / 000 000). Réponds STRICTEMENT au format JSON pur sans balises markdown, avec les clés suivantes : 'lot' (string ou null), 'reference' (string ou null), 'confidence' (nombre entre 0 et 1)."
             ],
-        });
+        });  
 
         const textResponse = response.text ? response.text.trim() : "";
         const cleanJsonStr = textResponse.replace(/```json/g, "").replace(/```/g, "").trim();
@@ -346,13 +392,57 @@ async function analyzeSealWithGemini(imageBuffer, mimeType = "image/jpeg") {
 }
 
 // ======================================================
-// FICHIERS STATIQUES
+// MOTEUR DE SÉRIALISATION UNITAIRE & MANIFESTE INDUSTRIEL
+// ======================================================
+
+async function generateUnitSerialsAndManifest(lotCode, totalQuantity, masterSignature) {
+    const batchSize = 5000;
+    let csvContent = "Index,Numero_De_Serie,Hachage_Securise\n";
+    const unitsToInsert = [];
+
+    for (let i = 1; i <= totalQuantity; i++) {
+        const paddedIndex = String(i).padStart(6, "0");
+        const serialNumber = `${lotCode}-${paddedIndex}`;
+        
+        const secureUnitHash = crypto
+            .createHash("sha256")
+            .update(`${masterSignature}-${serialNumber}-${i}`)
+            .digest("hex");
+
+        unitsToInsert.push({
+            lot: lotCode,
+            serial_number: serialNumber,
+            unit_index: i,
+            secure_unit_hash: secureUnitHash,
+            statut_unitaire: "ACTIF"
+        });
+
+        csvContent += `${i},${serialNumber},${secureUnitHash}\n`;
+
+        if (unitsToInsert.length >= batchSize || i === totalQuantity) {
+            const { error } = await supabase
+                .from("produits_unitaires_serials")
+                .upsert(unitsToInsert, { onConflict: "serial_number" });
+
+            if (error) {
+                console.error(`[SERIALIZATION ERROR] Erreur sur le bloc se terminant à l'index ${i}:`, error.message);
+                throw error;
+            }
+            unitsToInsert.length = 0;
+        }
+    }
+    console.log(`[SERIALIZATION] ${totalQuantity} unités sérialisées avec succès pour le lot ${lotCode}.`);
+    return csvContent;
+}
+
+// ======================================================
+// FICHIERS STATIQUES & ROUTES DE BASE
 // ======================================================
 
 app.use(express.static(__dirname));
 
 app.get(["/", "/index.html"], (req, res) => {
-    res.sendFile(path.join(__dirname, "index.html"));
+    res.redirect("/dashboard/index.html");
 });
 
 // ======================================================
@@ -381,7 +471,7 @@ app.get("/health", async (req, res) => {
 });
 
 // ======================================================
-// GENERATION DU SCEAU
+// GENERATION DU SCEAU & KIT DE SÉRIALISATION
 // ======================================================
 
 app.post(
@@ -489,18 +579,27 @@ app.post(
 
             if (error) { console.error("[SUPABASE INSERT]", error); throw error; }
 
-            const printNoticeContent = `
-1. IDENTIFICATION DU LOT ET DU PRODUIT :
-   - Numéro de Lot       : ${lot}
-   - Nom du Produit     : ${nom_produit || "N/A"}
-   - Producteur         : ${nom_producteur || "N/A"}
-   - Quantité certifiée : ${parsedQuantite.toLocaleString("fr-FR")} unités
-   - Type d'emballage   : ${type_emballage}
+            const csvManifestContent = await generateUnitSerialsAndManifest(certificateCode, parsedQuantite, secureSignature);
 
-2. CONSIGNES TECHNIQUES D'IMPRESSION DU SCEAU :
-   - Le fichier 'sceau_ANOR_MASTER.png' inclus dans ce paquet est la matrice mère.
-   - Impression recommandée : 300 DPI minimum.
-   - Dimensions minimales du glyph central : 15mm x 15mm.
+            const printNoticeContent = `
+======================================================================
+REPUBLIQUE DU CAMEROUN - MINISTERE DU COMMERCE
+AGENCE NORMES ET QUALITE (ANOR)
+SYSTEME SOUVERAIN DE CERTIFICATION - NOTICE OFFICIELLE DE LOT
+======================================================================
+
+1. IDENTIFICATION DU LOT ET DU PRODUIT :
+   - Numéro de Lot global    : ${lot}
+   - Nom du Produit         : ${nom_produit || "N/A"}
+   - Producteur             : ${nom_producteur || "N/A"}
+   - Quantité certifiée     : ${parsedQuantite.toLocaleString("fr-FR")} unités (Plage : 000001 à ${String(parsedQuantite).padStart(6, "0")})
+   - Type d'emballage       : ${type_emballage}
+
+2. PLAGE DE TRAÇABILITÉ ET SÉRIALISATION UNITAIRE :
+   - Chaque unité de ce lot embarque un identifiant de série unique inclus dans 'manifeste_serialisation_unitaire.csv'.
+
+3. AVIS JURIDIQUE ET RÉPRESSION DES FRAUDES :
+   - Le sceau numérique ANOR est protégé par les lois de la République du Cameroun. Toute contrefaçon est passible de poursuites.
 
 Fait à Yaoundé, le ${new Date().toLocaleDateString("fr-FR")}
 Système Souverain de Certification - ANOR Engine ${SERVER_VERSION}
@@ -508,12 +607,13 @@ Système Souverain de Certification - ANOR Engine ${SERVER_VERSION}
 
             const zip = new JSZip();
             zip.file("NOTICE_DIMPRESSION_ET_INSTRUCTIONS.txt", printNoticeContent);
+            zip.file("manifeste_serialisation_unitaire.csv", csvManifestContent);
             zip.file("certification.json", JSON.stringify({ lot, nom_produit, nom_producteur, quantite: parsedQuantite, visualVersion: VISUAL_VERSION, visualBits, visualSignature, signature_ia: secureSignature, created_at: new Date().toISOString() }, null, 4));
             zip.file("sceau_ANOR_MASTER.png", imageBuffer);
             const zipBuffer = await zip.generateAsync({ type: "nodebuffer", compression: "DEFLATE", compressionOptions: { level: 9 } });
 
             return apiSuccess(res, {
-                message: "Sceau généré avec succès.", lot, sha256_hash: secureSignature, visualVersion: VISUAL_VERSION, visualBits, visualSignature,
+                message: "Sceau et sérialisation unitaire générés avec succès.", lot, sha256_hash: secureSignature, visualVersion: VISUAL_VERSION, visualBits, visualSignature,
                 imageUrl: `data:image/png;base64,${rawBase64}`,
                 zipUrl: `data:application/zip;base64,${zipBuffer.toString("base64")}`,
                 data: data?.[0] || null,
@@ -537,8 +637,8 @@ app.post(
         const startTime = Date.now();
         try {
             if (!isValidUserAgent(req.headers["user-agent"])) {
-                securityLog(req, "INVALID_USER_AGENT");
-                return apiError(res, 400, "INVALID_CLIENT", "Client non valide.");
+                securityLog(req, "INVALID_USER_AGENT_BLOCKED", { agent: req.headers["user-agent"] });
+                return apiError(res, 400, "INVALID_CLIENT", "Client non valide ou rejeté par la politique de sécurité.");
             }
 
             const {
@@ -557,18 +657,15 @@ app.post(
             let verificationMode = "LOT";
             let matchConfidence = 1.0;
 
-            // 1. RECHERCHE PAR LOT DIRECT
             if (lot) {
                 const cleanLot = String(lot).trim();
                 const { data, error } = await supabase.from("produits_certifies").select("*").ilike("lot", cleanLot).maybeSingle();
                 if (!error && data) { row = data; }
             }
 
-            // 2. ANALYSE VISUELLE / GEMINI IA
             if (!row && scannedMatrix) {
                 verificationMode = "INTELLIGENT_VISUAL_SCAN";
 
-                // --- DEBUT MODULE GEMINI VISION IA ---
                 if (typeof scannedMatrix === "string" && scannedMatrix.startsWith("data:image")) {
                     const matches = scannedMatrix.match(/^data:(.+);base64,(.+)$/);
                     if (matches) {
@@ -592,7 +689,6 @@ app.post(
                         }
                     }
                 }
-                // --- FIN MODULE GEMINI VISION IA ---
 
                 if (!row) {
                     const analysis = await intelligentVisualAnalysis(
@@ -649,13 +745,11 @@ app.post(
                 }
             }
 
-            // 3. REJET
             if (!row) {
-                securityLog(req, "UNKNOWN_SEAL_ATTEMPT", { lot: lot || "N/A", visualSignature: requestSignature || "N/A", visualBitsLength: normalizedRequestBits?.length || 0, verificationMode });
+                securityLog(req, "UNKNOWN_SEAL_ATTEMPT", { lot: lot || "N/A", verificationMode });
                 return apiError(res, 404, "UNKNOWN_SEAL", "Sceau inconnu ou non authentifié.", { status: "CONTREFAÇON_REJETEE", processingTime: Date.now() - startTime, engineVersion: SERVER_VERSION });
             }
 
-            // 4. ENREGISTREMENT DU SCAN
             const currentScanCount = Number(row.scan_count || 0) + 1;
             const currentLocation = location || "Inconnue";
             let warningFlag = null;
@@ -672,7 +766,6 @@ app.post(
                 .then(({ error }) => { if (error) { console.warn("Mise à jour scan échouée:", error.message); } })
                 .catch(error => { console.warn("Exception mise à jour scan:", error.message); });
 
-            // 5. REPONSE
             const score = `${(matchConfidence * 100).toFixed(1)}%`;
 
             return apiSuccess(res, {
@@ -753,17 +846,13 @@ app.use((req, res) => { return apiError(res, 404, "ROUTE_NOT_FOUND", "Route inex
 
 const server = app.listen(PORT, "0.0.0.0", () => {
     console.log("======================================================");
-    console.log(`ANOR Backend v${SERVER_VERSION}`);
+    console.log(`ANOR Backend v${SERVER_VERSION} (Blindage Actif & Forensic)`);
     console.log(`Port: ${PORT}`);
     console.log(`Environment: ${process.env.NODE_ENV || "development"}`);
     console.log(`CORS origins: ${allowedOrigins.join(", ") || "aucune"}`);
-    console.log("Serveur prêt avec module Vision IA.");
+    console.log("Serveur prêt avec module Vision IA & Sérialisation Unitaire.");
     console.log("======================================================");
 });
-
-// ======================================================
-// ARRET PROPRE
-// ======================================================
 
 function shutdown(signal) {
     console.log(`[ANOR] Arrêt demandé (${signal}).`);

@@ -6,12 +6,13 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>ANOR V16 • Sceau Souverain & Gestion de Lot</title>
     <link rel="stylesheet" href="./forge.css">
-    <link rel="icon" href="./assets/logo_anor.png">
+    <link rel="icon" href="../assets/logo_anor.png">
     <style>
         .topbar nav {
             display: flex;
             gap: 10px;
             align-items: center;
+            flex-wrap: wrap;
         }
         .topbar nav a {
             color: #b0c4de;
@@ -49,17 +50,20 @@
 
 <header class="topbar">
     <div class="brand">
-        <img src="./assets/logo_anor.png" class="logo" alt="ANOR" onerror="this.style.display='none'">
+        <img src="../assets/logo_anor.png" class="logo" alt="ANOR" onerror="this.style.display='none'">
         <div>
             <h1>FORGE ANOR</h1>
             <p>Plateforme Nationale de Certification - Lots & Emballages</p>
         </div>
     </div>
     <nav>
+        <a href="../dashboard/index.html">📊 Dashboard</a>
         <a class="active" href="index.html">🏭 Forge & Lot</a>
-        <a href="historique.html">📜 Historique</a>
-        <a href="verification.html">🔍 Vérification</a>
-        <a href="parametres.html">⚙ Paramètres</a>
+        <a href="../registry/index.html">📋 Registre</a>
+        <a href="../map_surveillance/index.html">🗺️ Surveillance</a>
+        <a href="../product_audit/index.html">📦 Audit Produit</a>
+        <a href="../intelligence/index.html">🧠 Intelligence</a>
+        <a href="../verification/index.html">✔ Vérification</a>
     </nav>
     <div class="serverState">
         <div id="serverLed" class="led"></div>
