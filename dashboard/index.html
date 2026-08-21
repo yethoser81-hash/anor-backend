@@ -3,8 +3,9 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>ANOR V17 • Tour de Contrôle Intelligence & Sceaux</title>
+    <title>ANOR V17 • Tableau de Bord Global</title>
     <link rel="icon" href="../assets/logo_anor.png">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <style>
         :root {
             --bg-main: #070d1b;
@@ -15,7 +16,6 @@
             --text-muted: #94a3b8;
             --accent-blue: #3b82f6;
             --accent-green: #10b981;
-            --accent-purple: #8b5cf6;
             --accent-red: #ef4444;
         }
 
@@ -50,18 +50,11 @@
         }
         .top-header h1 { font-size: 18px; font-weight: 600; color: #fff; }
         
-        .header-actions { display: flex; gap: 12px; align-items: center; }
         .status-badge {
             background: rgba(16, 185, 129, 0.15); color: var(--accent-green); border: 1px solid rgba(16, 185, 129, 0.3);
             padding: 6px 14px; border-radius: 20px; font-size: 12px; font-weight: 600; display: flex; align-items: center; gap: 6px;
         }
         .status-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--accent-green); box-shadow: 0 0 8px currentColor; }
-
-        .btn-toggle-ai {
-            background: var(--accent-purple); color: #fff; border: none; padding: 8px 14px; border-radius: 8px;
-            font-size: 12px; font-weight: 600; cursor: pointer; display: flex; align-items: center; gap: 6px; transition: background 0.2s;
-        }
-        .btn-toggle-ai:hover { background: #7c3aed; }
 
         .dashboard-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 15px; }
         @media(max-width: 1200px) { .dashboard-grid { grid-template-columns: repeat(2, 1fr); } }
@@ -77,40 +70,13 @@
         @media(max-width: 1100px) { .content-grid { grid-template-columns: 1fr; } }
 
         .panel { background: var(--bg-panel); border: 1px solid var(--border-color); border-radius: 12px; padding: 20px; }
-        .panel h2 { font-size: 15px; font-weight: 600; margin-bottom: 15px; color: #fff; border-bottom: 1px solid rgba(255,255,255,0.05); padding-bottom: 10px; display: flex; justify-content: space-between; align-items: center; }
+        .panel h2 { font-size: 15px; font-weight: 600; margin-bottom: 15px; color: #fff; border-bottom: 1px solid rgba(255,255,255,0.05); padding-bottom: 10px; }
 
         .analysis-table { width: 100%; border-collapse: collapse; font-size: 13px; }
         .analysis-table th, .analysis-table td { padding: 12px 10px; text-align: left; border-bottom: 1px solid rgba(255,255,255,0.05); }
         .analysis-table th { color: var(--text-muted); font-weight: 600; background: rgba(0,0,0,0.15); }
         .badge { background: rgba(16, 185, 129, 0.15); color: var(--accent-green); padding: 3px 8px; border-radius: 4px; font-size: 11px; font-weight: 600; }
         .badge-alert { background: rgba(239, 68, 68, 0.15); color: var(--accent-red); padding: 3px 8px; border-radius: 4px; font-size: 11px; font-weight: 600; }
-
-        /* Panneau Latéral (Drawer) pour l'Assistant IA */
-        .ai-drawer {
-            position: fixed; right: -420px; top: 0; width: 400px; height: 100vh; background: var(--bg-panel);
-            border-left: 1px solid var(--border-color); z-index: 2000; box-shadow: -10px 0 30px rgba(0,0,0,0.5);
-            transition: right 0.3s ease-in-out; display: flex; flex-direction: column;
-        }
-        .ai-drawer.open { right: 0; }
-        .ai-drawer-header {
-            padding: 20px; background: var(--bg-card); border-bottom: 1px solid var(--border-color);
-            display: flex; justify-content: space-between; align-items: center;
-        }
-        .ai-drawer-header h3 { font-size: 15px; color: #fff; display: flex; align-items: center; gap: 8px; }
-        .btn-close-drawer { background: none; border: none; color: var(--text-muted); font-size: 18px; cursor: pointer; }
-        .ai-drawer-body { flex: 1; padding: 15px; overflow-y: auto; display: flex; flex-direction: column; gap: 12px; font-size: 13px; }
-        
-        .chat-msg { padding: 10px 14px; border-radius: 8px; max-width: 90%; line-height: 1.4; }
-        .chat-msg.ai { background: rgba(139, 92, 246, 0.15); border: 1px solid rgba(139, 92, 246, 0.3); color: #f8fafc; align-self: flex-start; }
-        .chat-msg.user { background: var(--accent-blue); color: #fff; align-self: flex-end; }
-
-        .ai-drawer-footer { padding: 15px; background: var(--bg-card); border-top: 1px solid var(--border-color); display: flex; gap: 8px; }
-        .ai-input {
-            flex: 1; background: var(--bg-main); border: 1px solid var(--border-color); border-radius: 6px;
-            padding: 8px 12px; color: #fff; font-size: 13px; outline: none;
-        }
-        .ai-input:focus { border-color: var(--accent-purple); }
-        .btn-send-ai { background: var(--accent-purple); color: #fff; border: none; padding: 8px 14px; border-radius: 6px; font-weight: 600; cursor: pointer; }
 
         .footer-credit { text-align: center; font-size: 11px; color: var(--text-muted); padding: 10px 0; }
     </style>
@@ -121,58 +87,55 @@
     <div class="sidebar-brand">
         <img src="../assets/logo_anor.png" alt="ANOR" onerror="this.style.display='none'">
         <h2>ANOR</h2>
-        <span>Intelligence Engine</span>
+        <span>Tour de Contrôle</span>
     </div>
     <nav class="sidebar-nav">
-        <a class="active" href="index.html">📊 Dashboard</a>
-        <a href="../forge/index.html">🏭 Forge & Lot</a>
-        <a href="../registry/index.html">📋 Registry</a>
-        <a href="../map_surveillance/index.html">🗺️ Surveillance</a>
-        <a href="../product_audit/index.html">📦 Product Audit</a>
-        <a href="../intelligence/index.html">🧠 Intelligence</a>
+        <a class="active" href="index.html"><i class="fa-solid fa-chart-pie"></i> Tableau de bord</a>
+        <a href="../forge/index.html"><i class="fa-solid fa-industry"></i> Forge & Lot</a>
+        <a href="../registry/index.html"><i class="fa-solid fa-database"></i> Registry</a>
+        <a href="../map_surveillance/index.html"><i class="fa-solid fa-map-location-dot"></i> Surveillance</a>
+        <a href="../product_audit/index.html"><i class="fa-solid fa-box-open"></i> Product Audit</a>
+        <a href="../intelligence/index.html"><i class="fa-solid fa-brain"></i> Intelligence</a>
     </nav>
 </aside>
 
 <main class="main-content">
     <div class="top-header">
-        <h1>Tour de Contrôle & Analyse Spatio-Temporelle des Séries</h1>
-        <div class="header-actions">
-            <div class="status-badge" id="serverStatusBadge">
-                <div class="status-dot" id="serverDot"></div>
-                <span id="serverStatusText">CONNEXION BDD...</span>
-            </div>
-            <button class="btn-toggle-ai" onclick="toggleAssistantAI()">💬 Assistant IA & Analyse Séries</button>
+        <h1>Tableau de Bord Global & Statistiques</h1>
+        <div class="status-badge" id="serverStatusBadge">
+            <div class="status-dot" id="serverDot"></div>
+            <span id="serverStatusText">CONNEXION BDD...</span>
         </div>
     </div>
 
-    <!-- KPIs reliés dynamiquement au serveur -->
+    <!-- Indicateurs Clés de Performance (KPIs) Globaux -->
     <div class="dashboard-grid">
         <div class="metric-card">
             <div class="label">Précision Globale des Sceaux</div>
             <div class="value" id="kpiPrecision">--</div>
-            <div class="sub" id="kpiPrecisionSub">En attente des données base</div>
+            <div class="sub" id="kpiPrecisionSub">Conformité des contrôles</div>
         </div>
         <div class="metric-card">
-            <div class="label">Scans Unitaires Analysés</div>
+            <div class="label">Total Scans Effectués</div>
             <div class="value" id="kpiScans">--</div>
-            <div class="sub">Temps réel</div>
+            <div class="sub">Volume global enregistré</div>
         </div>
         <div class="metric-card">
-            <div class="label">Régions à Forte Activité</div>
+            <div class="label">Région la Plus Active</div>
             <div class="value" id="kpiRegion">--</div>
-            <div class="sub">Couverture nationale</div>
+            <div class="sub">Couverture territoriale</div>
         </div>
         <div class="metric-card">
-            <div class="label">Anomalies Spatio-Temporelles (Doublons)</div>
+            <div class="label">Anomalies / Doublons Détectés</div>
             <div class="value" id="kpiFraudes" style="color: var(--accent-red);">--</div>
-            <div class="sub">Alerte anti-téléportation</div>
+            <div class="sub">Alertes de traçabilité</div>
         </div>
     </div>
 
-    <!-- Contenu Principal : Tableaux dynamiques des flux et séries -->
+    <!-- Grille Principale : Flux Global et Synthèse -->
     <div class="content-grid">
         <div class="panel">
-            <h2>📊 Traçabilité Unitaire & Analyse des Séries par Lot</h2>
+            <h2>📊 Flux Récent des Lots & Séries</h2>
             <div style="overflow-x: auto;">
                 <table class="analysis-table">
                     <thead>
@@ -181,12 +144,12 @@
                             <th>N° de Série</th>
                             <th>Dernière Localisation</th>
                             <th>Horodatage</th>
-                            <th>Statut IA</th>
+                            <th>Statut</th>
                         </tr>
                     </thead>
                     <tbody id="dynamicTableBody">
                         <tr>
-                            <td colspan="5" style="text-align: center; color: var(--text-muted);">Chargement des séries depuis le back-end...</td>
+                            <td colspan="5" style="text-align: center; color: var(--text-muted);">Chargement des données globales...</td>
                         </tr>
                     </tbody>
                 </table>
@@ -194,45 +157,24 @@
         </div>
 
         <div class="panel">
-            <h2>🧠 Diagnostics Prédictifs & Moteur Anti-Fraude</h2>
+            <h2>📈 Synthèse & État du Système</h2>
             <div id="diagnosticsContainer" style="display: flex; flex-direction: column; gap: 12px; font-size: 13px;">
-                <div style="background: var(--bg-card); padding: 12px; border-radius: 8px; border-left: 3px solid var(--accent-purple);">
-                    <strong>Règle Active :</strong> Surveillance des écarts géographiques impossibles (ex: Yaoundé ➔ Douala en moins de 30 min par un même numéro de série).
+                <div style="background: var(--bg-card); padding: 12px; border-radius: 8px; border-left: 3px solid var(--accent-blue);">
+                    <strong>État Général :</strong> Surveillance active des flux de production et des registres de certification sur l'ensemble des plateformes connectées.
                 </div>
             </div>
         </div>
     </div>
 
     <div class="footer-credit">
-        ANOR Intelligence Core © 2026 • Tour de Contrôle Unifiée & Analyse Comportementale des Séries
+        ANOR Intelligence Core © 2026 • Tableau de Bord Global
     </div>
 </main>
-
-<!-- Panneau Latéral (Drawer) pour l'Assistant IA -->
-<div class="ai-drawer" id="aiDrawer">
-    <div class="ai-drawer-header">
-        <h3>🤖 Assistant Stratégique ANOR</h3>
-        <button class="btn-close-drawer" onclick="toggleAssistantAI()">×</button>
-    </div>
-    <div class="ai-drawer-body" id="aiDrawerMessages">
-        <div class="chat-msg ai">
-            Bonjour. Je surveille activement les numéros de série unitaires de chaque lot. Interrogez-moi sur un numéro de série, un lot spécifique ou les alertes de doublons géographiques sur le territoire.
-        </div>
-    </div>
-    <div class="ai-drawer-footer">
-        <input type="text" class="ai-input" id="aiDrawerInput" placeholder="Ex: Vérifie le statut du numéro de série..." onkeypress="handleDrawerKey(event)">
-        <button class="btn-send-ai" onclick="envoyerRequeteAI()">Envoyer</button>
-    </div>
-</div>
 
 <script>
 document.addEventListener("DOMContentLoaded", () => {
     chargerDonneesServeur();
 });
-
-function toggleAssistantAI() {
-    document.getElementById("aiDrawer").classList.toggle("open");
-}
 
 async function chargerDonneesServeur() {
     try {
@@ -248,7 +190,6 @@ async function chargerDonneesServeur() {
             document.getElementById("kpiFraudes").textContent = data.stats.aiAlerts || "0";
         }
 
-        // Affichage des séries unitaires et des alertes de traçabilité
         if(data.latestSeries && data.latestSeries.length > 0) {
             const tbody = document.getElementById("dynamicTableBody");
             tbody.innerHTML = data.latestSeries.map(item => `
@@ -261,7 +202,7 @@ async function chargerDonneesServeur() {
                 </tr>
             `).join('');
         } else {
-            document.getElementById("dynamicTableBody").innerHTML = `<tr><td colspan="5" style="text-align: center; color: var(--text-muted);">Aucun scan unitaire enregistré pour l'instant.</td></tr>`;
+            document.getElementById("dynamicTableBody").innerHTML = `<tr><td colspan="5" style="text-align: center; color: var(--text-muted);">Aucun flux enregistré pour l'instant.</td></tr>`;
         }
 
         document.getElementById("serverDot").style.background = "var(--accent-green)";
@@ -282,43 +223,7 @@ async function chargerDonneesServeur() {
         document.getElementById("kpiRegion").textContent = "--";
         document.getElementById("kpiFraudes").textContent = "--";
 
-        document.getElementById("dynamicTableBody").innerHTML = `<tr><td colspan="5" style="text-align: center; color: var(--accent-red);">Serveur non accessible. Lancez le backend pour analyser les séries unitaires.</td></tr>`;
-    }
-}
-
-async function envoyerRequeteAI() {
-    const input = document.getElementById("aiDrawerInput");
-    const container = document.getElementById("aiDrawerMessages");
-    const texte = input.value.trim();
-    if(!texte) return;
-
-    container.innerHTML += `<div class="chat-msg user">${texte}</div>`;
-    input.value = "";
-    container.scrollTop = container.scrollHeight;
-
-    try {
-        const res = await fetch('/api/dashboard/stats');
-        const data = await res.json();
-        
-        let reponse = `Analyse des séries en cours. Total des scans : ${data.stats?.totalScans || '0'}.`;
-        const query = texte.toLowerCase();
-
-        if(query.includes("serie") || query.includes("lot")) {
-            reponse = `🔍 **Analyse IA :** Le suivi des numéros de série unitaires est actif. Aucune incohérence temporelle critique détectée pour l'instant sur les derniers lots.`;
-        } else if(query.includes("alerte") || query.includes("fraude")) {
-            reponse = `⚠️ **Rapport Fraudes :** ${data.stats?.aiAlerts || 0} alerte(s) de duplication spatio-temporelle signalée(s) par le moteur.`;
-        }
-
-        container.innerHTML += `<div class="chat-msg ai">${reponse}</div>`;
-    } catch(e) {
-        container.innerHTML += `<div class="chat-msg ai">Impossible de joindre la base de données. Démarrez le serveur pour exécuter l'analyse des séries.</div>`;
-    }
-    container.scrollTop = container.scrollHeight;
-}
-
-function handleDrawerKey(e) {
-    if(e.key === 'Enter') {
-        envoyerRequeteAI();
+        document.getElementById("dynamicTableBody").innerHTML = `<tr><td colspan="5" style="text-align: center; color: var(--accent-red);">Serveur non accessible. Veuillez lancer le back-end.</td></tr>`;
     }
 }
 </script>

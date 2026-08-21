@@ -7,7 +7,6 @@
     <!-- FontAwesome pour les icônes -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <style>
-        /* Styles CSS souverains intégrés directement pour éviter tout blocage réseau */
         :root {
             --bg-main: #020617;
             --bg-card: #0f172a;
@@ -113,7 +112,7 @@
 </head>
 <body>
 
-    <!-- En-tête Institutionnel -->
+    <!-- En-tête Institutionnel avec tous les liens de navigation -->
     <header>
         <div class="header-container">
             <div style="display: flex; align-items: center; gap: 0.75rem;">
@@ -125,11 +124,12 @@
                     <p style="font-size: 0.75rem; color: #94a3b8; margin: 0;">Module d'Audit et de Traçabilité des Produits</p>
                 </div>
             </div>
-            <nav style="display: none; gap: 1.5rem; font-size: 0.875rem;" class="md-flex">
+            <nav style="display: flex; gap: 1.25rem; font-size: 0.875rem; align-items: center;">
                 <a href="/dashboard/index.html" style="color: #cbd5e1; text-decoration: none;">Tableau de bord</a>
                 <a href="/product_audit/index.html" style="color: #34d399; text-decoration: none; font-weight: 600;">Audit Produit</a>
                 <a href="/intelligence/index.html" style="color: #cbd5e1; text-decoration: none;">Intelligence</a>
                 <a href="/surveillance/index.html" style="color: #cbd5e1; text-decoration: none;">Surveillance</a>
+                <a href="/forge/index.html" style="color: #cbd5e1; text-decoration: none;">Forge</a>
             </nav>
         </div>
     </header>
@@ -140,20 +140,20 @@
         <div style="text-align: center; margin-bottom: 2.5rem;">
             <h2 style="font-size: 1.875rem; font-weight: 800; margin-bottom: 0.5rem;">Vérification et Audit de Lot</h2>
             <p style="color: #94a3b8; font-size: 0.875rem; max-width: 36rem; margin: 0 auto;">
-                Saisissez un numéro de lot ou scannez un sceau numérique ANOR pour authentifier instantanément la conformité du produit.[cite: 7]
+                Saisissez un numéro de lot ou scannez un sceau numérique ANOR pour authentifier instantanément la conformité du produit.
             </p>
         </div>
 
         <!-- Formulaire de Recherche / Audit -->
         <div class="card">
-            <form id="auditForm" style="display: flex; flex-direction: column; gap: 1rem;" class="md-flex-row">
+            <form id="auditForm" style="display: flex; flex-direction: column; gap: 1rem;">
                 <div style="flex: 1;">
                     <label for="lotInput" style="display: block; font-size: 0.75rem; font-weight: 600; text-transform: uppercase; color: #94a3b8; margin-bottom: 0.5rem;">Numéro de Lot ou Code de Sceau</label>
                     <div style="position: relative;">
-                        <span style="position: absolute; inset: 0 auto 0 0; padding-left: 1rem; display: flex; align-items: center; pointer-events: none; color: #64748b;">
+                        <span style="position: absolute; top: 0; bottom: 0; left: 0; padding-left: 1rem; display: flex; align-items: center; pointer-events: none; color: #64748b;">
                             <i class="fa-solid fa-barcode"></i>
                         </span>
-                        <input type="text" id="lotInput" required placeholder="Ex: LOT-2026-001 ou code de lot...">[cite: 7]
+                        <input type="text" id="lotInput" required placeholder="Ex: LOT-2026-001 ou code de lot...">
                     </div>
                 </div>
                 <div style="display: flex; align-items: flex-end;">
