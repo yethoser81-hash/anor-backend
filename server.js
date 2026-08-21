@@ -2,7 +2,7 @@
  * ======================================================
  * SYSTEME SOUVERAIN DE CERTIFICATION ANOR
  * SERVER CORE (VERSION ARCHITECTURE HAUTE SÉCURITÉ)
- * Version: 17.9.0 (Blindage Avancé, Forensic & Vision IA)
+ * Version: 17.9.1 (Correction Dossiers Statiques & Routage)
  * ======================================================
  */
 
@@ -37,7 +37,7 @@ if (process.env.GEMINI_API_KEY) {
 // VERSION / CONFIGURATION
 // ======================================================
 
-const SERVER_VERSION = "17.9.0";
+const SERVER_VERSION = "17.9.1";
 const VISUAL_VERSION = 1;
 const VISUAL_BITS_LENGTH = 51;
 const isProduction = process.env.NODE_ENV === "production";
@@ -435,17 +435,23 @@ async function generateUnitSerialsAndManifest(lotCode, totalQuantity, masterSign
 }
 
 // ======================================================
-// FICHIERS STATIQUES & ROUTES DE BASE
+// FICHIERS STATIQUES & ROUTES DE BASE (CORRIGÉ POUR TOUS LES DOSSIERS)
 // ======================================================
 
-app.use(express.static(__dirname));
+app.use(express.static(path.join(__dirname)));
+// Servir explicitement les sous-dossiers clés pour éviter toute 404
+app.use("/dashboard", express.static(path.join(__dirname, "dashboard")));
+app.use("/product_audit", express.static(path.join(__dirname, "product_audit")));
+app.use("/intelligence", express.static(path.join(__dirname, "intelligence")));
+app.use("/surveillance", express.static(path.join(__dirname, "surveillance")));
+app.use("/forge", express.static(path.join(__dirname, "forge")));
 
 app.get(["/", "/index.html"], (req, res) => {
     res.redirect("/dashboard/index.html");
 });
 
 // ======================================================
-// HEALTH CHECK & DASHBOARD STATS API (SYNCHRONISÉ DASHBOARD & MAPS)
+// HEALTH CHECK & DASHBOARD STATS API
 // ======================================================
 
 app.get("/health", async (req, res) => {
@@ -471,15 +477,12 @@ app.get("/health", async (req, res) => {
 
 app.get("/api/dashboard/stats", async (req, res) => {
     try {
-        // Récupération globale des lots pour le dashboard et les cartes dynamiques
         const { data: products, error, count } = await supabase
             .from("produits_certifies")
             .select("*", { count: "exact" })
             .order("created_at", { ascending: false });
 
-        if (error) {
-            throw error;
-        }
+        if (error) throw error;
 
         let totalScans = 0;
         const companiesMap = {};
@@ -510,7 +513,7 @@ app.get("/api/dashboard/stats", async (req, res) => {
             producteur: p.nom_producteur || "Producteur Agréé",
             date_demande: p.created_at ? new Date(p.created_at).toLocaleDateString("fr-FR") : "Récemment",
             statut: p.statut || "CONFORME",
-            latitude: p.latitude || 3.8480, // Coordonnées par défaut Centre/Cameroun pour les maps si absentes
+            latitude: p.latitude || 3.8480,
             longitude: p.longitude || 11.5021
         }));
 
@@ -545,9 +548,7 @@ app.get("/api/dashboard/stats", async (req, res) => {
     }
 });
 
-// Route additionnelle miroir pour /api/intelligence/stats pour assurer la cohérence complète
 app.get("/api/intelligence/stats", async (req, res) => {
-    // Redirige ou duplique la logique robuste du dashboard pour alimenter le module intelligence
     return app._router.handle({ ...req, url: "/api/dashboard/stats", method: "GET" }, res);
 });
 
@@ -927,11 +928,11 @@ app.use((req, res) => { return apiError(res, 404, "ROUTE_NOT_FOUND", "Route inex
 
 const server = app.listen(PORT, "0.0.0.0", () => {
     console.log("======================================================");
-    console.log(`ANOR Backend v${SERVER_VERSION} (Blindage Actif & Forensic)`);
+    console.log(`ANOR Backend v${SERVER_VERSION} (Blindage Actif & Statique)`);
     console.log(`Port: ${PORT}`);
     console.log(`Environment: ${process.env.NODE_ENV || "development"}`);
     console.log(`CORS origins: ${allowedOrigins.join(", ") || "aucune"}`);
-    console.log("Serveur prêt avec module Vision IA, Sérialisation & Cartographie.");
+    console.log("Serveur prêt avec routage statique complet des dossiers.");
     console.log("======================================================");
 });
 
