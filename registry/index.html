@@ -64,6 +64,11 @@
         .activity-table th, .activity-table td { padding: 14px 12px; text-align: left; border-bottom: 1px solid rgba(255, 255, 255, 0.05); }
         .activity-table th { color: var(--text-muted); font-weight: 600; background: rgba(0,0,0,0.1); }
         .badge-cert { background: rgba(16, 185, 129, 0.15); color: var(--accent-green); padding: 4px 8px; border-radius: 4px; font-size: 11px; font-weight: 600; border: 1px solid rgba(16, 185, 129, 0.3); }
+        .btn-details {
+            background: rgba(59, 130, 246, 0.15); color: var(--accent-blue); border: 1px solid rgba(59, 130, 246, 0.3);
+            padding: 4px 10px; border-radius: 6px; font-size: 11px; font-weight: 600; cursor: pointer; transition: all 0.2s;
+        }
+        .btn-details:hover { background: var(--accent-blue); color: #fff; }
     </style>
 </head>
 <body>
@@ -165,6 +170,7 @@ async function chargerRegistreDonnees() {
         }
     } catch (err) {
         console.error("Erreur de chargement du registre", err);
+        document.getElementById("registryTableBody").innerHTML = `<tr><td colspan="7" style="text-align: center; color: var(--accent-red);">Erreur lors de la récupération des données du registre.</td></tr>`;
     }
 }
 
@@ -175,7 +181,7 @@ function afficherRegistre(data) {
         return;
     }
 
-    tbody.innerHTML = data.map(item => `
+    tbody.innerHTML = data.map((item, index) => `
         <tr>
             <td><strong>${item.numero_lot || 'N/A'}</strong></td>
             <td>${item.producteur || 'Inconnu'}</td>
@@ -183,16 +189,18 @@ function afficherRegistre(data) {
             <td>${(item.quantite || 0).toLocaleString()}</td>
             <td>${item.date_demande || 'Récemment'}</td>
             <td><span class="badge-cert">${item.statut || 'CERTIFIÉ'}</span></td>
-            <td><button class="input-control btn-details-action" style="padding: 4px 8px; cursor:pointer;" data-lot="${item.numero_lot}">Détails</button></td>
+            <td><button class="btn-details" id="btn-details-${index}">Détails</button></td>
         </tr>
     `).join('');
 
-    // Attachement dynamique de l'événement de redirection basé sur l'ID/numéro de lot
-    document.querySelectorAll('.btn-details-action').forEach(btn => {
-        btn.onclick = () => {
-            const lotId = btn.getAttribute('data-lot');
-            window.location.href = `details.html?lot=${encodeURIComponent(lotId)}`;
-        };
+    // Attachement dynamique correct de la redirection avec l'ID/numéro de lot
+    data.forEach((item, index) => {
+        const btnDetails = document.getElementById(`btn-details-${index}`);
+        if(btnDetails) {
+            btnDetails.onclick = () => {
+                window.location.href = `details.html?lot=${encodeURIComponent(item.numero_lot)}`;
+            };
+        }
     });
 }
 

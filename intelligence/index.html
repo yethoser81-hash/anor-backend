@@ -80,7 +80,6 @@
         .metric-card .value { font-size: 24px; font-weight: 700; color: #fff; }
         .metric-card .sub { font-size: 11px; color: var(--text-muted); margin-top: 4px; }
 
-        /* Grilles de graphiques et rapports */
         .analytics-grid { display: grid; grid-template-columns: 2fr 1fr; gap: 20px; }
         @media(max-width: 1200px) { .analytics-grid { grid-template-columns: 1fr; } }
 
@@ -94,7 +93,6 @@
         .analysis-table th { color: var(--text-muted); font-weight: 600; background: rgba(0,0,0,0.15); }
         .badge { background: rgba(16, 185, 129, 0.15); color: var(--accent-green); padding: 3px 8px; border-radius: 4px; font-size: 11px; font-weight: 600; }
         .badge-warning { background: rgba(245, 158, 11, 0.15); color: var(--accent-amber); padding: 3px 8px; border-radius: 4px; font-size: 11px; font-weight: 600; }
-        .badge-success { background: rgba(16, 185, 129, 0.15); color: var(--accent-green); padding: 3px 8px; border-radius: 4px; font-size: 11px; font-weight: 600; }
         .badge-danger { background: rgba(239, 68, 68, 0.15); color: var(--accent-red); padding: 3px 8px; border-radius: 4px; font-size: 11px; font-weight: 600; }
 
         /* Assistant IA Drawer */
@@ -199,7 +197,7 @@
         </div>
     </div>
 
-    <!-- Comportement des Entreprises & Traçabilité Sévère -->
+    <!-- Comportement des Entreprises & Traçabilité Sévère (100% Dynamique / Pas de code en dur) -->
     <div class="panel">
         <h2>🏢 Analyse Comportementale Détaillée par Entreprise</h2>
         <div style="overflow-x: auto;">
@@ -215,25 +213,7 @@
                 </thead>
                 <tbody id="companyBehaviorTable">
                     <tr>
-                        <td><strong>Cameroon Brewing Corp</strong></td>
-                        <td>14</td>
-                        <td>2,450</td>
-                        <td><code>0.01%</code></td>
-                        <td><span class="badge">CONFORME STABLE</span></td>
-                    </tr>
-                    <tr>
-                        <td><strong>Société Industrielle Cameroun</strong></td>
-                        <td>8</td>
-                        <td>1,120</td>
-                        <td><code>0.04%</code></td>
-                        <td><span class="badge">CONFORME STABLE</span></td>
-                    </tr>
-                    <tr>
-                        <td><strong>Agro-Industrie du Mboa</strong></td>
-                        <td>5</td>
-                        <td>830</td>
-                        <td><code>1.15%</code></td>
-                        <td><span class="badge-warning">SURVEILLANCE ACCRUE</span></td>
+                        <td colspan="5" style="text-align: center; color: var(--text-muted);">Chargement des analyses comportementales depuis la base de données...</td>
                     </tr>
                 </tbody>
             </table>
@@ -268,7 +248,6 @@ let pieChart = null;
 
 document.addEventListener("DOMContentLoaded", () => {
     initialiserGraphiques();
-    chargerDonneesAnalytiques();
     loadIntelligenceData();
 });
 
@@ -277,15 +256,14 @@ function toggleAssistantAI() {
 }
 
 function initialiserGraphiques() {
-    // Graphique linéaire d'évolution des scans
     const ctxLine = document.getElementById('scansEvolutionChart').getContext('2d');
     scansChart = new Chart(ctxLine, {
         type: 'line',
         data: {
-            labels: ['08:00', '10:00', '12:00', '14:00', '16:00', '18:00', '20:00'],
+            labels: [],
             datasets: [{
                 label: 'Volume de Scans Validés',
-                data: [120, 450, 890, 1400, 1150, 980, 430],
+                data: [],
                 borderColor: '#3b82f6',
                 backgroundColor: 'rgba(59, 130, 246, 0.1)',
                 borderWidth: 2,
@@ -304,15 +282,14 @@ function initialiserGraphiques() {
         }
     });
 
-    // Graphique en anneau pour les régions
     const ctxPie = document.getElementById('regionsPieChart').getContext('2d');
     pieChart = new Chart(ctxPie, {
         type: 'doughnut',
         data: {
-            labels: ['Centre (Yaoundé)', 'Littoral (Douala)', 'Ouest (Bafoussam)', 'Autres Régions'],
+            labels: [],
             datasets: [{
-                data: [55, 30, 10, 5],
-                backgroundColor: ['#3b82f6', '#10b981', '#f59e0b', '#8b5cf6'],
+                data: [],
+                backgroundColor: ['#3b82f6', '#10b981', '#f59e0b', '#8b5cf6', '#ef4444'],
                 borderWidth: 0
             }]
         },
@@ -327,47 +304,61 @@ function initialiserGraphiques() {
 async function loadIntelligenceData() {
     try {
         const response = await fetch('/api/intelligence/data');
+        if (!response.ok) throw new Error("Erreur de communication avec le serveur");
         const result = await response.json();
         
         if (result.success && result.data) {
-            document.getElementById('volume-global').innerText = result.data.volumeGlobal;
-            document.getElementById('pic-affluence').innerText = result.data.picAffluence;
-            document.getElementById('indice-conformite').innerText = result.data.indiceConformite;
-            document.getElementById('entreprises-auditees').innerText = result.data.entreprisesAuditees;
-            
-            // Remplissage du tableau comportemental dynamique
-            const tbody = document.querySelector('#table-comportement tbody');
+            // Mise à jour des KPIs
+            document.getElementById('volume-global').innerText = result.data.volumeGlobal ?? '0';
+            document.getElementById('pic-affluence').innerText = result.data.picAffluence ?? '--';
+            document.getElementById('indice-conformite').innerText = result.data.indiceConformite ?? '100%';
+            document.getElementById('entreprises-auditees').innerText = result.data.entreprisesAuditees ?? '0';
+            if(result.data.statPeakLocation) {
+                document.getElementById('statPeakLocation').innerText = result.data.statPeakLocation;
+            }
+
+            // Mise à jour dynamique du tableau comportemental (Aucun code en dur)
+            const tbody = document.getElementById('companyBehaviorTable');
             if (tbody) {
-                tbody.innerHTML = '';
-                result.data.comportement.forEach(row => {
-                    tbody.innerHTML += `
-                        <tr>
-                            <td>${row.entreprise}</td>
-                            <td>${row.lotsEmis}</td>
-                            <td>${row.scansAssocies}</td>
-                            <td>${row.risque}</td>
-                            <td><span class="badge ${row.statutConformite === 'Conforme' ? 'badge-success' : 'badge-danger'}">${row.statutConformite}</span></td>
-                        </tr>
-                    `;
-                });
+                const comportementList = result.data.comportement || [];
+                if (comportementList.length === 0) {
+                    tbody.innerHTML = `<tr><td colspan="5" style="text-align: center; color: var(--text-muted);">Aucune donnée comportementale disponible dans la base.</td></tr>`;
+                } else {
+                    tbody.innerHTML = comportementList.map(row => {
+                        let badgeClass = 'badge-success';
+                        if(row.statutConformite && row.statutConformite.includes('SURVEILLANCE')) {
+                            badgeClass = 'badge-warning';
+                        } else if(row.statutConformite && row.statutConformite.includes('CRITIQUE')) {
+                            badgeClass = 'badge-danger';
+                        }
+                        return `
+                            <tr>
+                                <td><strong>${row.entreprise || 'Inconnu'}</strong></td>
+                                <td>${row.lotsEmis || 0}</td>
+                                <td>${(row.scansAssocies || 0).toLocaleString()}</td>
+                                <td><code>${row.risque || '0.00%'}</code></td>
+                                <td><span class="badge ${badgeClass}">${row.statutConformite || 'CONFORME'}</span></td>
+                            </tr>
+                        `;
+                    }).join('');
+                }
+            }
+
+            // Mise à jour dynamique des graphiques si les données existent
+            if(scansChart && result.data.chartTimeline) {
+                scansChart.data.labels = result.data.chartTimeline.labels || [];
+                scansChart.data.datasets[0].data = result.data.chartTimeline.values || [];
+                scansChart.update();
+            }
+
+            if(pieChart && result.data.regionsDistribution) {
+                pieChart.data.labels = result.data.regionsDistribution.labels || [];
+                pieChart.data.datasets[0].data = result.data.regionsDistribution.values || [];
+                pieChart.update();
             }
         }
-    } catch (err) {
-        console.error("Erreur de chargement Intelligence:", err);
-    }
-}
 
-async function chargerDonneesAnalytiques() {
-    try {
-        const response = await fetch('/api/dashboard/stats');
-        if (!response.ok) throw new Error("Erreur serveur");
-        const data = await response.json();
-
-        if(data.stats) {
-            document.getElementById("statPeakHour").textContent = "14:00 - 15:00";
-            document.getElementById("statPeakLocation").textContent = "Yaoundé (Centre)";
-        }
-
+        // Indicateur serveur en ligne
         document.getElementById("serverDot").style.background = "var(--accent-green)";
         document.getElementById("serverDot").style.boxShadow = "0 0 8px var(--accent-green)";
         document.getElementById("serverStatusText").textContent = "SYNCHRONISÉ AVEC LA BDD";
@@ -375,11 +366,14 @@ async function chargerDonneesAnalytiques() {
         document.getElementById("serverStatusBadge").style.color = "var(--accent-green)";
 
     } catch (err) {
+        console.error("Erreur de chargement Intelligence:", err);
         document.getElementById("serverDot").style.background = "var(--accent-red)";
         document.getElementById("serverDot").style.boxShadow = "0 0 8px var(--accent-red)";
-        document.getElementById("serverStatusText").textContent = "MODE HORS-LIGNE (STATISTIQUES LOCALES)";
+        document.getElementById("serverStatusText").textContent = "ERREUR DE CONNEXION BDD";
         document.getElementById("serverStatusBadge").style.borderColor = "rgba(239, 68, 68, 0.3)";
         document.getElementById("serverStatusBadge").style.color = "var(--accent-red)";
+
+        document.getElementById('companyBehaviorTable').innerHTML = `<tr><td colspan="5" style="text-align: center; color: var(--accent-red);">Impossible de récupérer les données depuis le serveur.</td></tr>`;
     }
 }
 
@@ -398,13 +392,14 @@ async function envoyerRequeteAI() {
     input.value = "";
     container.scrollTop = container.scrollHeight;
 
+    // Simulation de réponse de l'assistant connectée au contexte de la BDD
     setTimeout(() => {
-        let reponse = "📊 **Analyse IA :** L'examen approfondi des courbes de trafic montre un pic majeur concentré sur l'axe Yaoundé-Douala entre 13h et 15h. Aucun comportement de duplication anormale n'affecte la stabilité globale des entreprises répertoriées.";
+        let reponse = "📊 **Analyse IA :** L'examen des flux en direct montre une stabilité générale des requêtes enregistrées sur le registre.";
         const query = texte.toLowerCase();
         if(query.includes("pic") || query.includes("heure")) {
-            reponse = "📈 **Pics d'Activité :** Le pic critique est enregistré à 14:00 avec près de 1 400 requêtes de validation simultanées sur les sceaux.";
+            reponse = "📈 **Pics d'Activité :** Analyse croisée des journaux de la base de données en cours pour identifier le pic critique de la période.";
         } else if(query.includes("entreprise") || query.includes("risque")) {
-            reponse = "⚠️ **Audit Entreprises :** La majorité des producteurs maintiennent un indice de risque inférieur à 0.05%. Une vigilance est maintenue sur les lots de l'Agro-Industrie du Mboa.";
+            reponse = "⚠️ **Audit Entreprises :** Le calcul des indices de risque est mis à jour en temps réel à partir des transactions validées.";
         }
         container.innerHTML += `<div class="chat-msg ai">${reponse}</div>`;
         container.scrollTop = container.scrollHeight;
