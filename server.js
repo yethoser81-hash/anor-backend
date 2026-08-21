@@ -2,7 +2,7 @@
  * ======================================================
  * SYSTEME SOUVERAIN DE CERTIFICATION ANOR
  * SERVER CORE (VERSION ARCHITECTURE HAUTE SÉCURITÉ)
- * Version: 17.9.3 (Ajout route /api/intelligence/chat connectée à Gemini & Supabase)
+ * Version: 17.9.4 (Ajout cache intelligent pour les scans Gemini & optimisation vitesse)
  * ======================================================
  */
 
@@ -34,10 +34,25 @@ if (process.env.GEMINI_API_KEY) {
 }
 
 // ======================================================
+// CACHE INTELLIGENT DE VISION (POUR RÉPONSE EN < 2 SECONDES)
+// ======================================================
+const scanCache = new Map();
+const SCAN_CACHE_TTL = 10 * 60 * 1000; // 10 minutes
+
+setInterval(() => {
+    const now = Date.now();
+    for (const [key, entry] of scanCache.entries()) {
+        if (now - entry.time > SCAN_CACHE_TTL) {
+            scanCache.delete(key);
+        }
+    }
+}, 60000);
+
+// ======================================================
 // VERSION / CONFIGURATION
 // ======================================================
 
-const SERVER_VERSION = "17.9.3";
+const SERVER_VERSION = "17.9.4";
 const VISUAL_VERSION = 1;
 const VISUAL_BITS_LENGTH = 51;
 const isProduction = process.env.NODE_ENV === "production";
@@ -846,7 +861,7 @@ Système Souverain de Certification - ANOR Engine ${SERVER_VERSION}
 );
 
 // ======================================================
-// VERIFICATION DU SCEAU AVEC INTÉGRATION GEMINI
+// VERIFICATION DU SCEAU AVEC INTÉGRATION GEMINI (OPTIMISÉ CACHE)
 // ======================================================
 
 app.post(
@@ -864,6 +879,17 @@ app.post(
                 scannedMatrix, lot, visualBits: requestVisualBits, visualSignature: requestVisualSignature,
                 location, locationMethod, deviceMetadata
             } = req.body;
+
+            // Vérification rapide dans le cache si l'image brute est envoyée en chaîne base64
+            let imageCacheKey = null;
+            if (typeof scannedMatrix === "string" && scannedMatrix.startsWith("data:image")) {
+                imageCacheKey = sha256Hex(scannedMatrix);
+                if (scanCache.has(imageCacheKey)) {
+                    const cachedResult = scanCache.get(imageCacheKey);
+                    console.log("[ANOR CACHE] Résultat trouvé dans le cache de vision (Temps de réponse instantané).");
+                    return apiSuccess(res, { ...cachedResult, processingTime: Date.now() - startTime, processingTimeMs: Date.now() - startTime });
+                }
+            }
 
             const normalizedRequestBits = normalizeVisualBits(requestVisualBits || scannedMatrix?.bits || scannedMatrix?.visualBits);
             const requestSignature = typeof requestVisualSignature === "string" ? requestVisualSignature.trim() : (typeof scannedMatrix?.signature === "string" ? scannedMatrix.signature.trim() : (normalizedRequestBits ? `ANOR51:${normalizedRequestBits}` : null));
@@ -987,7 +1013,7 @@ app.post(
 
             const score = `${(matchConfidence * 100).toFixed(1)}%`;
 
-            return apiSuccess(res, {
+            const responsePayload = {
                 status: "AUTHENTIQUE", verified: true, confidence: matchConfidence, score, confidenceScore: matchConfidence,
                 security_alert: warningFlag, securityAlert: warningFlag, lot: row.lot, batch: row.lot,
                 nom_produit: row.nom_produit || "Produit Certifié Conforme", nomProduit: row.nom_produit || "Produit Certifié Conforme",
@@ -1002,7 +1028,14 @@ app.post(
                 prodDate: row.date_fabrication || "N/A", expDate: row.date_peremption || "N/A",
                 norme: "ANOR NC-ISO", processingTime: Date.now() - startTime, processingTimeMs: Date.now() - startTime,
                 engineVersion: SERVER_VERSION, visualVersion: VISUAL_VERSION, verificationMode, serverTimestamp: Date.now()
-            });
+            };
+
+            // Mémorisation dans le cache si une clé d'image existe
+            if (imageCacheKey) {
+                scanCache.set(imageCacheKey, { ...responsePayload, time: Date.now() });
+            }
+
+            return apiSuccess(res, responsePayload);
         } catch (error) {
             console.error("Erreur vérification:", error);
             return apiError(res, 500, "SERVER_ERROR", isProduction ? "Erreur interne pendant la vérification." : error.message);
@@ -1065,7 +1098,7 @@ app.use((req, res) => { return apiError(res, 404, "ROUTE_NOT_FOUND", "Route inex
 
 const server = app.listen(PORT, "0.0.0.0", () => {
     console.log("======================================================");
-    console.log(`ANOR Backend v${SERVER_VERSION} (Blindage Actif & Statique)`);
+    console.log(`ANOR Backend v${SERVER_VERSION} (Blindage Actif & Cache Vision Optimisé)`);
     console.log(`Port: ${PORT}`);
     console.log(`Environment: ${process.env.NODE_ENV || "development"}`);
     console.log(`CORS origins: ${allowedOrigins.join(", ") || "aucune"}`);
