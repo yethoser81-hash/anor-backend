@@ -94,6 +94,8 @@
         .analysis-table th { color: var(--text-muted); font-weight: 600; background: rgba(0,0,0,0.15); }
         .badge { background: rgba(16, 185, 129, 0.15); color: var(--accent-green); padding: 3px 8px; border-radius: 4px; font-size: 11px; font-weight: 600; }
         .badge-warning { background: rgba(245, 158, 11, 0.15); color: var(--accent-amber); padding: 3px 8px; border-radius: 4px; font-size: 11px; font-weight: 600; }
+        .badge-success { background: rgba(16, 185, 129, 0.15); color: var(--accent-green); padding: 3px 8px; border-radius: 4px; font-size: 11px; font-weight: 600; }
+        .badge-danger { background: rgba(239, 68, 68, 0.15); color: var(--accent-red); padding: 3px 8px; border-radius: 4px; font-size: 11px; font-weight: 600; }
 
         /* Assistant IA Drawer */
         .ai-drawer {
@@ -160,22 +162,22 @@
     <div class="dashboard-grid">
         <div class="metric-card">
             <div class="label">Volume Global Scanné</div>
-            <div class="value" id="statTotalScans">--</div>
+            <div class="value" id="volume-global">--</div>
             <div class="sub">Évolution sur la période</div>
         </div>
         <div class="metric-card">
             <div class="label">Pic d'Affluence National</div>
-            <div class="value" id="statPeakHour">--</div>
+            <div class="value" id="pic-affluence">--</div>
             <div class="sub" id="statPeakLocation">Heure & Zone critique</div>
         </div>
         <div class="metric-card">
             <div class="label">Indice de Conformité Global</div>
-            <div class="value" id="statCompliance" style="color: var(--accent-green);">--</div>
+            <div class="value" id="indice-conformite" style="color: var(--accent-green);">--</div>
             <div class="sub">Taux de sceaux authentiques</div>
         </div>
         <div class="metric-card">
             <div class="label">Entreprises Auditées</div>
-            <div class="value" id="statCompaniesCount">--</div>
+            <div class="value" id="entreprises-auditees">--</div>
             <div class="sub">Actifs sur le réseau</div>
         </div>
     </div>
@@ -201,7 +203,7 @@
     <div class="panel">
         <h2>🏢 Analyse Comportementale Détaillée par Entreprise</h2>
         <div style="overflow-x: auto;">
-            <table class="analysis-table">
+            <table class="analysis-table" id="table-comportement">
                 <thead>
                     <tr>
                         <th>Entreprise / Producteur</th>
@@ -213,7 +215,25 @@
                 </thead>
                 <tbody id="companyBehaviorTable">
                     <tr>
-                        <td colspan="5" style="text-align: center; color: var(--text-muted);">Chargement des matrices comportementales...</td>
+                        <td><strong>Cameroon Brewing Corp</strong></td>
+                        <td>14</td>
+                        <td>2,450</td>
+                        <td><code>0.01%</code></td>
+                        <td><span class="badge">CONFORME STABLE</span></td>
+                    </tr>
+                    <tr>
+                        <td><strong>Société Industrielle Cameroun</strong></td>
+                        <td>8</td>
+                        <td>1,120</td>
+                        <td><code>0.04%</code></td>
+                        <td><span class="badge">CONFORME STABLE</span></td>
+                    </tr>
+                    <tr>
+                        <td><strong>Agro-Industrie du Mboa</strong></td>
+                        <td>5</td>
+                        <td>830</td>
+                        <td><code>1.15%</code></td>
+                        <td><span class="badge-warning">SURVEILLANCE ACCRUE</span></td>
                     </tr>
                 </tbody>
             </table>
@@ -249,6 +269,7 @@ let pieChart = null;
 document.addEventListener("DOMContentLoaded", () => {
     initialiserGraphiques();
     chargerDonneesAnalytiques();
+    loadIntelligenceData();
 });
 
 function toggleAssistantAI() {
@@ -303,6 +324,39 @@ function initialiserGraphiques() {
     });
 }
 
+async function loadIntelligenceData() {
+    try {
+        const response = await fetch('/api/intelligence/data');
+        const result = await response.json();
+        
+        if (result.success && result.data) {
+            document.getElementById('volume-global').innerText = result.data.volumeGlobal;
+            document.getElementById('pic-affluence').innerText = result.data.picAffluence;
+            document.getElementById('indice-conformite').innerText = result.data.indiceConformite;
+            document.getElementById('entreprises-auditees').innerText = result.data.entreprisesAuditees;
+            
+            // Remplissage du tableau comportemental dynamique
+            const tbody = document.querySelector('#table-comportement tbody');
+            if (tbody) {
+                tbody.innerHTML = '';
+                result.data.comportement.forEach(row => {
+                    tbody.innerHTML += `
+                        <tr>
+                            <td>${row.entreprise}</td>
+                            <td>${row.lotsEmis}</td>
+                            <td>${row.scansAssocies}</td>
+                            <td>${row.risque}</td>
+                            <td><span class="badge ${row.statutConformite === 'Conforme' ? 'badge-success' : 'badge-danger'}">${row.statutConformite}</span></td>
+                        </tr>
+                    `;
+                });
+            }
+        }
+    } catch (err) {
+        console.error("Erreur de chargement Intelligence:", err);
+    }
+}
+
 async function chargerDonneesAnalytiques() {
     try {
         const response = await fetch('/api/dashboard/stats');
@@ -310,50 +364,8 @@ async function chargerDonneesAnalytiques() {
         const data = await response.json();
 
         if(data.stats) {
-            document.getElementById("statTotalScans").textContent = data.stats.totalScans || "5,840";
             document.getElementById("statPeakHour").textContent = "14:00 - 15:00";
             document.getElementById("statPeakLocation").textContent = "Yaoundé (Centre)";
-            document.getElementById("statCompliance").textContent = data.stats.precision || "99.85%";
-            document.getElementById("statCompaniesCount").textContent = data.companiesCount || "24";
-        }
-
-        // Tableau comportemental des entreprises
-        if(data.companies && data.companies.length > 0) {
-            const tbody = document.getElementById("companyBehaviorTable");
-            tbody.innerHTML = data.companies.map(c => `
-                <tr>
-                    <td><strong>${c.nom}</strong></td>
-                    <td>${c.lots_emis}</td>
-                    <td>${c.scans_total}</td>
-                    <td><code>${c.indice_risque || '0.02%'}</code></td>
-                    <td><span class="${c.alerte ? 'badge-warning' : 'badge'}">${c.statut || 'CONFORME STABLE'}</span></td>
-                </tr>
-            `).join('');
-        } else {
-            // Données simulées robustes si le back-end ne renvoie pas encore la liste spécifique
-            document.getElementById("companyBehaviorTable").innerHTML = `
-                <tr>
-                    <td><strong>Cameroon Brewing Corp</strong></td>
-                    <td>14</td>
-                    <td>2,450</td>
-                    <td><code>0.01%</code></td>
-                    <td><span class="badge">CONFORME STABLE</span></td>
-                </tr>
-                <tr>
-                    <td><strong>Société Industrielle Cameroun</strong></td>
-                    <td>8</td>
-                    <td>1,120</td>
-                    <td><code>0.04%</code></td>
-                    <td><span class="badge">CONFORME STABLE</span></td>
-                </tr>
-                <tr>
-                    <td><strong>Agro-Industrie du Mboa</strong></td>
-                    <td>5</td>
-                    <td>830</td>
-                    <td><code>1.15%</code></td>
-                    <td><span class="badge-warning">SURVEILLANCE ACCRUE</span></td>
-                </tr>
-            `;
         }
 
         document.getElementById("serverDot").style.background = "var(--accent-green)";

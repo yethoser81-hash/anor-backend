@@ -83,7 +83,6 @@
         <a href="../map_surveillance/index.html">🗺️ Surveillance</a>
         <a href="../product_audit/index.html">📦 Audit Produit</a>
         <a href="../intelligence/index.html">🧠 Intelligence</a>
-       
     </nav>
     <div class="serverState">
         <div id="serverLed" class="led"></div>
@@ -158,7 +157,6 @@ async function verifierServeurEtChargerRegistre() {
 
 async function chargerRegistreDonnees() {
     try {
-        // Utilise la même route ou une dédiée pour lister l'ensemble du registre
         const response = await fetch('/api/dashboard/stats');
         const json = await response.json();
         if(json.success) {
@@ -185,9 +183,17 @@ function afficherRegistre(data) {
             <td>${(item.quantite || 0).toLocaleString()}</td>
             <td>${item.date_demande || 'Récemment'}</td>
             <td><span class="badge-cert">${item.statut || 'CERTIFIÉ'}</span></td>
-            <td><button class="input-control" style="padding: 4px 8px; cursor:pointer;" onclick="voirDetails('${item.numero_lot}')">Détails</button></td>
+            <td><button class="input-control btn-details-action" style="padding: 4px 8px; cursor:pointer;" data-lot="${item.numero_lot}">Détails</button></td>
         </tr>
     `).join('');
+
+    // Attachement dynamique de l'événement de redirection basé sur l'ID/numéro de lot
+    document.querySelectorAll('.btn-details-action').forEach(btn => {
+        btn.onclick = () => {
+            const lotId = btn.getAttribute('data-lot');
+            window.location.href = `details.html?lot=${encodeURIComponent(lotId)}`;
+        };
+    });
 }
 
 function filtrerRegistre() {
@@ -203,10 +209,6 @@ function filtrerRegistre() {
     });
 
     afficherRegistre(filtered);
-}
-
-function voirDetails(numLot) {
-    alert("Ouverture de la fiche d'audit et de traçabilité pour le lot : " + numLot);
 }
 
 function exporterRegistre() {
