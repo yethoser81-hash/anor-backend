@@ -555,6 +555,10 @@ app.get("/api/intelligence/stats", async (req, res) => {
 // ROUTE API : SURVEILLANCE NATIONALE
 // ======================================================
 
+// ======================================================
+// ROUTE API : SURVEILLANCE NATIONALE (100% DYNAMIQUE)
+// ======================================================
+
 app.get("/api/surveillance/data", async (req, res) => {
     try {
         const { region, statut } = req.query;
@@ -568,6 +572,7 @@ app.get("/api/surveillance/data", async (req, res) => {
         let alertesCount = 0;
         const history = [];
         const alerts = [];
+        const points = [];
 
         if (products && products.length > 0) {
             products.forEach(p => {
@@ -580,8 +585,18 @@ app.get("/api/surveillance/data", async (req, res) => {
                     alerts.push({
                         titre: `Alerte sur le lot ${p.lot || p.certificate_code}`,
                         source: p.nom_producteur || "Producteur Agréé",
-                        temps: "Récemment",
+                        temps: p.created_at ? new Date(p.created_at).toLocaleDateString("fr-FR") : "Récemment",
                         niveau: "danger"
+                    });
+                }
+
+                // Extraction des coordonnées réelles si disponibles dans la table
+                if (p.latitude && p.longitude) {
+                    points.push({
+                        nom: `${p.nom_produit || 'Produit'} (${p.lot || 'Lot'})`,
+                        coords: [Number(p.latitude), Number(p.longitude)],
+                        type: stat,
+                        details: `Producteur: ${p.nom_producteur || 'N/A'} - Scans: ${scans}`
                     });
                 }
 
@@ -590,7 +605,7 @@ app.get("/api/surveillance/data", async (req, res) => {
                     produit: p.nom_produit || "Produit Certifié",
                     lot: p.lot || p.certificate_code || "N/A",
                     entreprise: p.nom_producteur || "Inconnu",
-                    ville: "Yaoundé",
+                    ville: p.ville || "Yaoundé",
                     region: region || "Centre",
                     inspecteur: "Système AI",
                     resultat: stat
@@ -598,20 +613,14 @@ app.get("/api/surveillance/data", async (req, res) => {
             });
         }
 
-        const points = [
-            { nom: "Yaoundé (Centre)", coords: [3.848, 11.502], type: "CONFORME", details: "Contrôles unitaires actifs" },
-            { nom: "Douala (Littoral)", coords: [4.051, 9.767], type: "CONFORME", details: "Traçabilité portuaire active" },
-            { nom: "Bafoussam (Ouest)", coords: [5.475, 10.416], type: "CONFORME", details: "Inspection agro-alimentaire" }
-        ];
-
         return apiSuccess(res, {
             stats: {
-                scans: totalScans > 0 ? totalScans.toLocaleString("fr-FR") : "1,420",
-                inspecteurs: "48",
+                scans: totalScans.toLocaleString("fr-FR"),
+                inspecteurs: "Actifs",
                 alertes: String(alertesCount),
-                produits: products ? `${products.length * 125}k` : "640k"
+                produits: products ? `${products.length}` : "0"
             },
-            points,
+            points, // Uniquement les points réels issus de la base de données
             alerts: alerts.length > 0 ? alerts : [
                 { titre: "Réseau de surveillance stable", source: "IA ANOR", temps: "En direct", niveau: "normal" }
             ],
