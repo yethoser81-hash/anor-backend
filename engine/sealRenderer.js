@@ -283,7 +283,7 @@ const sealRenderer = {
         ctx.restore();
 
         // ------------------------------------------------------------
-        // 4. LOGO CENTRAL
+        // 4. LOGO CENTRAL (Sécurisé)
         // ------------------------------------------------------------
         const logoPath =
             options.logoPath ||
@@ -301,8 +301,10 @@ const sealRenderer = {
                     logoSize
                 );
             } catch (error) {
-                console.error('[sealRenderer] Erreur logo :', error);
+                console.error('[sealRenderer] Erreur lors du chargement du logo :', error);
             }
+        } else {
+            console.warn('[sealRenderer] Avertissement : Le fichier logo est introuvable au chemin :', logoPath);
         }
 
         // ------------------------------------------------------------
