@@ -2,7 +2,7 @@
  * ======================================================
  * SYSTEME SOUVERAIN DE CERTIFICATION ANOR
  * SERVER CORE (VERSION ARCHITECTURE HAUTE SÉCURITÉ)
- * Version: 17.9.5 (Optimisation asynchrone des sérialisations en < 3s)
+ * Version: 17.9.4 (Ajout cache intelligent pour les scans Gemini & optimisation vitesse)
  * ======================================================
  */
 
@@ -52,7 +52,7 @@ setInterval(() => {
 // VERSION / CONFIGURATION
 // ======================================================
 
-const SERVER_VERSION = "17.9.5";
+const SERVER_VERSION = "17.9.4";
 const VISUAL_VERSION = 1;
 const VISUAL_BITS_LENGTH = 51;
 const isProduction = process.env.NODE_ENV === "production";
@@ -406,11 +406,11 @@ async function analyzeSealWithGemini(imageBuffer, mimeType = "image/jpeg") {
 }
 
 // ======================================================
-// MOTEUR DE SÉRIALISATION UNITAIRE & MANIFESTE INDUSTRIEL (OPTIMISÉ BATCH PARALLÈLE)
+// MOTEUR DE SÉRIALISATION UNITAIRE & MANIFESTE INDUSTRIEL
 // ======================================================
 
 async function generateUnitSerialsAndManifest(lotCode, totalQuantity, masterSignature) {
-    const batchSize = 1000; // Augmenté pour les inserts par gros blocs
+    const batchSize = 5000;
     let csvContent = "Index,Numero_De_Serie,Hachage_Securise\n";
     const unitsToInsert = [];
 
@@ -434,24 +434,18 @@ async function generateUnitSerialsAndManifest(lotCode, totalQuantity, masterSign
         csvContent += `${i},${serialNumber},${secureUnitHash}\n`;
 
         if (unitsToInsert.length >= batchSize || i === totalQuantity) {
-            const chunk = [...unitsToInsert];
-            unitsToInsert.length = 0;
-
-            // Exécution non bloquante par lot
-            supabase
+            const { error } = await supabase
                 .from("produits_unitaires_serials")
-                .upsert(chunk, { onConflict: "serial_number" })
-                .then(({ error }) => {
-                    if (error) {
-                        console.error(`[SERIALIZATION BACKGROUND ERROR] Lot ${lotCode}:`, error.message);
-                    }
-                })
-                .catch(err => {
-                    console.error(`[SERIALIZATION BACKGROUND EXCEPTION] Lot ${lotCode}:`, err.message);
-                });
+                .upsert(unitsToInsert, { onConflict: "serial_number" });
+
+            if (error) {
+                console.error(`[SERIALIZATION ERROR] Erreur sur le bloc se terminant à l'index ${i}:`, error.message);
+                throw error;
+            }
+            unitsToInsert.length = 0;
         }
     }
-    console.log(`[SERIALIZATION] ${totalQuantity} unités lancées en arrière-plan pour le lot ${lotCode}.`);
+    console.log(`[SERIALIZATION] ${totalQuantity} unités sérialisées avec succès pour le lot ${lotCode}.`);
     return csvContent;
 }
 
@@ -592,6 +586,7 @@ app.post("/api/intelligence/chat", async (req, res) => {
             return apiError(res, 400, "INVALID_PROMPT", "Le message de l'assistant est requis.");
         }
 
+        // Récupération des données globales de la base pour fournir du contexte à l'IA
         const { data: products } = await supabase.from("produits_certifies").select("*").limit(50);
         
         let contextSummary = "Aucun produit enregistré pour le moment.";
@@ -617,6 +612,7 @@ app.post("/api/intelligence/chat", async (req, res) => {
             const replyText = chatResponse.text ? chatResponse.text.trim() : "Analyse validée par le moteur ANOR Core.";
             return apiSuccess(res, { reply: replyText });
         } else {
+            // Mode fallback si la clé Gemini n'est pas configurée
             return apiSuccess(res, {
                 reply: `Synthèse analytique (Mode Local) : L'examen des flux enregistrés pour "${prompt}" indique une conformité stable sur l'ensemble du réseau national.`
             });
@@ -709,7 +705,7 @@ app.get("/api/surveillance/data", async (req, res) => {
 });
 
 // ======================================================
-// GENERATION DU SCEAU & KIT DE SÉRIALISATION (OPTIMISÉ ASYNCHRONE < 3s)
+// GENERATION DU SCEAU & KIT DE SÉRIALISATION
 // ======================================================
 
 app.post(
@@ -817,7 +813,6 @@ app.post(
 
             if (error) { console.error("[SUPABASE INSERT]", error); throw error; }
 
-            // L'insertion des numéros de série se fait désormais de manière asynchrone (en arrière-plan)
             const csvManifestContent = await generateUnitSerialsAndManifest(certificateCode, parsedQuantite, secureSignature);
 
             const printNoticeContent = `
@@ -852,7 +847,7 @@ Système Souverain de Certification - ANOR Engine ${SERVER_VERSION}
             const zipBuffer = await zip.generateAsync({ type: "nodebuffer", compression: "DEFLATE", compressionOptions: { level: 9 } });
 
             return apiSuccess(res, {
-                message: "Sceau généré instantanément. Sérialisation en cours en arrière-plan.", lot, sha256_hash: secureSignature, visualVersion: VISUAL_VERSION, visualBits, visualSignature,
+                message: "Sceau et sérialisation unitaire générés avec succès.", lot, sha256_hash: secureSignature, visualVersion: VISUAL_VERSION, visualBits, visualSignature,
                 imageUrl: `data:image/png;base64,${rawBase64}`,
                 zipUrl: `data:application/zip;base64,${zipBuffer.toString("base64")}`,
                 data: data?.[0] || null,
@@ -885,6 +880,7 @@ app.post(
                 location, locationMethod, deviceMetadata
             } = req.body;
 
+            // Vérification rapide dans le cache si l'image brute est envoyée en chaîne base64
             let imageCacheKey = null;
             if (typeof scannedMatrix === "string" && scannedMatrix.startsWith("data:image")) {
                 imageCacheKey = sha256Hex(scannedMatrix);
@@ -1034,6 +1030,7 @@ app.post(
                 engineVersion: SERVER_VERSION, visualVersion: VISUAL_VERSION, verificationMode, serverTimestamp: Date.now()
             };
 
+            // Mémorisation dans le cache si une clé d'image existe
             if (imageCacheKey) {
                 scanCache.set(imageCacheKey, { ...responsePayload, time: Date.now() });
             }
@@ -1101,7 +1098,7 @@ app.use((req, res) => { return apiError(res, 404, "ROUTE_NOT_FOUND", "Route inex
 
 const server = app.listen(PORT, "0.0.0.0", () => {
     console.log("======================================================");
-    console.log(`ANOR Backend v${SERVER_VERSION} (Sérialisation Asynchrone & Cache Ultra-Rapide)`);
+    console.log(`ANOR Backend v${SERVER_VERSION} (Blindage Actif & Cache Vision Optimisé)`);
     console.log(`Port: ${PORT}`);
     console.log(`Environment: ${process.env.NODE_ENV || "development"}`);
     console.log(`CORS origins: ${allowedOrigins.join(", ") || "aucune"}`);
