@@ -378,10 +378,7 @@ async function analyzeSealWithGemini(imageBuffer, mimeType = "image/jpeg") {
             contents: [
                 imagePart,
                 "Analyse cette image de sceau de certification ANOR. Extrais textuellement et fidèlement le numéro de lot (ex: LOT 54P-2026) et toute référence additionnelle visible (ex: DM / 000 000). Réponds STRICTEMENT au format JSON pur sans balises markdown, avec les clés suivantes : 'lot' (string ou null), 'reference' (string ou null), 'confidence' (nombre entre 0 et 1)."
-            ],
-            config: {
-                thinkingConfig: { thinkingBudget: 0 } // Désactivation du thinking budget pour garantir une réponse < 2s[cite: 17]
-            }
+            ]
         });  
 
         const textResponse = response.text ? response.text.trim() : "";
@@ -596,10 +593,7 @@ app.post("/api/intelligence/chat", async (req, res) => {
                 contents: [
                     `Tu es l'assistant statistique intelligent de l'ANOR (Agence des Normes et de la Qualité du Cameroun). Réponds de manière professionnelle, analytique et claire à la question de l'utilisateur concernant les flux, les scans ou les entreprises. Voici un extrait des données actuelles de la base : ${contextSummary}`,
                     `Question de l'utilisateur : ${prompt}`
-                ],
-                config: {
-                    thinkingConfig: { thinkingBudget: 0 } //[cite: 17]
-                }
+                ]
             });
 
             const replyText = chatResponse.text ? chatResponse.text.trim() : "Analyse validée par le moteur ANOR Core.";
@@ -953,7 +947,7 @@ app.post(
                             }
                         }
 
-                        // Optimisation Hamming via RPC PostgreSQL (plus de chargement de 1000 lignes en JS)
+                        // Optimisation Hamming via RPC PostgreSQL
                         if (!row && bitsToMatch) {
                             const { data: rpcMatches, error: rpcError } = await supabase.rpc("match_visual_bits_hamming", {
                                 target_bits: bitsToMatch,
@@ -989,7 +983,7 @@ app.post(
             const updatePayload = { scan_count: currentScanCount, last_scan_location: currentLocation, location_method: locationMethod || null, last_scanned_at: new Date() };
             if (deviceMetadata) { updatePayload.device_metadata = deviceMetadata; }
 
-            // Délégation non bloquante de la mise à jour et télémétrie vers le worker asynchrone[cite: 17]
+            // Délégation non bloquante de la mise à jour et télémétrie vers le worker asynchrone
             if (taskQueue && typeof taskQueue.addJob === "function") {
                 taskQueue.addJob(`scan-update-${row.lot}-${Date.now()}`, async () => {
                     await supabase.from("produits_certifies").update(updatePayload).eq("lot", row.lot);
