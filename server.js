@@ -989,9 +989,11 @@ app.post(
                     await supabase.from("produits_certifies").update(updatePayload).eq("lot", row.lot);
                 }, { type: 'background-sync', priority: 'high' });
             } else {
-                supabase.from("produits_certifies").update(updatePayload).eq("lot", row.lot)
-                    .then(({ error }) => { if (error) { console.warn("Mise à jour scan échouée:", error.message); } })
-                    .catch(error => { console.warn("Exception mise à jour scan:", error.message); });
+                setImmediate(() => {
+                    supabase.from("produits_certifies").update(updatePayload).eq("lot", row.lot)
+                        .then(({ error }) => { if (error) { console.warn("Mise à jour scan échouée:", error.message); } })
+                        .catch(error => { console.warn("Exception mise à jour scan:", error.message); });
+                });
             }
 
             const score = `${(matchConfidence * 100).toFixed(1)}%`;
