@@ -1,8 +1,8 @@
-// worker.js - Gestionnaire de file d'attente contrôlé pour ANOR-CHECK
+// worker.js - Gestionnaire de file d'attente contrôlé pour ANOR-CHECK[cite: 18]
 
 /**
  * Normalise la structure des payloads de télémétrie et de logs
- * pour garantir un format uniforme en base / Supabase.
+ * pour garantir un format uniforme en base / Supabase.[cite: 18]
  */
 function normalizePayload(type, payload = {}) {
     const timestamp = new Date().toISOString();
@@ -57,7 +57,7 @@ class TaskQueue {
     }
 
     /**
-     * Enregistre une tâche dans la file d'attente prioritaire.
+     * Enregistre une tâche dans la file d'attente prioritaire.[cite: 18]
      * 
      * @param {string} jobId - Identifiant unique de la tâche.
      * @param {Function} taskFunction - Fonction asynchrone à exécuter.
@@ -96,7 +96,7 @@ class TaskQueue {
     }
 
     /**
-     * Moteur de traitement contrôlé de la file d'attente.
+     * Moteur de traitement contrôlé de la file d'attente.[cite: 18]
      */
     async processQueue() {
         if (this.activeJobs >= this.maxConcurrentJobs) {
@@ -119,7 +119,7 @@ class TaskQueue {
     }
 
     /**
-     * Exécute la tâche individuelle isolée.
+     * Exécute la tâche individuelle isolée.[cite: 18]
      */
     async executeJob(job) {
         const { jobId, taskFunction, options } = job;
@@ -162,7 +162,7 @@ class TaskQueue {
     }
 
     /**
-     * Récupère l'état courant d'une tâche (Optimisé via statusCache).
+     * Récupère l'état courant d'une tâche (Optimisé via statusCache).[cite: 18]
      */
     getJobStatus(jobId) {
         const job = this.jobs.get(jobId);
@@ -175,7 +175,7 @@ class TaskQueue {
     }
 
     /**
-     * Nettoie les tâches anciennes ou excédentaires pour protéger la mémoire.
+     * Nettoie les tâches anciennes ou excédentaires pour protéger la mémoire.[cite: 18]
      */
     _cleanUpOldJobs() {
         const now = Date.now();
