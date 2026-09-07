@@ -703,6 +703,35 @@ app.get("/api/surveillance/data", async (req, res) => {
 });
 
 // ======================================================
+// ROUTE API : REGISTRE NATIONAL (100% DYNAMIQUE)
+// ======================================================
+
+app.get("/api/registry/data", async (req, res) => {
+    try {
+        const { data: products, error } = await supabase
+            .from("produits_certifies")
+            .select("*")
+            .order("created_at", { ascending: false });
+
+        if (error) throw error;
+
+        const registryItems = (products || []).map(p => ({
+            numero_lot: p.lot || p.certificate_code || "N/A",
+            producteur: p.nom_producteur || "Inconnu",
+            produit: p.nom_produit || "Standard",
+            quantite: Number(p.quantite) || 0,
+            date_demande: p.created_at ? new Date(p.created_at).toLocaleDateString("fr-FR") : "Récemment",
+            statut: p.statut || "CERTIFIÉ"
+        }));
+
+        return apiSuccess(res, { registry: registryItems });
+    } catch (err) {
+        console.error("[REGISTRY API ERROR]", err.message);
+        return apiError(res, 500, "REGISTRY_ERROR", "Impossible de charger le registre national.");
+    }
+});
+
+// ======================================================
 // GENERATION DU SCEAU & KIT DE SÉRIALISATION
 // ======================================================
 
