@@ -2,7 +2,7 @@
  * ======================================================
  * SYSTEME SOUVERAIN DE CERTIFICATION ANOR
  * SERVER CORE (VERSION ARCHITECTURE HAUTE SÉCURITÉ)
- * Version: 17.9.6 (Optimisation Hamming RPC & Worker Asynchrone)
+ * Version: 17.9.4 (Ajout cache intelligent pour les scans Gemini & optimisation vitesse)
  * ======================================================
  */
 
@@ -19,7 +19,6 @@ const helmet = require("helmet");
 const supabase = require("./config/database");
 const SealRenderer = require("./engine/sealRenderer");
 const { GoogleGenAI } = require("@google/genai");
-const taskQueue = require("./worker");
 
 const app = express();
 
@@ -53,7 +52,7 @@ setInterval(() => {
 // VERSION / CONFIGURATION
 // ======================================================
 
-const SERVER_VERSION = "17.9.6";
+const SERVER_VERSION = "17.9.4";
 const VISUAL_VERSION = 1;
 const VISUAL_BITS_LENGTH = 51;
 const isProduction = process.env.NODE_ENV === "production";
@@ -82,6 +81,19 @@ function sha256Hex(value) {
         .createHash("sha256")
         .update(String(value))
         .digest("hex");
+}
+
+function calculateHammingDistance(str1, str2) {
+    if (typeof str1 !== "string" || typeof str2 !== "string" || str1.length !== str2.length) {
+        return Infinity;
+    }
+    let distance = 0;
+    for (let i = 0; i < str1.length; i++) {
+        if (str1[i] !== str2[i]) {
+            distance++;
+        }
+    }
+    return distance;
 }
 
 function sanitizeFileName(filename) {
@@ -319,7 +331,7 @@ const upload = multer({
 });
 
 // ======================================================
-// ANALYSE VISUELLE CLASSIQUE ET GEMINI IA (OPTIMISÉE VITESSE)
+// ANALYSE VISUELLE CLASSIQUE ET GEMINI IA
 // ======================================================
 
 async function intelligentVisualAnalysis(scannedMatrix) {
@@ -365,7 +377,7 @@ async function analyzeSealWithGemini(imageBuffer, mimeType = "image/jpeg") {
             return null;
         }
 
-        console.log("[GEMINI] Début de l'analyse visuelle ultra-rapide du sceau...");
+        console.log("[GEMINI] Début de l'analyse visuelle du sceau...");
         const imagePart = {
             inlineData: {
                 data: imageBuffer.toString("base64"),
@@ -378,7 +390,7 @@ async function analyzeSealWithGemini(imageBuffer, mimeType = "image/jpeg") {
             contents: [
                 imagePart,
                 "Analyse cette image de sceau de certification ANOR. Extrais textuellement et fidèlement le numéro de lot (ex: LOT 54P-2026) et toute référence additionnelle visible (ex: DM / 000 000). Réponds STRICTEMENT au format JSON pur sans balises markdown, avec les clés suivantes : 'lot' (string ou null), 'reference' (string ou null), 'confidence' (nombre entre 0 et 1)."
-            ]
+            ],
         });  
 
         const textResponse = response.text ? response.text.trim() : "";
@@ -564,7 +576,7 @@ app.get("/api/intelligence/data", async (req, res) => {
 });
 
 // ======================================================
-// ROUTE API : CHAT ASSISTANT STATISTIQUE (GEMINI + BDD)
+// NOUVELLE ROUTE API : CHAT ASSISTANT STATISTIQUE (GEMINI + BDD)
 // ======================================================
 
 app.post("/api/intelligence/chat", async (req, res) => {
@@ -574,6 +586,7 @@ app.post("/api/intelligence/chat", async (req, res) => {
             return apiError(res, 400, "INVALID_PROMPT", "Le message de l'assistant est requis.");
         }
 
+        // Récupération des données globales de la base pour fournir du contexte à l'IA
         const { data: products } = await supabase.from("produits_certifies").select("*").limit(50);
         
         let contextSummary = "Aucun produit enregistré pour le moment.";
@@ -599,6 +612,7 @@ app.post("/api/intelligence/chat", async (req, res) => {
             const replyText = chatResponse.text ? chatResponse.text.trim() : "Analyse validée par le moteur ANOR Core.";
             return apiSuccess(res, { reply: replyText });
         } else {
+            // Mode fallback si la clé Gemini n'est pas configurée
             return apiSuccess(res, {
                 reply: `Synthèse analytique (Mode Local) : L'examen des flux enregistrés pour "${prompt}" indique une conformité stable sur l'ensemble du réseau national.`
             });
@@ -847,7 +861,7 @@ Système Souverain de Certification - ANOR Engine ${SERVER_VERSION}
 );
 
 // ======================================================
-// VERIFICATION DU SCEAU AVEC INTÉGRATION GEMINI & RPC HAMMING
+// VERIFICATION DU SCEAU AVEC INTÉGRATION GEMINI (OPTIMISÉ CACHE)
 // ======================================================
 
 app.post(
@@ -866,6 +880,7 @@ app.post(
                 location, locationMethod, deviceMetadata
             } = req.body;
 
+            // Vérification rapide dans le cache si l'image brute est envoyée en chaîne base64
             let imageCacheKey = null;
             if (typeof scannedMatrix === "string" && scannedMatrix.startsWith("data:image")) {
                 imageCacheKey = sha256Hex(scannedMatrix);
@@ -947,19 +962,28 @@ app.post(
                             }
                         }
 
-                        // Optimisation Hamming via RPC PostgreSQL
                         if (!row && bitsToMatch) {
-                            const { data: rpcMatches, error: rpcError } = await supabase.rpc("match_visual_bits_hamming", {
-                                target_bits: bitsToMatch,
-                                max_distance: 6
-                            });
+                            const { data: candidates, error } = await supabase.from("produits_certifies").select("*").limit(1000);
+                            if (!error && Array.isArray(candidates)) {
+                                let bestMatch = null;
+                                let bestDistance = Infinity;
 
-                            if (!rpcError && Array.isArray(rpcMatches) && rpcMatches.length > 0) {
-                                const bestMatch = rpcMatches[0];
-                                row = bestMatch;
-                                const distance = bestMatch.hamming_distance ?? 0;
-                                matchConfidence = Number((1 - distance / VISUAL_BITS_LENGTH).toFixed(3));
-                                verificationMode = distance === 0 ? "VISUAL_BITS_EXACT_RPC" : "VISUAL_HAMMING_MATCH_RPC";
+                                for (const candidate of candidates) {
+                                    const storedSignature = typeof candidate.visual_signature === "string" ? candidate.visual_signature : candidate.glyph_payload?.visualSignature;
+                                    const storedBits = normalizeVisualBits(candidate.visual_bits || candidate.glyph_payload?.visualBits || (typeof storedSignature === "string" && storedSignature.startsWith("ANOR51:") ? storedSignature.substring(7) : null));
+
+                                    if (!storedBits) continue;
+                                    if (storedBits === bitsToMatch) { bestMatch = candidate; bestDistance = 0; break; }
+
+                                    const distance = calculateHammingDistance(bitsToMatch, storedBits);
+                                    if (distance < bestDistance) { bestDistance = distance; bestMatch = candidate; }
+                                }
+
+                                if (bestMatch && bestDistance <= 6) {
+                                    row = bestMatch;
+                                    matchConfidence = Number((1 - bestDistance / VISUAL_BITS_LENGTH).toFixed(3));
+                                    verificationMode = bestDistance === 0 ? "VISUAL_BITS_EXACT_COMPAT" : "VISUAL_HAMMING_MATCH_COMPAT";
+                                }
                             }
                         }
                     }
@@ -983,18 +1007,9 @@ app.post(
             const updatePayload = { scan_count: currentScanCount, last_scan_location: currentLocation, location_method: locationMethod || null, last_scanned_at: new Date() };
             if (deviceMetadata) { updatePayload.device_metadata = deviceMetadata; }
 
-            // Délégation non bloquante de la mise à jour et télémétrie vers le worker asynchrone
-            if (taskQueue && typeof taskQueue.addJob === "function") {
-                taskQueue.addJob(`scan-update-${row.lot}-${Date.now()}`, async () => {
-                    await supabase.from("produits_certifies").update(updatePayload).eq("lot", row.lot);
-                }, { type: 'background-sync', priority: 'high' });
-            } else {
-                setImmediate(() => {
-                    supabase.from("produits_certifies").update(updatePayload).eq("lot", row.lot)
-                        .then(({ error }) => { if (error) { console.warn("Mise à jour scan échouée:", error.message); } })
-                        .catch(error => { console.warn("Exception mise à jour scan:", error.message); });
-                });
-            }
+            supabase.from("produits_certifies").update(updatePayload).eq("lot", row.lot)
+                .then(({ error }) => { if (error) { console.warn("Mise à jour scan échouée:", error.message); } })
+                .catch(error => { console.warn("Exception mise à jour scan:", error.message); });
 
             const score = `${(matchConfidence * 100).toFixed(1)}%`;
 
@@ -1015,6 +1030,7 @@ app.post(
                 engineVersion: SERVER_VERSION, visualVersion: VISUAL_VERSION, verificationMode, serverTimestamp: Date.now()
             };
 
+            // Mémorisation dans le cache si une clé d'image existe
             if (imageCacheKey) {
                 scanCache.set(imageCacheKey, { ...responsePayload, time: Date.now() });
             }
@@ -1028,7 +1044,7 @@ app.post(
 );
 
 // ======================================================
-// FEEDBACK / TELEMETRIE (ASYNCHRONE VIA WORKER)
+// FEEDBACK / TELEMETRIE
 // ======================================================
 
 app.post(
@@ -1039,23 +1055,16 @@ app.post(
             const { lot, luminance, isLowLight, contrastScore, rawFrameSnippet } = req.body;
             const safeSnippet = typeof rawFrameSnippet === "string" ? rawFrameSnippet.substring(0, 500) : null;
 
-            const telemetryJob = async () => {
-                const { error } = await supabase.from("telemetrie_scans").insert([{
-                    lot: lot || "INCONNU",
-                    luminance: typeof luminance === "number" ? luminance : null,
-                    is_low_light: !!isLowLight,
-                    contrast_score: typeof contrastScore === "number" ? contrastScore : null,
-                    frame_snippet: safeSnippet,
-                    created_at: new Date()
-                }]);
-                if (error) { throw error; }
-            };
+            const { error } = await supabase.from("telemetrie_scans").insert([{
+                lot: lot || "INCONNU",
+                luminance: typeof luminance === "number" ? luminance : null,
+                is_low_light: !!isLowLight,
+                contrast_score: typeof contrastScore === "number" ? contrastScore : null,
+                frame_snippet: safeSnippet,
+                created_at: new Date()
+            }]);
 
-            if (taskQueue && typeof taskQueue.addJob === "function") {
-                taskQueue.addJob(`telemetry-${Date.now()}`, telemetryJob, { type: 'telemetry', priority: 'low' });
-            } else {
-                telemetryJob().catch(err => console.error("Erreur insertion télémétrie différée:", err.message));
-            }
+            if (error) { throw error; }
 
             return apiSuccess(res, { adaptiveParameters: { recommendedLightBoost: !!isLowLight }, message: "Télémétrie intégrée avec succès." });
         } catch (error) {

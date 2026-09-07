@@ -42,7 +42,7 @@
         .sidebar-nav a:hover { color: #fff; background: rgba(59, 130, 246, 0.1); }
         .sidebar-nav a.active { color: #fff; background: var(--accent-blue); box-shadow: 0 0 12px rgba(59, 130, 246, 0.4); }
 
-        .main-content { margin-left: 260px; flex: 1; padding: 25px; display: flex; flex-direction: column; gap: 20px; }
+        .main-content { margin-left: 260px; flex: 1; padding: 25px; display: flex; flex-direction: column; gap: 20px; width: calc(100% - 260px); }
 
         .top-header {
             display: flex; justify-content: space-between; align-items: center;
@@ -113,7 +113,7 @@
         <div class="metric-card">
             <div class="label">Précision Globale des Sceaux</div>
             <div class="value" id="kpiPrecision">--</div>
-            <div class="sub" id="kpiPrecisionSub">Conformité des contrôles</div>
+            <div class="sub">Conformité des contrôles</div>
         </div>
         <div class="metric-card">
             <div class="label">Total Scans Effectués</div>
@@ -171,61 +171,7 @@
     </div>
 </main>
 
-<script>
-document.addEventListener("DOMContentLoaded", () => {
-    chargerDonneesServeur();
-});
-
-async function chargerDonneesServeur() {
-    try {
-        const response = await fetch('/api/dashboard/stats');
-        if (!response.ok) throw new Error("Erreur serveur");
-        
-        const data = await response.json();
-        
-        if(data.stats) {
-            document.getElementById("kpiPrecision").textContent = data.stats.precision || "99.85%";
-            document.getElementById("kpiScans").textContent = data.stats.totalScans || "0";
-            document.getElementById("kpiRegion").textContent = data.stats.topRegion || "Centre & Littoral";
-            document.getElementById("kpiFraudes").textContent = data.stats.aiAlerts || "0";
-        }
-
-        if(data.latestSeries && data.latestSeries.length > 0) {
-            const tbody = document.getElementById("dynamicTableBody");
-            tbody.innerHTML = data.latestSeries.map(item => `
-                <tr>
-                    <td><strong>${item.numero_lot || 'N/A'}</strong></td>
-                    <td><code>${item.numero_serie || 'Série-000'}</code></td>
-                    <td>📍 ${item.localisation || 'Inconnue'}</td>
-                    <td>${item.horodatage || 'Récemment'}</td>
-                    <td><span class="${item.alerte ? 'badge-alert' : 'badge'}">${item.statut || 'CONFORME'}</span></td>
-                </tr>
-            `).join('');
-        } else {
-            document.getElementById("dynamicTableBody").innerHTML = `<tr><td colspan="5" style="text-align: center; color: var(--text-muted);">Aucun flux enregistré pour l'instant.</td></tr>`;
-        }
-
-        document.getElementById("serverDot").style.background = "var(--accent-green)";
-        document.getElementById("serverDot").style.boxShadow = "0 0 8px var(--accent-green)";
-        document.getElementById("serverStatusText").textContent = "SYSTÈMES CONNECTÉS";
-        document.getElementById("serverStatusBadge").style.borderColor = "rgba(16, 185, 129, 0.3)";
-        document.getElementById("serverStatusBadge").style.color = "var(--accent-green)";
-
-    } catch (err) {
-        document.getElementById("serverDot").style.background = "var(--accent-red)";
-        document.getElementById("serverDot").style.boxShadow = "0 0 8px var(--accent-red)";
-        document.getElementById("serverStatusText").textContent = "EN ATTENTE SERVEUR";
-        document.getElementById("serverStatusBadge").style.borderColor = "rgba(239, 68, 68, 0.3)";
-        document.getElementById("serverStatusBadge").style.color = "var(--accent-red)";
-        
-        document.getElementById("kpiPrecision").textContent = "--";
-        document.getElementById("kpiScans").textContent = "--";
-        document.getElementById("kpiRegion").textContent = "--";
-        document.getElementById("kpiFraudes").textContent = "--";
-
-        document.getElementById("dynamicTableBody").innerHTML = `<tr><td colspan="5" style="text-align: center; color: var(--accent-red);">Serveur non accessible. Veuillez lancer le back-end.</td></tr>`;
-    }
-}
-</script>
+<!-- Inclusion du script JavaScript externe -->
+<script src="script.js"></script>
 </body>
 </html>
