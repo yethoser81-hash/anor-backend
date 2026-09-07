@@ -703,7 +703,7 @@ app.get("/api/surveillance/data", async (req, res) => {
 });
 
 // ======================================================
-// ROUTE API : REGISTRE NATIONAL (100% DYNAMIQUE)
+// ROUTE API : REGISTRE NATIONAL (100% DYNAMIQUE) - CORRIGÉ AVEC IMAGE BDD
 // ======================================================
 
 app.get("/api/registry/data", async (req, res) => {
@@ -721,7 +721,8 @@ app.get("/api/registry/data", async (req, res) => {
             produit: p.nom_produit || "Standard",
             quantite: Number(p.quantite) || 0,
             date_demande: p.created_at ? new Date(p.created_at).toLocaleDateString("fr-FR") : "Récemment",
-            statut: p.statut || "CERTIFIÉ"
+            statut: p.statut || "CERTIFIÉ",
+            image_url: p.visuel_produit_url || p.image_url || null // Récupération de l'image réelle de la base de données
         }));
 
         return apiSuccess(res, { registry: registryItems });

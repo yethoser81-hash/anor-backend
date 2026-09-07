@@ -71,12 +71,30 @@ function ouvrirModalDetails(item) {
     const modal = document.getElementById("lotModal");
     const modalTitle = document.getElementById("modalTitle");
     const modalDetailsText = document.getElementById("modalDetailsText");
-    const modalProductImage = document.getElementById("modalProductImage");
+    const modalImageContainer = document.getElementById("modalImageContainer") || document.getElementById("modalProductImage")?.parentElement;
 
     modalTitle.textContent = `Détails du Lot : ${item.numero_lot}`;
     
-    // Image par défaut si aucune URL n'est présente dans les données
-    modalProductImage.src = item.image_url || "https://images.unsplash.com/photo-1584308666744-24d5c474f2ae?w=400";
+    // Injection dynamique et sécurisée de l'image issue de la base de données (ou message de repli propre)
+    if (modalImageContainer) {
+        if (item.image_url) {
+            modalImageContainer.innerHTML = `
+                <img id="modalProductImage" src="${item.image_url}" alt="Visuel du produit ${item.produit}" style="max-width: 100%; max-height: 220px; border-radius: 8px; object-fit: contain; background: #0f172a; padding: 8px; border: 1px solid #334155;">
+            `;
+        } else {
+            modalImageContainer.innerHTML = `
+                <div id="modalProductImage" style="height: 180px; display: flex; align-items: center; justify-content: center; background: #0f172a; border: 1px dashed #334155; border-radius: 8px; color: var(--text-muted); font-size: 13px; text-align: center; padding: 10px;">
+                    Aucun visuel disponible pour ce lot
+                </div>
+            `;
+        }
+    } else {
+        // Fallback direct si le conteneur n'est qu'une balise <img>
+        const modalProductImage = document.getElementById("modalProductImage");
+        if (modalProductImage) {
+            modalProductImage.src = item.image_url || "https://images.unsplash.com/photo-1584308666744-24d5c474f2ae?w=400";
+        }
+    }
 
     modalDetailsText.innerHTML = `
         <p><strong>Producteur :</strong> ${item.producteur}</p>
