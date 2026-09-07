@@ -61,10 +61,47 @@ function afficherRegistre(data) {
         const btnDetails = document.getElementById(`btn-details-${index}`);
         if(btnDetails) {
             btnDetails.onclick = () => {
-                window.location.href = `details.html?lot=${encodeURIComponent(item.numero_lot)}`;
+                ouvrirModalDetails(item);
             };
         }
     });
+}
+
+function ouvrirModalDetails(item) {
+    const modal = document.getElementById("lotModal");
+    const modalTitle = document.getElementById("modalTitle");
+    const modalDetailsText = document.getElementById("modalDetailsText");
+    const modalProductImage = document.getElementById("modalProductImage");
+
+    modalTitle.textContent = `Détails du Lot : ${item.numero_lot}`;
+    
+    // Image par défaut si aucune URL n'est présente dans les données
+    modalProductImage.src = item.image_url || "https://images.unsplash.com/photo-1584308666744-24d5c474f2ae?w=400";
+
+    modalDetailsText.innerHTML = `
+        <p><strong>Producteur :</strong> ${item.producteur}</p>
+        <p><strong>Produit :</strong> ${item.produit}</p>
+        <p><strong>Quantité :</strong> ${item.quantite.toLocaleString()} unités</p>
+        <p><strong>Date d'émission :</strong> ${item.date_demande}</p>
+        <p><strong>Statut :</strong> <span style="color: #10b981; font-weight: bold;">${item.statut}</span></p>
+    `;
+
+    modal.style.display = "flex";
+}
+
+function fermerModal() {
+    const modal = document.getElementById("lotModal");
+    if(modal) {
+        modal.style.display = "none";
+    }
+}
+
+// Fermer la modale en cliquant en dehors de celle-ci
+window.onclick = function(event) {
+    const modal = document.getElementById("lotModal");
+    if (event.target === modal) {
+        fermerModal();
+    }
 }
 
 function filtrerRegistre() {
