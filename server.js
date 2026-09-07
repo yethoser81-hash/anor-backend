@@ -2,7 +2,7 @@
  * ======================================================
  * SYSTEME SOUVERAIN DE CERTIFICATION ANOR
  * SERVER CORE (VERSION ARCHITECTURE HAUTE SÉCURITÉ)
- * Version: 17.9.4 (Ajout cache intelligent pour les scans Gemini & optimisation vitesse)
+ * Version: 17.9.5 (Correction critique mise à jour scan BDD & comptage dashboard)
  * ======================================================
  */
 
@@ -52,7 +52,7 @@ setInterval(() => {
 // VERSION / CONFIGURATION
 // ======================================================
 
-const SERVER_VERSION = "17.9.4";
+const SERVER_VERSION = "17.9.5";
 const VISUAL_VERSION = 1;
 const VISUAL_BITS_LENGTH = 51;
 const isProduction = process.env.NODE_ENV === "production";
@@ -508,8 +508,8 @@ app.get("/api/dashboard/stats", async (req, res) => {
                 fluxRecents.push({
                     lot: p.lot || p.certificate_code || "N/A",
                     serie: p.serie || "N/A",
-                    localisation: p.ville || p.region || "Yaoundé",
-                    horodatage: p.created_at ? new Date(p.created_at).toLocaleString("fr-FR") : "Récemment",
+                    localisation: p.ville || p.region || p.last_scan_location || "Yaoundé",
+                    horodatage: p.last_scanned_at ? new Date(p.last_scanned_at).toLocaleString("fr-FR") : (p.created_at ? new Date(p.created_at).toLocaleString("fr-FR") : "Récemment"),
                     statut: p.statut || "CERTIFIÉ"
                 });
             });
@@ -586,7 +586,6 @@ app.post("/api/intelligence/chat", async (req, res) => {
             return apiError(res, 400, "INVALID_PROMPT", "Le message de l'assistant est requis.");
         }
 
-        // Récupération des données globales de la base pour fournir du contexte à l'IA
         const { data: products } = await supabase.from("produits_certifies").select("*").limit(50);
         
         let contextSummary = "Aucun produit enregistré pour le moment.";
@@ -612,7 +611,6 @@ app.post("/api/intelligence/chat", async (req, res) => {
             const replyText = chatResponse.text ? chatResponse.text.trim() : "Analyse validée par le moteur ANOR Core.";
             return apiSuccess(res, { reply: replyText });
         } else {
-            // Mode fallback si la clé Gemini n'est pas configurée
             return apiSuccess(res, {
                 reply: `Synthèse analytique (Mode Local) : L'examen des flux enregistrés pour "${prompt}" indique une conformité stable sur l'ensemble du réseau national.`
             });
@@ -676,7 +674,7 @@ app.get("/api/surveillance/data", async (req, res) => {
                     produit: p.nom_produit || "Produit Certifié",
                     lot: p.lot || p.certificate_code || "N/A",
                     entreprise: p.nom_producteur || "Inconnu",
-                    ville: p.ville || "Yaoundé",
+                    ville: p.ville || p.last_scan_location || "Yaoundé",
                     region: region || "Centre",
                     inspecteur: "Système AI",
                     resultat: stat
@@ -880,7 +878,6 @@ app.post(
                 location, locationMethod, deviceMetadata
             } = req.body;
 
-            // Vérification rapide dans le cache si l'image brute est envoyée en chaîne base64
             let imageCacheKey = null;
             if (typeof scannedMatrix === "string" && scannedMatrix.startsWith("data:image")) {
                 imageCacheKey = sha256Hex(scannedMatrix);
@@ -995,8 +992,11 @@ app.post(
                 return apiError(res, 404, "UNKNOWN_SEAL", "Sceau inconnu ou non authentifié.", { status: "CONTREFAÇON_REJETEE", processingTime: Date.now() - startTime, engineVersion: SERVER_VERSION });
             }
 
+            // ==========================================================
+            // MISE À JOUR SYNCHRONE DU COMPTEUR DE SCAN ET DE LA LOCALISATION
+            // ==========================================================
             const currentScanCount = Number(row.scan_count || 0) + 1;
-            const currentLocation = location || "Inconnue";
+            const currentLocation = location || "Yaoundé";
             let warningFlag = null;
 
             if (row.last_scan_location && row.last_scan_location !== currentLocation && row.last_scanned_at) {
@@ -1004,12 +1004,22 @@ app.post(
                 if (timeDiffMinutes < 15) { warningFlag = "SUSPICION_DUPLICATION_SCEAU"; }
             }
 
-            const updatePayload = { scan_count: currentScanCount, last_scan_location: currentLocation, location_method: locationMethod || null, last_scanned_at: new Date() };
+            const updatePayload = { 
+                scan_count: currentScanCount, 
+                last_scan_location: currentLocation, 
+                location_method: locationMethod || null, 
+                last_scanned_at: new Date().toISOString() 
+            };
             if (deviceMetadata) { updatePayload.device_metadata = deviceMetadata; }
 
-            supabase.from("produits_certifies").update(updatePayload).eq("lot", row.lot)
-                .then(({ error }) => { if (error) { console.warn("Mise à jour scan échouée:", error.message); } })
-                .catch(error => { console.warn("Exception mise à jour scan:", error.message); });
+            const { error: updateError } = await supabase
+                .from("produits_certifies")
+                .update(updatePayload)
+                .eq("lot", row.lot);
+
+            if (updateError) {
+                console.error("[SCAN UPDATE ERROR] Échec de la mise à jour du scan dans Supabase :", updateError.message);
+            }
 
             const score = `${(matchConfidence * 100).toFixed(1)}%`;
 
@@ -1030,7 +1040,6 @@ app.post(
                 engineVersion: SERVER_VERSION, visualVersion: VISUAL_VERSION, verificationMode, serverTimestamp: Date.now()
             };
 
-            // Mémorisation dans le cache si une clé d'image existe
             if (imageCacheKey) {
                 scanCache.set(imageCacheKey, { ...responsePayload, time: Date.now() });
             }
@@ -1061,7 +1070,7 @@ app.post(
                 is_low_light: !!isLowLight,
                 contrast_score: typeof contrastScore === "number" ? contrastScore : null,
                 frame_snippet: safeSnippet,
-                created_at: new Date()
+                created_at: new Date().toISOString()
             }]);
 
             if (error) { throw error; }
