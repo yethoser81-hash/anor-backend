@@ -41,6 +41,18 @@ const MIDDLE_VISIBLE_COUNT = 24;
 const OUTER_VISIBLE_COUNT = 20;
 const CANONICAL_OUTER_RADIUS = 375;
 
+// Palette de couleurs distinctes à fort contraste (incluant le noir)
+const GLYPH_COLORS = [
+    '#000000', // Noir
+    '#1B365D', // Bleu marine profond
+    '#A6192E', // Rouge cramoisi
+    '#006747', // Vert émeraude
+    '#5C2D91', // Violet foncé
+    '#D9531F', // Orange brûlé
+    '#008080', // Teal / Bleu-vert
+    '#708090'  // Gris ardoise foncé
+];
+
 const sealRenderer = {
 
     deriveVisualBits(seed) {
@@ -324,13 +336,6 @@ const sealRenderer = {
             outer: outerRingRadius
         };
 
-        ctx.save();
-        ctx.strokeStyle = GEOMETRY_COLOR;
-        ctx.fillStyle = GEOMETRY_COLOR;
-        ctx.lineWidth = strokeWidth;
-        ctx.lineCap = 'round';
-        ctx.lineJoin = 'round';
-
         for (let visibleIndex = 0; visibleIndex < positions.length; visibleIndex++) {
             const position = positions[visibleIndex];
             const radius = rings[position.ring];
@@ -353,9 +358,18 @@ const sealRenderer = {
             // Le bit est directement le FULL / EMPTY du glyphe.
             const isFilled = visualBits[visibleIndex] === '1';
 
+            // Attribution d'une couleur distincte par glyphe issu de la palette
+            const glyphColor = GLYPH_COLORS[visibleIndex % GLYPH_COLORS.length];
+
             ctx.save();
             ctx.translate(px, py);
             ctx.rotate(angle);
+
+            ctx.strokeStyle = glyphColor;
+            ctx.fillStyle = glyphColor;
+            ctx.lineWidth = strokeWidth;
+            ctx.lineCap = 'round';
+            ctx.lineJoin = 'round';
 
             drawGlyphFromDefinition(
                 ctx,
@@ -368,8 +382,6 @@ const sealRenderer = {
 
             ctx.restore();
         }
-
-        ctx.restore();
 
         // ------------------------------------------------------------
         // 6. MIRES CARDINALES

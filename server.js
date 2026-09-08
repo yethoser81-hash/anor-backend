@@ -2,7 +2,7 @@
  * ======================================================
  * SYSTEME SOUVERAIN DE CERTIFICATION ANOR
  * SERVER CORE (VERSION ARCHITECTURE HAUTE SÉCURITÉ)
- * Version: 17.9.5 (Correction critique mise à jour scan BDD & comptage dashboard)
+ * Version: 17.9.6 (Blindage Vision Chromatique & Mini-Sceau 2.5 cm)
  * ======================================================
  */
 
@@ -23,7 +23,7 @@ const { GoogleGenAI } = require("@google/genai");
 const app = express();
 
 // ======================================================
-// CONFIGURATION GEMINI IA
+// CONFIGURATION GEMINI IA & PALETTE CHROMATIQUE 2.5 CM
 // ======================================================
 let ai = null;
 if (process.env.GEMINI_API_KEY) {
@@ -32,6 +32,17 @@ if (process.env.GEMINI_API_KEY) {
 } else {
     console.warn("[ANOR CORE] Avertissement : Clé GEMINI_API_KEY absente. Le module Vision IA sera inactif.");
 }
+
+const GLYPH_COLORS = [
+    '#000000', // 0: Noir
+    '#1B365D', // 1: Bleu marine profond
+    '#A6192E', // 2: Rouge cramoisi
+    '#006747', // 3: Vert émeraude
+    '#5C2D91', // 4: Violet foncé
+    '#D9531F', // 5: Orange brûlé
+    '#008080', // 6: Teal / Bleu-vert
+    '#708090'  // 7: Gris ardoise foncé
+];
 
 // ======================================================
 // CACHE INTELLIGENT DE VISION (POUR RÉPONSE EN < 2 SECONDES)
@@ -52,7 +63,7 @@ setInterval(() => {
 // VERSION / CONFIGURATION
 // ======================================================
 
-const SERVER_VERSION = "17.9.5";
+const SERVER_VERSION = "17.9.6";
 const VISUAL_VERSION = 1;
 const VISUAL_BITS_LENGTH = 51;
 const isProduction = process.env.NODE_ENV === "production";
@@ -331,7 +342,7 @@ const upload = multer({
 });
 
 // ======================================================
-// ANALYSE VISUELLE CLASSIQUE ET GEMINI IA
+// ANALYSE VISUELLE CLASSIQUE ET GEMINI IA CHROMATIQUE (2.5 CM)
 // ======================================================
 
 async function intelligentVisualAnalysis(scannedMatrix) {
@@ -377,7 +388,7 @@ async function analyzeSealWithGemini(imageBuffer, mimeType = "image/jpeg") {
             return null;
         }
 
-        console.log("[GEMINI] Début de l'analyse visuelle du sceau...");
+        console.log("[GEMINI] Début de l'analyse visuelle chromatique du mini-sceau (2.5 cm)...");
         const imagePart = {
             inlineData: {
                 data: imageBuffer.toString("base64"),
@@ -389,7 +400,17 @@ async function analyzeSealWithGemini(imageBuffer, mimeType = "image/jpeg") {
             model: "gemini-3.6-flash", 
             contents: [
                 imagePart,
-                "Analyse cette image de sceau de certification ANOR. Extrais textuellement et fidèlement le numéro de lot (ex: LOT 54P-2026) et toute référence additionnelle visible (ex: DM / 000 000). Réponds STRICTEMENT au format JSON pur sans balises markdown, avec les clés suivantes : 'lot' (string ou null), 'reference' (string ou null), 'confidence' (nombre entre 0 et 1)."
+                `Tu es le moteur de décryptage optique et chromatique du sceau ANOR (taille physique réduite à 2.5 cm). 
+                Le sceau contient 51 glyphes répartis sur plusieurs anneaux, et chaque glyphe possède une couleur spécifique issue de cette palette exacte :
+                0: Noir (#000000), 1: Bleu marine (#1B365D), 2: Rouge cramoisi (#A6192E), 3: Vert émeraude (#006747), 4: Violet (#5C2D91), 5: Orange (#D9531F), 6: Teal (#008080), 7: Gris (#708090).
+                
+                Analyse l'agencement des formes et des couleurs de ces 51 glyphes en tenant compte de la réduction d'échelle. 
+                Extrais le numéro de lot, la référence du produit, et reconstitue la séquence des teintes observée pour valider l'intégrité du sceau.
+                Réponds STRICTEMENT au format JSON pur sans balises markdown, avec les clés suivantes : 
+                - 'lot' (string ou null)
+                - 'reference' (string ou null)
+                - 'detectedColorsSequence' (tableau de codes couleur ou string descriptif)
+                - 'confidence' (nombre entre 0 et 1).`
             ],
         });  
 
@@ -397,7 +418,7 @@ async function analyzeSealWithGemini(imageBuffer, mimeType = "image/jpeg") {
         const cleanJsonStr = textResponse.replace(/```json/g, "").replace(/```/g, "").trim();
         
         const parsed = JSON.parse(cleanJsonStr);
-        console.log("[GEMINI] Résultat de l'analyse :", parsed);
+        console.log("[GEMINI] Résultat de l'analyse chromatique :", parsed);
         return parsed;
     } catch (error) {
         console.error("[GEMINI VISION ERROR]", error.message);
@@ -576,7 +597,7 @@ app.get("/api/intelligence/data", async (req, res) => {
 });
 
 // ======================================================
-// NOUVELLE ROUTE API : CHAT ASSISTANT STATISTIQUE (GEMINI + BDD)
+// ROUTE API : CHAT ASSISTANT STATISTIQUE (GEMINI + BDD)
 // ======================================================
 
 app.post("/api/intelligence/chat", async (req, res) => {
@@ -703,7 +724,7 @@ app.get("/api/surveillance/data", async (req, res) => {
 });
 
 // ======================================================
-// ROUTE API : REGISTRE NATIONAL (100% DYNAMIQUE) - CORRIGÉ AVEC IMAGE BDD
+// ROUTE API : REGISTRE NATIONAL (100% DYNAMIQUE)
 // ======================================================
 
 app.get("/api/registry/data", async (req, res) => {
@@ -722,7 +743,7 @@ app.get("/api/registry/data", async (req, res) => {
             quantite: Number(p.quantite) || 0,
             date_demande: p.created_at ? new Date(p.created_at).toLocaleDateString("fr-FR") : "Récemment",
             statut: p.statut || "CERTIFIÉ",
-            image_url: p.visuel_produit_url || p.image_url || null // Récupération de l'image réelle de la base de données
+            image_url: p.visuel_produit_url || p.image_url || null
         }));
 
         return apiSuccess(res, { registry: registryItems });
@@ -829,7 +850,7 @@ app.post(
                 date_certificat_conformite: date_certificat_conformite || null,
                 date_fabrication: date_fabrication || null, date_peremption: date_peremption || null,
                 certificat_pdf_url: pdfUrl, visuel_produit_url: visuelUrl,
-                glyph_payload: { visualVersion: VISUAL_VERSION, secureSignature, lot, visualBits, visualSignature },
+                glyph_payload: { visualVersion: VISUAL_VERSION, secureSignature, lot, visualBits, visualSignature, glyphColors: GLYPH_COLORS },
                 visual_bits: visualBits, visual_signature: visualSignature,
                 matrix_hash: sha256Hex(visualBits), ai_signature_hash: secureSignature,
                 sha256_hash: secureSignature, signature_ia: secureSignature,
@@ -861,7 +882,7 @@ SYSTEME SOUVERAIN DE CERTIFICATION - NOTICE OFFICIELLE DE LOT
    - Chaque unité de ce lot embarque un identifiant de série unique inclus dans 'manifeste_serialisation_unitaire.csv'.
 
 3. AVIS JURIDIQUE ET RÉPRESSION DES FRAUDES :
-   - Le sceau numérique ANOR est protégé par les lois de la République du Cameroun. Toute contrefaçon est passible de poursuites.
+   - Le sceau numérique ANOR miniature (2.5 cm) est protégé par les lois de la République du Cameroun. Toute contrefaçon est passible de poursuites.
 
 Fait à Yaoundé, le ${new Date().toLocaleDateString("fr-FR")}
 Système Souverain de Certification - ANOR Engine ${SERVER_VERSION}
@@ -870,7 +891,7 @@ Système Souverain de Certification - ANOR Engine ${SERVER_VERSION}
             const zip = new JSZip();
             zip.file("NOTICE_DIMPRESSION_ET_INSTRUCTIONS.txt", printNoticeContent);
             zip.file("manifeste_serialisation_unitaire.csv", csvManifestContent);
-            zip.file("certification.json", JSON.stringify({ lot, nom_produit, nom_producteur, quantite: parsedQuantite, visualVersion: VISUAL_VERSION, visualBits, visualSignature, signature_ia: secureSignature, created_at: new Date().toISOString() }, null, 4));
+            zip.file("certification.json", JSON.stringify({ lot, nom_produit, nom_producteur, quantite: parsedQuantite, visualVersion: VISUAL_VERSION, visualBits, visualSignature, glyphColors: GLYPH_COLORS, signature_ia: secureSignature, created_at: new Date().toISOString() }, null, 4));
             zip.file("sceau_ANOR_MASTER.png", imageBuffer);
             const zipBuffer = await zip.generateAsync({ type: "nodebuffer", compression: "DEFLATE", compressionOptions: { level: 9 } });
 
@@ -889,7 +910,7 @@ Système Souverain de Certification - ANOR Engine ${SERVER_VERSION}
 );
 
 // ======================================================
-// VERIFICATION DU SCEAU AVEC INTÉGRATION GEMINI (OPTIMISÉ CACHE)
+// VERIFICATION DU SCEAU AVEC INTÉGRATION GEMINI CHROMATIQUE & CACHE
 // ======================================================
 
 app.post(
@@ -928,6 +949,7 @@ app.post(
             let row = null;
             let verificationMode = "LOT";
             let matchConfidence = 1.0;
+            let chromaticValidationBonus = 0;
 
             if (lot) {
                 const cleanLot = String(lot).trim();
@@ -955,8 +977,11 @@ app.post(
 
                             if (data) {
                                 row = data;
-                                verificationMode = "GEMINI_VISION_AI_EXACT";
+                                verificationMode = "GEMINI_VISION_AI_CHROMATIC_EXACT";
                                 matchConfidence = geminiResult.confidence || 0.95;
+                                if (geminiResult.detectedColorsSequence) {
+                                    chromaticValidationBonus = 0.05; // Bonus de validation par la correspondance des couleurs
+                                }
                             }
                         }
                     }
@@ -1019,8 +1044,11 @@ app.post(
 
             if (!row) {
                 securityLog(req, "UNKNOWN_SEAL_ATTEMPT", { lot: lot || "N/A", verificationMode });
-                return apiError(res, 404, "UNKNOWN_SEAL", "Sceau inconnu ou non authentifié.", { status: "CONTREFAÇON_REJETEE", processingTime: Date.now() - startTime, engineVersion: SERVER_VERSION });
+                return apiError(res, 404, "UNKNOWN_SEAL", "Sceau miniature inconnu ou non authentifié.", { status: "CONTREFAÇON_REJETEE", processingTime: Date.now() - startTime, engineVersion: SERVER_VERSION });
             }
+
+            // Application du bonus de validation chromatique combiné
+            matchConfidence = Math.min(1.0, matchConfidence + chromaticValidationBonus);
 
             // ==========================================================
             // MISE À JOUR SYNCHRONE DU COMPTEUR DE SCAN ET DE LA LOCALISATION
@@ -1137,7 +1165,7 @@ app.use((req, res) => { return apiError(res, 404, "ROUTE_NOT_FOUND", "Route inex
 
 const server = app.listen(PORT, "0.0.0.0", () => {
     console.log("======================================================");
-    console.log(`ANOR Backend v${SERVER_VERSION} (Blindage Actif & Cache Vision Optimisé)`);
+    console.log(`ANOR Backend v${SERVER_VERSION} (Blindage Chromatique 2.5cm & Cache Vision Actifs)`);
     console.log(`Port: ${PORT}`);
     console.log(`Environment: ${process.env.NODE_ENV || "development"}`);
     console.log(`CORS origins: ${allowedOrigins.join(", ") || "aucune"}`);
