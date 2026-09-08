@@ -348,9 +348,10 @@ const sealRenderer = {
 
             const isFilled = visualBits[visibleIndex] === '1';
 
-            // Attribution de la couleur via la palette centralisée de GlyphsLibrary
-            const glyphColorIndex = visibleIndex % Object.keys(GlyphsLibrary.colorsPalette).length;
-            const glyphColor = GlyphsLibrary.colorsPalette[glyphColorIndex].hex;
+            // Attribution de la couleur via la règle univoque de GlyphsLibrary
+            const glyphColor = GlyphsLibrary.getGlyphColor
+                ? GlyphsLibrary.getGlyphColor(glyphType, isFilled)
+                : '#000000';
 
             ctx.save();
             ctx.translate(px, py);

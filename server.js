@@ -2,7 +2,7 @@
  * ======================================================
  * SYSTEME SOUVERAIN DE CERTIFICATION ANOR
  * SERVER CORE (VERSION ARCHITECTURE HAUTE SÉCURITÉ)
- * Version: 17.9.6 (Blindage Vision Chromatique & Mini-Sceau 2.5 cm)
+ * Version: 17.9.7 (Blindage Vision Chromatique Avancée & Mini-Sceau 2.5 cm)
  * ======================================================
  */
 
@@ -56,7 +56,7 @@ setInterval(() => {
 // VERSION / CONFIGURATION
 // ======================================================
 
-const SERVER_VERSION = "17.9.6";
+const SERVER_VERSION = "17.9.7";
 const VISUAL_VERSION = 1;
 const VISUAL_BITS_LENGTH = 51;
 const isProduction = process.env.NODE_ENV === "production";
@@ -381,7 +381,7 @@ async function analyzeSealWithGemini(imageBuffer, mimeType = "image/jpeg") {
             return null;
         }
 
-        console.log("[GEMINI] Début de l'analyse visuelle chromatique du mini-sceau (2.5 cm) avec validation GlyphsLibrary...");
+        console.log("[GEMINI] Début de l'analyse visuelle chromatique du mini-sceau (2.5 cm) avec architecture GlyphsLibrary...");
         const imagePart = {
             inlineData: {
                 data: imageBuffer.toString("base64"),
@@ -393,11 +393,12 @@ async function analyzeSealWithGemini(imageBuffer, mimeType = "image/jpeg") {
             model: "gemini-3.6-flash", 
             contents: [
                 imagePart,
-                `Tu es le moteur de décryptage optique et chromatique du sceau ANOR (taille physique réduite à 2.5 cm). 
-                Le sceau contient 51 glyphes répartis sur plusieurs anneaux, et chaque glyphe possède une couleur spécifique issue de la palette officielle (0: Noir, 1: Bleu marine, 2: Rouge cramoisi, 3: Vert émeraude, 4: Violet, 5: Orange brûlé, 6: Teal, 7: Gris ardoise).
+                `Tu es le moteur expert de décryptage optique et chromatique du sceau ANOR (taille physique réduite à 2.5 cm). 
+                Le sceau contient 51 glyphes répartis sur plusieurs anneaux, et chaque glyphe possède une couleur spécifique issue de la palette officielle gérée dans GlyphsLibrary (0: Noir, 1: Bleu marine, 2: Rouge cramoisi, 3: Vert émeraude, 4: Violet, 5: Orange brûlé, 6: Teal, 7: Gris ardoise).
                 
-                Analyse l'agencement des formes et des teintes de ces 51 glyphes en tenant compte de la réduction d'échelle. 
-                Extrais le numéro de lot, la référence du produit, et reconstitue la séquence des teintes observée pour valider l'intégrité du sceau.
+                RÈGLE CRITIQUE DE RECONSTRUCTION EN CAS D'IMAGE FLoue : Si l'image fournie est floue, de basse résolution ou altérée, concentre-toi en priorité sur l'analyse et la pondération des teintes chromatiques dominantes de chaque zone et anneau. Utilise cette signature colorimétrique pour reconstruire logiquement le sceau et trouver sa correspondance exacte dans la base de données.
+                
+                Extrais le numéro de lot, la référence du produit, et reconstitue la séquence des teintes observée pour valider l'intégrité du sceau selon la nouvelle architecture GlyphsLibrary.
                 Réponds STRICTEMENT au format JSON pur sans balises markdown, avec les clés suivantes : 
                 - 'lot' (string ou null)
                 - 'reference' (string ou null)
@@ -411,11 +412,11 @@ async function analyzeSealWithGemini(imageBuffer, mimeType = "image/jpeg") {
         
         const parsed = JSON.parse(cleanJsonStr);
 
-        // Validation croisée optionnelle via GlyphsLibrary si un code couleur est détecté
+        // Validation croisée via GlyphsLibrary pour chaque couleur détectée
         if (parsed && parsed.detectedColorsSequence && Array.isArray(parsed.detectedColorsSequence)) {
             parsed.detectedColorsSequence.forEach((hex, idx) => {
                 const colorIdx = GlyphsLibrary.resolveColorIndex(hex);
-                console.log(`[CHROMATIC VALIDATION] Glyphe ${idx} détecté avec la couleur ${hex} -> Index validé: ${colorIdx}`);
+                console.log(`[CHROMATIC VALIDATION - GlyphsLibrary] Glyphe ${idx} détecté avec la couleur ${hex} -> Index validé: ${colorIdx}`);
             });
         }
 
@@ -1163,7 +1164,7 @@ app.use((req, res) => { return apiError(res, 404, "ROUTE_NOT_FOUND", "Route inex
 
 const server = app.listen(PORT, "0.0.0.0", () => {
     console.log("======================================================");
-    console.log(`ANOR Backend v${SERVER_VERSION} (Blindage Chromatique 2.5cm & Cache Vision Actifs)`);
+    console.log(`ANOR Backend v${SERVER_VERSION} (Blindage Chromatique Avancé & Cache Vision Actifs)`);
     console.log(`Port: ${PORT}`);
     console.log(`Environment: ${process.env.NODE_ENV || "development"}`);
     console.log(`CORS origins: ${allowedOrigins.join(", ") || "aucune"}`);

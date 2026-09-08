@@ -24,7 +24,7 @@
  *   5. le bit correspondant ;
  *   6. un niveau de confiance ;
  *   7. les paramètres nécessaires à une reconstruction géométrique.
- *   8. l'indexation et la validation chromatique (palette à 8 couleurs).
+ *   8. l'indexation et la validation chromatique (palette univoque).
  *
  * IMPORTANT :
  *
@@ -57,23 +57,44 @@ const GlyphsLibrary = {
      * ================================================================
      */
 
-    VERSION: "6.1.0",
+    VERSION: "6.1.1",
 
     /**
      * ================================================================
-     * PALETTE CHROMATIQUE OFFICIELLE (8 COULEURS DU MINI-SCEAU)
+     * PALETTE CHROMATIQUE OFFICIELLE (10 COULEURS UNIQUES : 5 FORMES x 2 ÉTATS)
      * ================================================================
      */
 
     colorsPalette: {
-        0: { hex: '#000000', name: 'Noir' },
-        1: { hex: '#1B365D', name: 'Bleu marine profond' },
-        2: { hex: '#A6192E', name: 'Rouge cramoisi' },
-        3: { hex: '#006747', name: 'Vert émeraude' },
-        4: { hex: '#5C2D91', name: 'Violet foncé' },
-        5: { hex: '#D9531F', name: 'Orange brûlé' },
-        6: { hex: '#008080', name: 'Teal / Bleu-vert' },
-        7: { hex: '#708090', name: 'Gris ardoise foncé' }
+        0: { hex: '#000000', name: 'Carré Plein (Noir)' },
+        1: { hex: '#3B9CFF', name: 'Carré Vide (Bleu clair)' },
+        2: { hex: '#A6192E', name: 'Rectangle Plein (Rouge cramoisi)' },
+        3: { hex: '#708090', name: 'Rectangle Vide (Gris ardoise)' },
+        4: { hex: '#006747', name: 'Cercle Plein (Vert émeraude)' },
+        5: { hex: '#D9531F', name: 'Cercle Vide (Orange brûlé)' },
+        6: { hex: '#5C2D91', name: 'Losange Plein (Violet foncé)' },
+        7: { hex: '#8B4513', name: 'Losange Vide (Marron / brique)' },
+        8: { hex: '#008080', name: 'Croix Pleine (Teal)' },
+        9: { hex: '#1B365D', name: 'Croix Vide (Bleu marine profond)' }
+    },
+
+    /**
+     * Correspondance directe par type et par état (plein / vide)
+     */
+    glyphColorMap: {
+        square:  { full: '#000000', empty: '#3B9CFF' },
+        rect:    { full: '#A6192E', empty: '#708090' },
+        circle:  { full: '#006747', empty: '#D9531F' },
+        diamond: { full: '#5C2D91', empty: '#8B4513' },
+        plus:    { full: '#008080', empty: '#1B365D' }
+    },
+
+    getGlyphColor(type, isFilled) {
+        const stateKey = isFilled ? 'full' : 'empty';
+        if (this.glyphColorMap && this.glyphColorMap[type]) {
+            return this.glyphColorMap[type][stateKey];
+        }
+        return '#000000';
     },
 
     /**
@@ -430,7 +451,7 @@ const GlyphsLibrary = {
             ...baseAnalysis,
             colorIndex,
             colorName: this.colorsPalette[colorIndex]?.name || 'Inconnu',
-            chromaticValid: colorIndex >= 0 && colorIndex <= 7,
+            chromaticValid: colorIndex >= 0 && colorIndex <= 9,
             strictMatch: baseAnalysis.reliable && (colorIndex >= 0)
         };
     },
