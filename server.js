@@ -2,7 +2,7 @@
  * ======================================================
  * SYSTEME SOUVERAIN DE CERTIFICATION ANOR
  * SERVER CORE (VERSION ARCHITECTURE HAUTE SÉCURITÉ)
- * Version: 17.9.9 (Blindage Vision Chromatique & Performance Massive < 5s)
+ * Version: 17.9.10 (Blindage Vision Chromatique & Performance Massive < 5s)
  * ======================================================
  */
 
@@ -16,10 +16,10 @@ const JSZip = require("jszip");
 const multer = require("multer");
 const rateLimit = require("express-rate-limit");
 const helmet = require("helmet");
-const supabase = require("./config/database");[cite: 9]
-const SealRenderer = require("./engine/sealRenderer");[cite: 9]
-const GlyphsLibrary = require("./library/glyphsLibrary");[cite: 9]
-const { GoogleGenAI } = require("@google/genai");[cite: 9]
+const supabase = require("./config/database");
+const SealRenderer = require("./engine/sealRenderer");
+const GlyphsLibrary = require("./library/glyphsLibrary");
+const { GoogleGenAI } = require("@google/genai");
 
 const app = express();
 
@@ -28,17 +28,16 @@ const app = express();
 // ======================================================
 let ai = null;
 if (process.env.GEMINI_API_KEY) {
-    ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });[cite: 9]
+    ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
     console.log("[ANOR CORE] Module Vision IA initialisé avec succès.");
 } else {
     console.warn("[ANOR CORE] Avertissement : Clé GEMINI_API_KEY absente. Le module Vision IA sera inactif.");
 }
 
-// Utilisation directe de la palette officielle centralisée dans GlyphsLibrary[cite: 9]
-const GLYPH_COLORS = Object.values(GlyphsLibrary.colorsPalette).map(c => c.hex);[cite: 9]
+const GLYPH_COLORS = Object.values(GlyphsLibrary.colorsPalette).map(c => c.hex);
 
 // ======================================================
-// CACHE INTELLIGENT DE VISION (POUR RÉPONSE EN < 5 SECONDES)
+// CACHE INTELLIGENT DE VISION (< 5 SECONDES)
 // ======================================================
 const scanCache = new Map();
 const SCAN_CACHE_TTL = 10 * 60 * 1000; // 10 minutes
@@ -56,7 +55,7 @@ setInterval(() => {
 // VERSION / CONFIGURATION
 // ======================================================
 
-const SERVER_VERSION = "17.9.9";
+const SERVER_VERSION = "17.9.10";
 const VISUAL_VERSION = 1;
 const VISUAL_BITS_LENGTH = 51;
 const isProduction = process.env.NODE_ENV === "production";
@@ -85,19 +84,6 @@ function sha256Hex(value) {
         .createHash("sha256")
         .update(String(value))
         .digest("hex");
-}
-
-function calculateHammingDistance(str1, str2) {
-    if (typeof str1 !== "string" || typeof str2 !== "string" || str1.length !== str2.length) {
-        return Infinity;
-    }
-    let distance = 0;
-    for (let i = 0; i < str1.length; i++) {
-        if (str1[i] !== str2[i]) {
-            distance++;
-        }
-    }
-    return distance;
 }
 
 function sanitizeFileName(filename) {
@@ -271,7 +257,7 @@ app.use((req, res, next) => {
 
 const scanLimiter = rateLimit({
     windowMs: 60 * 1000,
-    max: 60, // Élargi pour fluidifier les scans répétés sur le terrain
+    max: 60,
     standardHeaders: true,
     legacyHeaders: false,
     handler: (req, res) => {
@@ -387,11 +373,11 @@ async function analyzeSealWithGemini(imageBuffer, mimeType = "image/jpeg") {
             },
         };
 
-        const paletteDescription = Object.entries(GlyphsLibrary.colorsPalette)[cite: 9]
+        const paletteDescription = Object.entries(GlyphsLibrary.colorsPalette)
             .map(([idx, data]) => `- Index ${idx}: ${data.hex} (${data.name})`)
             .join("\n");
 
-        const response = await ai.models.generateContent({[cite: 9]
+        const response = await ai.models.generateContent({
             model: "gemini-3.6-flash", 
             contents: [
                 imagePart,
@@ -412,11 +398,11 @@ async function analyzeSealWithGemini(imageBuffer, mimeType = "image/jpeg") {
 }
 
 // ======================================================
-// MOTEUR DE SÉRIALISATION MASSIVE ULTRA-RAPIDE (10M+ en quelques secondes)
+// MOTEUR DE SÉRIALISATION MASSIVE ULTRA-RAPIDE (10M+)
 // ======================================================
 
 async function generateUnitSerialsAndManifest(lotCode, totalQuantity, masterSignature) {
-    const batchSize = 10000; // Augmenté pour un débit maximal
+    const batchSize = 10000;
     let csvContent = "Index,Numero_De_Serie,Hachage_Securise\n";
     const unitsToInsert = [];
 
@@ -424,7 +410,6 @@ async function generateUnitSerialsAndManifest(lotCode, totalQuantity, masterSign
         const paddedIndex = String(i).padStart(6, "0");
         const serialNumber = `${lotCode}-${paddedIndex}`;
         
-        // Hachage cryptographique unitaire rapide
         const secureUnitHash = crypto
             .createHash("sha256")
             .update(`${masterSignature}-${serialNumber}-${i}`)
@@ -438,11 +423,10 @@ async function generateUnitSerialsAndManifest(lotCode, totalQuantity, masterSign
             statut_unitaire: "ACTIF"
         });
 
-        // Pour les volumes astronomiques (ex: 10 millions), écriture directe du CSV par blocs pour préserver la mémoire vive (RAM)
         csvContent += `${i},${serialNumber},${secureUnitHash}\n`;
 
         if (unitsToInsert.length >= batchSize || i === totalQuantity) {
-            const { error } = await supabase[cite: 9]
+            const { error } = await supabase
                 .from("produits_unitaires_serials")
                 .upsert(unitsToInsert, { onConflict: "serial_number" });
 
@@ -450,7 +434,7 @@ async function generateUnitSerialsAndManifest(lotCode, totalQuantity, masterSign
                 console.error(`[SERIALIZATION ERROR] Erreur sur le bloc se terminant à l'index ${i}:`, error.message);
                 throw error;
             }
-            unitsToInsert.length = 0; // Libération instantanée de la mémoire du lot
+            unitsToInsert.length = 0;
         }
     }
     console.log(`[SERIALIZATION] ${totalQuantity.toLocaleString("fr-FR")} unités générées et enregistrées avec succès pour le lot ${lotCode}.`);
@@ -479,14 +463,14 @@ app.get(["/", "/index.html"], (req, res) => {
 app.get("/health", async (req, res) => {
     let database = "DOWN";
     try {
-        const { error } = await supabase.from("produits_certifies").select("lot").limit(1);[cite: 9]
+        const { error } = await supabase.from("produits_certifies").select("lot").limit(1);
         if (!error) { database = "UP"; } 
     } catch (error) {}
 
     return apiSuccess(res, {
         status: "ONLINE",
         engine: `ANOR Core ${SERVER_VERSION}`,
-        glyphProtocolVersion: GlyphsLibrary.VERSION,[cite: 9]
+        glyphProtocolVersion: GlyphsLibrary.VERSION,
         database,
         gemini: ai ? "CONFIGURED" : "NOT_CONFIGURED",
         uptime: process.uptime(),
@@ -497,7 +481,7 @@ app.get("/health", async (req, res) => {
 
 app.get("/api/dashboard/stats", async (req, res) => {
     try {
-        const { data: products, error } = await supabase.from("produits_certifies").select("*").order("created_at", { ascending: false });[cite: 9]
+        const { data: products, error } = await supabase.from("produits_certifies").select("*").order("created_at", { ascending: false });
         if (error) throw error;
 
         let totalScans = 0;
@@ -539,7 +523,7 @@ app.get("/api/dashboard/stats", async (req, res) => {
 
 app.get("/api/intelligence/data", async (req, res) => {
     try {
-        const { data: products, error } = await supabase.from("produits_certifies").select("*");[cite: 9]
+        const { data: products, error } = await supabase.from("produits_certifies").select("*");
         if (error) throw error;
 
         let totalVolume = 0;
@@ -602,7 +586,7 @@ app.get("/api/intelligence/stats", async (req, res) => {
 
 app.get("/api/surveillance/data", async (req, res) => {
     try {
-        const { data: products, error } = await supabase.from("produits_certifies").select("*").order("created_at", { ascending: false });[cite: 9]
+        const { data: products, error } = await supabase.from("produits_certifies").select("*").order("created_at", { ascending: false });
         if (error) throw error;
 
         let totalScans = 0;
@@ -644,7 +628,7 @@ app.get("/api/surveillance/data", async (req, res) => {
 
 app.get("/api/registry/data", async (req, res) => {
     try {
-        const { data: products, error } = await supabase.from("produits_certifies").select("*").order("created_at", { ascending: false });[cite: 9]
+        const { data: products, error } = await supabase.from("produits_certifies").select("*").order("created_at", { ascending: false });
         if (error) throw error;
 
         const registryItems = (products || []).map(p => ({
@@ -696,10 +680,10 @@ app.post(
 
             const certificateCode = String(lot).trim();
             const secureSignature = crypto.createHash("sha256").update(`${certificateCode}-${Date.now()}-${crypto.randomUUID()}`).digest("hex");
-            const visualBits = normalizeVisualBits(SealRenderer.deriveVisualBits(secureSignature));[cite: 9]
+            const visualBits = normalizeVisualBits(SealRenderer.deriveVisualBits(secureSignature));
             const visualSignature = `ANOR51:${visualBits}`;
 
-            const imageBuffer = await SealRenderer.renderSealToBuffer([cite: 9]
+            const imageBuffer = await SealRenderer.renderSealToBuffer(
                 { secureSignature, visualBits },
                 {
                     lot, quantite: parsedQuantite, type_emballage,
@@ -727,12 +711,11 @@ app.post(
                 engine_version: SERVER_VERSION, statut: "CERTIFIÉ", scan_count: 0
             };
 
-            await supabase.from("produits_certifies").upsert(payloadDB, { onConflict: "lot" });[cite: 9]
+            await supabase.from("produits_certifies").upsert(payloadDB, { onConflict: "lot" });
 
-            // Génération unitaire ultra-rapide (supporte jusqu'à 10 000 000+ sérialisations sans blocage)
             const csvManifestContent = await generateUnitSerialsAndManifest(certificateCode, parsedQuantite, secureSignature);
 
-            const zip = new JSZip();[cite: 9]
+            const zip = new JSZip();
             zip.file("NOTICE_DIMPRESSION.txt", `Sceau ANOR Master - Lot ${lot} (${parsedQuantite.toLocaleString("fr-FR")} unités)`);
             zip.file("manifeste_serialisation_unitaire.csv", csvManifestContent);
             zip.file("sceau_ANOR_MASTER.png", imageBuffer);
@@ -754,7 +737,7 @@ app.post(
 );
 
 // ======================================================
-// VERIFICATION DU SCEAU CHROMATIQUE PRIORITAIRE (< 5s GARANTI)
+// VERIFICATION DU SCEAU CHROMATIQUE PRIORITAIRE (< 5s)
 // ======================================================
 
 app.post(
@@ -772,20 +755,18 @@ app.post(
             let row = null;
             let matchConfidence = 1.0;
 
-            // 1. Recherche prioritaire par Lot textuel ou code direct
             if (lot) {
-                const { data } = await supabase.from("produits_certifies").select("*").ilike("lot", String(lot).trim()).maybeSingle();[cite: 9]
+                const { data } = await supabase.from("produits_certifies").select("*").ilike("lot", String(lot).trim()).maybeSingle();
                 if (data) row = data;
             }
 
-            // 2. Recherche visuelle chromatique instantanée (peu importe la taille du sceau, ex: 2.5 cm)
             if (!row && scannedMatrix) {
                 if (typeof scannedMatrix === "string" && scannedMatrix.startsWith("data:image")) {
                     const matches = scannedMatrix.match(/^data:(.+);base64,(.+)$/);
                     if (matches) {
                         const geminiResult = await analyzeSealWithGemini(Buffer.from(matches[2], "base64"), matches[1]);
                         if (geminiResult && geminiResult.lot) {
-                            const { data } = await supabase.from("produits_certifies").select("*").ilike("lot", String(geminiResult.lot).trim()).maybeSingle();[cite: 9]
+                            const { data } = await supabase.from("produits_certifies").select("*").ilike("lot", String(geminiResult.lot).trim()).maybeSingle();
                             if (data) {
                                 row = data;
                                 matchConfidence = geminiResult.confidence || 0.98;
@@ -797,7 +778,7 @@ app.post(
                 if (!row) {
                     const analysis = await intelligentVisualAnalysis(scannedMatrix);
                     if (analysis.lot) {
-                        const { data } = await supabase.from("produits_certifies").select("*").ilike("lot", String(analysis.lot).trim()).maybeSingle();[cite: 9]
+                        const { data } = await supabase.from("produits_certifies").select("*").ilike("lot", String(analysis.lot).trim()).maybeSingle();
                         if (data) row = data;
                     }
                 }
@@ -808,7 +789,7 @@ app.post(
             }
 
             const currentScanCount = Number(row.scan_count || 0) + 1;
-            await supabase.from("produits_certifies").update({ scan_count: currentScanCount, last_scanned_at: new Date().toISOString() }).eq("lot", row.lot);[cite: 9]
+            await supabase.from("produits_certifies").update({ scan_count: currentScanCount, last_scanned_at: new Date().toISOString() }).eq("lot", row.lot);
 
             const processingTimeMs = Date.now() - startTime;
             console.log(`[PERFORMANCE] Vérification et lecture optique exécutées en ${processingTimeMs}ms (< 5s atteint).`);
