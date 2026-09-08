@@ -1,7 +1,7 @@
 /**
  * ====================================================================
  * ANOR CHECK
- * SEAL RENDERER V6.1 - COMPATIBLE SEAL DECODER V7
+ * SEAL RENDERER V6.1 - COMPATIBLE SEAL DECODER V7 & CHROMATIC PALETTE
  *
  * PROTOCOLE VISUEL
  *
@@ -41,17 +41,8 @@ const MIDDLE_VISIBLE_COUNT = 24;
 const OUTER_VISIBLE_COUNT = 20;
 const CANONICAL_OUTER_RADIUS = 375;
 
-// Palette de couleurs distinctes à fort contraste (incluant le noir)
-const GLYPH_COLORS = [
-    '#000000', // Noir
-    '#1B365D', // Bleu marine profond
-    '#A6192E', // Rouge cramoisi
-    '#006747', // Vert émeraude
-    '#5C2D91', // Violet foncé
-    '#D9531F', // Orange brûlé
-    '#008080', // Teal / Bleu-vert
-    '#708090'  // Gris ardoise foncé
-];
+// Palette de couleurs synchronisée avec GlyphsLibrary.colorsPalette
+const GLYPH_COLORS = Object.values(GlyphsLibrary.colorsPalette).map(c => c.hex);
 
 const sealRenderer = {
 
@@ -355,11 +346,11 @@ const sealRenderer = {
                 );
             }
 
-            // Le bit est directement le FULL / EMPTY du glyphe.
             const isFilled = visualBits[visibleIndex] === '1';
 
-            // Attribution d'une couleur distincte par glyphe issu de la palette
-            const glyphColor = GLYPH_COLORS[visibleIndex % GLYPH_COLORS.length];
+            // Attribution de la couleur via la palette centralisée de GlyphsLibrary
+            const glyphColorIndex = visibleIndex % Object.keys(GlyphsLibrary.colorsPalette).length;
+            const glyphColor = GlyphsLibrary.colorsPalette[glyphColorIndex].hex;
 
             ctx.save();
             ctx.translate(px, py);
@@ -473,14 +464,6 @@ const sealRenderer = {
     }
 };
 
-/**
- * Dessine un glyphe dans son état logique.
- *
- * FULL  -> surface pleine.
- * EMPTY -> contour / trait.
- *
- * Le plus possède donc lui aussi deux états lisibles.
- */
 function drawGlyphFromDefinition(
     ctx,
     type,

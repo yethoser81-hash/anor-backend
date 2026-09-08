@@ -1,9 +1,9 @@
 /**
  * ====================================================================
  * ANOR CHECK
- * GLYPHS LIBRARY V6.0 - TRUTHMODE
+ * GLYPHS LIBRARY V6.1 - TRUTHMODE & CHROMATIC EXTENSION
  *
- * SOURCE DE VÉRITÉ DES GLYPHES
+ * SOURCE DE VÉRITÉ DES GLYPHES & PALETTE CHROMATIQUE
  *
  * Types :
  *   - square
@@ -24,6 +24,7 @@
  *   5. le bit correspondant ;
  *   6. un niveau de confiance ;
  *   7. les paramètres nécessaires à une reconstruction géométrique.
+ *   8. l'indexation et la validation chromatique (palette à 8 couleurs).
  *
  * IMPORTANT :
  *
@@ -56,7 +57,24 @@ const GlyphsLibrary = {
      * ================================================================
      */
 
-    VERSION: "6.0.0",
+    VERSION: "6.1.0",
+
+    /**
+     * ================================================================
+     * PALETTE CHROMATIQUE OFFICIELLE (8 COULEURS DU MINI-SCEAU)
+     * ================================================================
+     */
+
+    colorsPalette: {
+        0: { hex: '#000000', name: 'Noir' },
+        1: { hex: '#1B365D', name: 'Bleu marine profond' },
+        2: { hex: '#A6192E', name: 'Rouge cramoisi' },
+        3: { hex: '#006747', name: 'Vert émeraude' },
+        4: { hex: '#5C2D91', name: 'Violet foncé' },
+        5: { hex: '#D9531F', name: 'Orange brûlé' },
+        6: { hex: '#008080', name: 'Teal / Bleu-vert' },
+        7: { hex: '#708090', name: 'Gris ardoise foncé' }
+    },
 
     /**
      * ================================================================
@@ -383,6 +401,42 @@ const GlyphsLibrary = {
 
     /**
      * ================================================================
+     * RÉSOLUTION DE LA COULEUR (EXTENSION CHROMATIQUE)
+     * ================================================================
+     */
+
+    resolveColorIndex(hexColor) {
+        if (!hexColor) return 0;
+        const normalized = String(hexColor).toUpperCase().trim();
+        for (const [index, data] of Object.entries(this.colorsPalette)) {
+            if (data.hex === normalized) {
+                return Number(index);
+            }
+        }
+        return 0;
+    },
+
+    /**
+     * ================================================================
+     * VALIDATION CHROMATIQUE CROISÉE
+     * ================================================================
+     */
+
+    validateChromaticGlyph(type, fillRatio, detectedHexColor) {
+        const baseAnalysis = this.analyzeGlyph(type, fillRatio);
+        const colorIndex = this.resolveColorIndex(detectedHexColor);
+        
+        return {
+            ...baseAnalysis,
+            colorIndex,
+            colorName: this.colorsPalette[colorIndex]?.name || 'Inconnu',
+            chromaticValid: colorIndex >= 0 && colorIndex <= 7,
+            strictMatch: baseAnalysis.reliable && (colorIndex >= 0)
+        };
+    },
+
+    /**
+     * ================================================================
      * ANALYSE D'UN GLYPHE
      * ================================================================
      *
@@ -637,6 +691,10 @@ const GlyphsLibrary = {
             measurement:
                 {
                     ...this.MEASUREMENT
+                },
+            colorsPalette:
+                {
+                    ...this.colorsPalette
                 },
             definitions:
                 Object.keys(

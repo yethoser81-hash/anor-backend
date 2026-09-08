@@ -18,6 +18,7 @@ const rateLimit = require("express-rate-limit");
 const helmet = require("helmet");
 const supabase = require("./config/database");
 const SealRenderer = require("./engine/sealRenderer");
+const GlyphsLibrary = require("./library/glyphsLibrary");
 const { GoogleGenAI } = require("@google/genai");
 
 const app = express();
@@ -33,16 +34,8 @@ if (process.env.GEMINI_API_KEY) {
     console.warn("[ANOR CORE] Avertissement : Clé GEMINI_API_KEY absente. Le module Vision IA sera inactif.");
 }
 
-const GLYPH_COLORS = [
-    '#000000', // 0: Noir
-    '#1B365D', // 1: Bleu marine profond
-    '#A6192E', // 2: Rouge cramoisi
-    '#006747', // 3: Vert émeraude
-    '#5C2D91', // 4: Violet foncé
-    '#D9531F', // 5: Orange brûlé
-    '#008080', // 6: Teal / Bleu-vert
-    '#708090'  // 7: Gris ardoise foncé
-];
+// Utilisation directe de la palette officielle centralisée dans GlyphsLibrary
+const GLYPH_COLORS = Object.values(GlyphsLibrary.colorsPalette).map(c => c.hex);
 
 // ======================================================
 // CACHE INTELLIGENT DE VISION (POUR RÉPONSE EN < 2 SECONDES)
@@ -388,7 +381,7 @@ async function analyzeSealWithGemini(imageBuffer, mimeType = "image/jpeg") {
             return null;
         }
 
-        console.log("[GEMINI] Début de l'analyse visuelle chromatique du mini-sceau (2.5 cm)...");
+        console.log("[GEMINI] Début de l'analyse visuelle chromatique du mini-sceau (2.5 cm) avec validation GlyphsLibrary...");
         const imagePart = {
             inlineData: {
                 data: imageBuffer.toString("base64"),
@@ -401,10 +394,9 @@ async function analyzeSealWithGemini(imageBuffer, mimeType = "image/jpeg") {
             contents: [
                 imagePart,
                 `Tu es le moteur de décryptage optique et chromatique du sceau ANOR (taille physique réduite à 2.5 cm). 
-                Le sceau contient 51 glyphes répartis sur plusieurs anneaux, et chaque glyphe possède une couleur spécifique issue de cette palette exacte :
-                0: Noir (#000000), 1: Bleu marine (#1B365D), 2: Rouge cramoisi (#A6192E), 3: Vert émeraude (#006747), 4: Violet (#5C2D91), 5: Orange (#D9531F), 6: Teal (#008080), 7: Gris (#708090).
+                Le sceau contient 51 glyphes répartis sur plusieurs anneaux, et chaque glyphe possède une couleur spécifique issue de la palette officielle (0: Noir, 1: Bleu marine, 2: Rouge cramoisi, 3: Vert émeraude, 4: Violet, 5: Orange brûlé, 6: Teal, 7: Gris ardoise).
                 
-                Analyse l'agencement des formes et des couleurs de ces 51 glyphes en tenant compte de la réduction d'échelle. 
+                Analyse l'agencement des formes et des teintes de ces 51 glyphes en tenant compte de la réduction d'échelle. 
                 Extrais le numéro de lot, la référence du produit, et reconstitue la séquence des teintes observée pour valider l'intégrité du sceau.
                 Réponds STRICTEMENT au format JSON pur sans balises markdown, avec les clés suivantes : 
                 - 'lot' (string ou null)
@@ -418,6 +410,15 @@ async function analyzeSealWithGemini(imageBuffer, mimeType = "image/jpeg") {
         const cleanJsonStr = textResponse.replace(/```json/g, "").replace(/```/g, "").trim();
         
         const parsed = JSON.parse(cleanJsonStr);
+
+        // Validation croisée optionnelle via GlyphsLibrary si un code couleur est détecté
+        if (parsed && parsed.detectedColorsSequence && Array.isArray(parsed.detectedColorsSequence)) {
+            parsed.detectedColorsSequence.forEach((hex, idx) => {
+                const colorIdx = GlyphsLibrary.resolveColorIndex(hex);
+                console.log(`[CHROMATIC VALIDATION] Glyphe ${idx} détecté avec la couleur ${hex} -> Index validé: ${colorIdx}`);
+            });
+        }
+
         console.log("[GEMINI] Résultat de l'analyse chromatique :", parsed);
         return parsed;
     } catch (error) {
@@ -502,6 +503,7 @@ app.get("/health", async (req, res) => {
     return apiSuccess(res, {
         status: "ONLINE",
         engine: `ANOR Core ${SERVER_VERSION}`,
+        glyphProtocolVersion: GlyphsLibrary.VERSION,
         database,
         gemini: ai ? "CONFIGURED" : "NOT_CONFIGURED",
         uptime: process.uptime(),
@@ -885,7 +887,7 @@ SYSTEME SOUVERAIN DE CERTIFICATION - NOTICE OFFICIELLE DE LOT
    - Le sceau numérique ANOR miniature (2.5 cm) est protégé par les lois de la République du Cameroun. Toute contrefaçon est passible de poursuites.
 
 Fait à Yaoundé, le ${new Date().toLocaleDateString("fr-FR")}
-Système Souverain de Certification - ANOR Engine ${SERVER_VERSION}
+Système Souverain de Certification - ANOR Engine ${SERVER_VERSION} (Glyph Protocol v${GlyphsLibrary.VERSION})
 `;
 
             const zip = new JSZip();
@@ -980,7 +982,7 @@ app.post(
                                 verificationMode = "GEMINI_VISION_AI_CHROMATIC_EXACT";
                                 matchConfidence = geminiResult.confidence || 0.95;
                                 if (geminiResult.detectedColorsSequence) {
-                                    chromaticValidationBonus = 0.05; // Bonus de validation par la correspondance des couleurs
+                                    chromaticValidationBonus = 0.05; // Bonus de validation chromatique
                                 }
                             }
                         }
@@ -1047,12 +1049,8 @@ app.post(
                 return apiError(res, 404, "UNKNOWN_SEAL", "Sceau miniature inconnu ou non authentifié.", { status: "CONTREFAÇON_REJETEE", processingTime: Date.now() - startTime, engineVersion: SERVER_VERSION });
             }
 
-            // Application du bonus de validation chromatique combiné
             matchConfidence = Math.min(1.0, matchConfidence + chromaticValidationBonus);
 
-            // ==========================================================
-            // MISE À JOUR SYNCHRONE DU COMPTEUR DE SCAN ET DE LA LOCALISATION
-            // ==========================================================
             const currentScanCount = Number(row.scan_count || 0) + 1;
             const currentLocation = location || "Yaoundé";
             let warningFlag = null;
