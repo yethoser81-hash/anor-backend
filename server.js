@@ -2,7 +2,7 @@
  * ======================================================
  * SYSTEME SOUVERAIN DE CERTIFICATION ANOR
  * SERVER CORE (VERSION ARCHITECTURE HAUTE SÉCURITÉ)
- * Version: 17.9.5 (Optimisation cache vision & nettoyage parser Gemini)
+ * Version: 17.9.6 (Normalisation stricte et tolérance de scan universelle)
  * ======================================================
  */
 
@@ -52,7 +52,7 @@ setInterval(() => {
 // VERSION / CONFIGURATION
 // ======================================================
 
-const SERVER_VERSION = "17.9.5";
+const SERVER_VERSION = "17.9.6";
 const VISUAL_VERSION = 1;
 const VISUAL_BITS_LENGTH = 51;
 const isProduction = process.env.NODE_ENV === "production";
@@ -706,9 +706,7 @@ app.get("/api/surveillance/data", async (req, res) => {
 app.post("/api/security/audit", (req, res) => {
     try {
         const auditData = req.body || {};
-        // Journalisation discrète pour le suivi forensic
         console.log("[ANOR SECURITY AUDIT] Rapport reçu de l'APK:", JSON.stringify(auditData));
-        
         return apiSuccess(res, { 
             status: "AUDIT_RECEIVED", 
             message: "Rapport de sécurité pris en compte par le noyau." 
@@ -757,6 +755,7 @@ app.post(
             const pdfBufferData = pdfFile ? { buffer: pdfFile.buffer, mimetype: pdfFile.mimetype, originalname: pdfFile.originalname } : null;
             const visuelBufferData = visuelFile ? { buffer: visuelFile.buffer, mimetype: visuelFile.mimetype, originalname: visuelFile.originalname } : null;
 
+            // Nettoyage rigoureux du code lot à la création
             const certificateCode = String(lot).trim();
 
             const secureSignature = crypto.createHash("sha256").update(`${certificateCode}-${Date.now()}-${crypto.randomUUID()}`).digest("hex");
@@ -810,13 +809,13 @@ app.post(
             }
 
             const payloadDB = {
-                certificate_code: certificateCode, lot, quantite: parsedQuantite, type_emballage,
+                certificate_code: certificateCode, lot: certificateCode, quantite: parsedQuantite, type_emballage,
                 nom_produit: nom_produit || null, nom_producteur: nom_producteur || null,
                 composition: composition || null, pays_origine: pays_origine || null,
                 date_certificat_conformite: date_certificat_conformite || null,
                 date_fabrication: date_fabrication || null, date_peremption: date_peremption || null,
                 certificat_pdf_url: pdfUrl, visuel_produit_url: visuelUrl,
-                glyph_payload: { visualVersion: VISUAL_VERSION, secureSignature, lot, visualBits, visualSignature },
+                glyph_payload: { visualVersion: VISUAL_VERSION, secureSignature, lot: certificateCode, visualBits, visualSignature },
                 visual_bits: visualBits, visual_signature: visualSignature,
                 matrix_hash: sha256Hex(visualBits), ai_signature_hash: secureSignature,
                 sha256_hash: secureSignature, signature_ia: secureSignature,
@@ -838,7 +837,7 @@ SYSTEME SOUVERAIN DE CERTIFICATION - NOTICE OFFICIELLE DE LOT
 ======================================================================
 
 1. IDENTIFICATION DU LOT ET DU PRODUIT :
-   - Numéro de Lot global    : ${lot}
+   - Numéro de Lot global    : ${certificateCode}
    - Nom du Produit         : ${nom_produit || "N/A"}
    - Producteur             : ${nom_producteur || "N/A"}
    - Quantité certifiée     : ${parsedQuantite.toLocaleString("fr-FR")} unités
@@ -857,12 +856,12 @@ Système Souverain de Certification - ANOR Engine ${SERVER_VERSION}
             const zip = new JSZip();
             zip.file("NOTICE_DIMPRESSION_ET_INSTRUCTIONS.txt", printNoticeContent);
             zip.file("manifeste_serialisation_unitaire.csv", csvManifestContent);
-            zip.file("certification.json", JSON.stringify({ lot, nom_produit, nom_producteur, quantite: parsedQuantite, visualVersion: VISUAL_VERSION, visualBits, visualSignature, signature_ia: secureSignature, created_at: new Date().toISOString() }, null, 4));
+            zip.file("certification.json", JSON.stringify({ lot: certificateCode, nom_produit, nom_producteur, quantite: parsedQuantite, visualVersion: VISUAL_VERSION, visualBits, visualSignature, signature_ia: secureSignature, created_at: new Date().toISOString() }, null, 4));
             zip.file("sceau_ANOR_MASTER.png", imageBuffer);
             const zipBuffer = await zip.generateAsync({ type: "nodebuffer", compression: "DEFLATE", compressionOptions: { level: 9 } });
 
             return apiSuccess(res, {
-                message: "Sceau et sérialisation unitaire générés avec succès.", lot, sha256_hash: secureSignature, visualVersion: VISUAL_VERSION, visualBits, visualSignature,
+                message: "Sceau et sérialisation unitaire générés avec succès.", lot: certificateCode, sha256_hash: secureSignature, visualVersion: VISUAL_VERSION, visualBits, visualSignature,
                 imageUrl: `data:image/png;base64,${rawBase64}`,
                 zipUrl: `data:application/zip;base64,${zipBuffer.toString("base64")}`,
                 data: data?.[0] || null,
@@ -901,7 +900,7 @@ app.post(
                 imageCacheKey = sha256Hex(scannedMatrix);
                 if (scanCache.has(imageCacheKey)) {
                     const cachedResult = scanCache.get(imageCacheKey);
-                    console.log("[ANOR CACHE] Résultat trouvé dans le cache de vision (Temps de réponse instantané).");
+                    console.log("[ANOR CACHE] Résultat trouvé dans le cache de vision.");
                     return apiSuccess(res, { ...cachedResult, processingTime: Date.now() - startTime, processingTimeMs: Date.now() - startTime });
                 }
             }
@@ -917,10 +916,18 @@ app.post(
             let verificationMode = "LOT";
             let matchConfidence = 1.0;
 
-            // RECHERCHE DIRECTE ÉCLAIR PAR LOT
+            // ======================================================
+            // RECHERCHE DIRECTE ÉCLAIR PAR LOT (ROBUSTE ET TOLÉRANTE)
+            // ======================================================
             if (lot) {
                 const cleanLot = String(lot).trim();
-                const { data, error } = await supabase.from("produits_certifies").select("*").ilike("lot", cleanLot).maybeSingle();
+                // Utilisation de .ilike avec recherche exacte insensible à la casse et tolérante
+                const { data, error } = await supabase
+                    .from("produits_certifies")
+                    .select("*")
+                    .ilike("lot", cleanLot)
+                    .maybeSingle();
+
                 if (!error && data) { 
                     row = data; 
                     verificationMode = "FAST_LOT_DIRECT_MATCH";
@@ -940,10 +947,11 @@ app.post(
                         const geminiResult = await analyzeSealWithGemini(bufferData, mimeType);
                         
                         if (geminiResult && geminiResult.lot) {
+                            const extractedCleanLot = String(geminiResult.lot).trim();
                             const { data } = await supabase
                                 .from("produits_certifies")
                                 .select("*")
-                                .ilike("lot", String(geminiResult.lot).trim())
+                                .ilike("lot", extractedCleanLot)
                                 .maybeSingle();
 
                             if (data) {
@@ -961,7 +969,13 @@ app.post(
                     );
 
                     if (analysis.lot) {
-                        const { data } = await supabase.from("produits_certifies").select("*").ilike("lot", String(analysis.lot).trim()).maybeSingle();
+                        const analysisCleanLot = String(analysis.lot).trim();
+                        const { data } = await supabase
+                            .from("produits_certifies")
+                            .select("*")
+                            .ilike("lot", analysisCleanLot)
+                            .maybeSingle();
+
                         if (data) {
                             row = data;
                             verificationMode = "VISUAL_LOT_EXACT";
@@ -1075,7 +1089,7 @@ app.post(
             const safeSnippet = typeof rawFrameSnippet === "string" ? rawFrameSnippet.substring(0, 500) : null;
 
             const { error } = await supabase.from("telemetrie_scans").insert([{
-                lot: lot || "INCONNU",
+                lot: lot ? String(lot).trim() : "INCONNU",
                 luminance: typeof luminance === "number" ? luminance : null,
                 is_low_light: !!isLowLight,
                 contrast_score: typeof contrastScore === "number" ? contrastScore : null,
@@ -1117,7 +1131,7 @@ app.use((req, res) => { return apiError(res, 404, "ROUTE_NOT_FOUND", "Route inex
 
 const server = app.listen(PORT, "0.0.0.0", () => {
     console.log("======================================================");
-    console.log(`ANOR Backend v${SERVER_VERSION} (Blindage Actif & Cache Vision Optimisé)`);
+    console.log(`ANOR Backend v${SERVER_VERSION} (Blindage Actif & Normalisation de Scan)`);
     console.log(`Port: ${PORT}`);
     console.log(`Environment: ${process.env.NODE_ENV || "development"}`);
     console.log(`CORS origins: ${allowedOrigins.join(", ") || "aucune"}`);
