@@ -700,6 +700,26 @@ app.get("/api/surveillance/data", async (req, res) => {
 });
 
 // ======================================================
+// ROUTE API : AUDIT DE SÉCURITÉ (MOBILE APK)
+// ======================================================
+
+app.post("/api/security/audit", (req, res) => {
+    try {
+        const auditData = req.body || {};
+        // Journalisation discrète pour le suivi forensic
+        console.log("[ANOR SECURITY AUDIT] Rapport reçu de l'APK:", JSON.stringify(auditData));
+        
+        return apiSuccess(res, { 
+            status: "AUDIT_RECEIVED", 
+            message: "Rapport de sécurité pris en compte par le noyau." 
+        });
+    } catch (error) {
+        console.error("[SECURITY AUDIT ERROR]", error.message);
+        return apiError(res, 500, "AUDIT_ERROR", "Échec du traitement de l'audit.");
+    }
+});
+
+// ======================================================
 // GENERATION DU SCEAU & KIT DE SÉRIALISATION
 // ======================================================
 

@@ -1,7 +1,7 @@
 /**
  * ====================================================================
  * ANOR CHECK
- * SEAL RENDERER V6.9 - BLOC TEXTE COMPACT & SÉRIE HAUTE LISIBILITÉ (2.5CM)
+ * SEAL RENDERER V7.1 - BLOC TEXTE ÉLARGI & HAUTE LISIBILITÉ (2.5CM)
  * ====================================================================
  */
 
@@ -322,7 +322,7 @@ const sealRenderer = {
                 glyphType,
                 glyphDef,
                 isFilled,
-                glyphScale,
+            glyphScale,
                 strokeWidth
             );
 
@@ -374,24 +374,24 @@ const sealRenderer = {
         ctx.restore();
 
         // ------------------------------------------------------------
-        // 7. BLOC TEXTE (LOT & SÉRIE) - COMPACT ET HAUTE LISIBILITÉ
+        // 7. BLOC TEXTE (LOT & SÉRIE) - PLUS LARGE & ÉPAIS (OPTIMISÉ 2.5CM)
         // ------------------------------------------------------------
         ctx.save();
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
 
         const textY = centerY + 128 * scale; 
-        const boxWidth = 230 * scale; // Largeur réduite et compacte
-        const boxHeight = 52 * scale;
+        const boxWidth = 295 * scale; // Largeur optimisée pour éviter l'effet étriqué
+        const boxHeight = 58 * scale;
 
         // Boîte blanche de fond
         ctx.fillStyle = 'rgba(255, 255, 255, 0.98)';
         ctx.beginPath();
-        ctx.roundRect(centerX - boxWidth / 2, textY - boxHeight / 2, boxWidth, boxHeight, 8 * scale);
+        ctx.roundRect(centerX - boxWidth / 2, textY - boxHeight / 2, boxWidth, boxHeight, 10 * scale);
         ctx.fill();
         
         ctx.strokeStyle = '#94A3B8';
-        ctx.lineWidth = 1.6 * scale;
+        ctx.lineWidth = 1.8 * scale;
         ctx.stroke();
 
         const drawOutlinedText = (
@@ -403,28 +403,28 @@ const sealRenderer = {
         ) => {
             ctx.font = font;
             ctx.strokeStyle = '#FFFFFF';
-            ctx.lineWidth = Math.max(3, 4 * scale);
+            ctx.lineWidth = Math.max(4, 5 * scale); // Contour large pour détacher les caractères des glyphes
             ctx.lineJoin = 'round';
             ctx.strokeText(text, x, y);
             ctx.fillStyle = textColor;
             ctx.fillText(text, x, y);
         };
 
-        // Nom du Lot
+        // Nom du Lot (plus grand et plus gras)
         drawOutlinedText(
             batchText,
             centerX,
-            textY - 9 * scale,
-            `bold ${Math.max(20, Math.round(24 * scale))}px sans-serif`,
+            textY - 10 * scale,
+            `bold ${Math.max(22, Math.round(28 * scale))}px sans-serif`,
             '#0F172A'
         );
 
-        // Numéro de série / DM (agrandi et renforcé pour impression 2.5cm)
+        // Numéro de série / DM (plus épais, bien lisible en format compact)
         drawOutlinedText(
             itemText,
             centerX,
-            textY + 13 * scale,
-            `bold ${Math.max(16, Math.round(20 * scale))}px monospace`,
+            textY + 14 * scale,
+            `bold ${Math.max(18, Math.round(22 * scale))}px sans-serif`,
             '#1D4ED8'
         );
 
@@ -555,4 +555,4 @@ function drawGlyphFromDefinition(
     }
 }
 
-module.exports = sealRenderer;   
+module.exports = sealRenderer;
