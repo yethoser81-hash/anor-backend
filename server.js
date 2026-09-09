@@ -2,7 +2,7 @@
  * ======================================================
  * SYSTEME SOUVERAIN DE CERTIFICATION ANOR
  * SERVER CORE (VERSION ARCHITECTURE HAUTE SÉCURITÉ)
- * Version: 18.1.0 (Optimisation Haute Performance & Binaire Pur)
+ * Version: 18.1.1 (Correction Recherche Multi-Critères Turbo)
  * ======================================================
  */
 
@@ -53,7 +53,7 @@ setInterval(() => {
 // VERSION / CONFIGURATION
 // ======================================================
 
-const SERVER_VERSION = "18.1.0";
+const SERVER_VERSION = "18.1.1";
 const VISUAL_VERSION = 1;
 const VISUAL_BITS_LENGTH = 51;
 const isProduction = process.env.NODE_ENV === "production";
@@ -447,7 +447,6 @@ app.get("/health", async (req, res) => {
 
 app.get("/api/dashboard/stats", async (req, res) => {
     try {
-        // Requête ultra-rapide avec comptage direct en base (évite le scan lourd complet)
         const { count: totalProducts, error: countError } = await supabase
             .from("produits_certifies")
             .select("*", { count: "exact", head: true });
@@ -705,7 +704,6 @@ app.post(
 
             await supabase.from("produits_certifies").upsert(payloadDB, { onConflict: "lot" });
 
-            // Lancement de la sérialisation en arrière-plan
             generateUnitSerialsAndManifestAsync(certificateCode, parsedQuantite, secureSignature);
 
             const csvManifestContent = `Index,Numero_De_Serie,Hachage_Securise\n1,${certificateCode}-000001,${secureSignature}`;
@@ -747,24 +745,34 @@ app.post(
             const { scannedMatrix, lot, visualBits: requestVisualBits, visualSignature: requestVisualSignature, location } = req.body;
 
             let row = null;
-            let matchConfidence = 1.0;
+            const analysis = await intelligentVisualAnalysis(scannedMatrix || lot || requestVisualBits);
 
-            if (lot) {
-                const { data } = await supabase.from("produits_certifies").select("*").ilike("lot", String(lot).trim()).maybeSingle();
-                if (data) row = data;
-            }
+            // Construction d'une requête de recherche large multi-critères et insensible à la casse
+            const searchTerms = [];
+            if (lot) searchTerms.push(String(lot).trim());
+            if (analysis.lot) searchTerms.push(String(analysis.lot).trim());
+            if (analysis.bits) searchTerms.push(String(analysis.bits).trim());
+            if (analysis.signature) searchTerms.push(String(analysis.signature).trim());
+            if (requestVisualBits) searchTerms.push(String(requestVisualBits).trim());
+            if (requestVisualSignature) searchTerms.push(String(requestVisualSignature).trim());
+            if (typeof scannedMatrix === "string") searchTerms.push(String(scannedMatrix).trim());
 
-            if (!row && scannedMatrix) {
-                const analysis = await intelligentVisualAnalysis(scannedMatrix);
-                
-                if (analysis.lot) {
-                    const { data } = await supabase.from("produits_certifies").select("*").ilike("lot", String(analysis.lot).trim()).maybeSingle();
-                    if (data) row = data;
-                }
+            const uniqueTerms = [...new Set(searchTerms.filter(Boolean))];
 
-                if (!row && analysis.bits) {
-                    const { data } = await supabase.from("produits_certifies").select("*").eq("visual_bits", analysis.bits).maybeSingle();
-                    if (data) row = data;
+            if (uniqueTerms.length > 0) {
+                // Construction du filtre .or() pour interroger toutes les colonnes en une seule fois
+                const orQuery = uniqueTerms.map(term => 
+                    `lot.ilike.%${term}%,certificate_code.ilike.%${term}%,visual_bits.eq.${term},visual_signature.ilike.%${term}%`
+                ).join(",");
+
+                const { data, error } = await supabase
+                    .from("produits_certifies")
+                    .select("*")
+                    .or(orQuery)
+                    .limit(1);
+
+                if (!error && data && data.length > 0) {
+                    row = data[0];
                 }
             }
 
@@ -788,7 +796,7 @@ app.post(
             console.log(`[PERFORMANCE] Vérification optique binaire exécutée en ${processingTimeMs}ms.`);
 
             return apiSuccess(res, {
-                status: "AUTHENTIQUE", verified: true, confidence: matchConfidence,
+                status: "AUTHENTIQUE", verified: true, confidence: analysis.confidence || 1.0,
                 lot: row.lot, batch: row.lot,
                 nom_produit: row.nom_produit || "Produit Certifié Conforme",
                 nom_producteur: row.nom_producteur || "Producteur Agréé",
