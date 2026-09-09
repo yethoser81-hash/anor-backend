@@ -1,7 +1,7 @@
 /**
  * ====================================================================
  * ANOR CHECK
- * SEAL RENDERER V6.6 - CORRECTION ESPACEMENT SUPÉRIEUR & CENTRAGE
+ * SEAL RENDERER V6.8 - LOGO AU CENTRE & BLOC TEXTE EN BAS
  * ====================================================================
  */
 
@@ -231,6 +231,9 @@ const sealRenderer = {
             );
         }
 
+        // ------------------------------------------------------------
+        // 3. CERCLE EXTERIEUR
+        // ------------------------------------------------------------
         ctx.save();
         ctx.strokeStyle = GEOMETRY_COLOR;
         ctx.lineWidth = 6;
@@ -239,6 +242,9 @@ const sealRenderer = {
         ctx.stroke();
         ctx.restore();
 
+        // ------------------------------------------------------------
+        // 4. RENDU DU LOGO (STRICTEMENT AU CENTRE)
+        // ------------------------------------------------------------
         const logoPath =
             options.logoPath ||
             payload.logoPath ||
@@ -247,7 +253,7 @@ const sealRenderer = {
         if (fs.existsSync(logoPath)) {
             try {
                 const img = await loadImage(logoPath);
-                const logoOffsetY = -15 * scale;
+                const logoOffsetY = 0; // Logo maintenu parfaitement au centre
                 ctx.drawImage(
                     img,
                     centerX - logoRadius,
@@ -262,6 +268,9 @@ const sealRenderer = {
             console.warn('[sealRenderer] Avertissement : Le fichier logo est introuvable au chemin :', logoPath);
         }
 
+        // ------------------------------------------------------------
+        // 5. GLYPHES
+        // ------------------------------------------------------------
         const positions = this.getVisiblePositions();
         const glyphScale = Number.isFinite(options.glyphScale)
             ? Math.max(0.9, Math.min(1.45, options.glyphScale))
@@ -322,6 +331,9 @@ const sealRenderer = {
 
         ctx.restore();
 
+        // ------------------------------------------------------------
+        // 6. MIRES CARDINALES
+        // ------------------------------------------------------------
         const finderSize = Math.max(
             30,
             Math.round((outerRadius / CANONICAL_OUTER_RADIUS) * 44)
@@ -361,17 +373,23 @@ const sealRenderer = {
         }
         ctx.restore();
 
+        // ------------------------------------------------------------
+        // 7. BLOC TEXTE (LOT & SÉRIE) - DÉPLACÉ DANS L'ESPACE VIDE EN BAS
+        // ------------------------------------------------------------
         ctx.save();
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
 
-        const textY = centerY + 48 * scale; 
+        // Position Y abaissée à +130 pour placer le rectangle blanc tout en bas dans l'espace vide
+        const textY = centerY + 130 * scale; 
 
+        // Boîte blanche lisible avec dimensions équilibrées
         ctx.fillStyle = 'rgba(255, 255, 255, 0.98)';
         ctx.beginPath();
         ctx.roundRect(centerX - 155 * scale, textY - 26 * scale, 310 * scale, 54 * scale, 10 * scale);
         ctx.fill();
         
+        // Bordure du bloc texte
         ctx.strokeStyle = '#94A3B8';
         ctx.lineWidth = 1.8 * scale;
         ctx.stroke();
@@ -392,6 +410,7 @@ const sealRenderer = {
             ctx.fillText(text, x, y);
         };
 
+        // Nom du Lot
         drawOutlinedText(
             batchText,
             centerX,
@@ -400,6 +419,7 @@ const sealRenderer = {
             '#0F172A'
         );
 
+        // Numéro de série / DM
         drawOutlinedText(
             itemText,
             centerX,
