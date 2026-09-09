@@ -53,17 +53,15 @@ const sealRenderer = {
         return types[visibleIndex % types.length];
     },
 
-    // --- MODIFICATION PARTIE 1 : GÉOMÉTRIE & ESPACEMENT DU LOGO ---
     getGeometry(width, height) {
         const outerRadius = Math.min(width, height) / 2 - 25;
         const centerX = width / 2;
         const centerY = height / 2;
         
-        // Taille du logo optimisée pour laisser une marge de sécurité autour
         const logoSize = 180; 
         const logoRadius = logoSize / 2;
 
-        const innerRingRadius = logoRadius + 50; // Marge nette garantie avec les glyphes intérieurs
+        const innerRingRadius = logoRadius + 50; 
         const outerRingRadius = outerRadius - 30;
         const midRingRadius = (innerRingRadius + outerRingRadius) / 2;
 
@@ -177,9 +175,6 @@ const sealRenderer = {
             ctx.restore();
         }
 
-        // ------------------------------------------------------------
-        // 1. LOT / IDENTIFICATION
-        // ------------------------------------------------------------
         const rawBatchName =
             payload.lot ||
             payload.batchNumber ||
@@ -217,9 +212,6 @@ const sealRenderer = {
                 ? `N° ${rawItemNumber}`
                 : 'DM / 000 000';
 
-        // ------------------------------------------------------------
-        // 2. MATRICE VISUELLE
-        // ------------------------------------------------------------
         const secureSignature =
             payload.secureSignature ||
             payload.glyph_payload?.secureSignature ||
@@ -239,9 +231,6 @@ const sealRenderer = {
             );
         }
 
-        // ------------------------------------------------------------
-        // 3. CERCLE EXTERIEUR
-        // ------------------------------------------------------------
         ctx.save();
         ctx.strokeStyle = GEOMETRY_COLOR;
         ctx.lineWidth = 6;
@@ -250,7 +239,6 @@ const sealRenderer = {
         ctx.stroke();
         ctx.restore();
 
-        // --- MODIFICATION PARTIE 2 : POSITIONNEMENT DU LOGO (ANTI-COLLISION HAUTE) ---
         const logoPath =
             options.logoPath ||
             payload.logoPath ||
@@ -259,7 +247,6 @@ const sealRenderer = {
         if (fs.existsSync(logoPath)) {
             try {
                 const img = await loadImage(logoPath);
-                // Décalage vertical réduit à -15 pour laisser de l'air au-dessus (plus de collision avec le glyphe '+')
                 const logoOffsetY = -15 * scale;
                 ctx.drawImage(
                     img,
@@ -275,9 +262,6 @@ const sealRenderer = {
             console.warn('[sealRenderer] Avertissement : Le fichier logo est introuvable au chemin :', logoPath);
         }
 
-        // ------------------------------------------------------------
-        // 5. GLYPHES
-        // ------------------------------------------------------------
         const positions = this.getVisiblePositions();
         const glyphScale = Number.isFinite(options.glyphScale)
             ? Math.max(0.9, Math.min(1.45, options.glyphScale))
@@ -338,9 +322,6 @@ const sealRenderer = {
 
         ctx.restore();
 
-        // ------------------------------------------------------------
-        // 6. MIRES CARDINALES
-        // ------------------------------------------------------------
         const finderSize = Math.max(
             30,
             Math.round((outerRadius / CANONICAL_OUTER_RADIUS) * 44)
@@ -380,20 +361,17 @@ const sealRenderer = {
         }
         ctx.restore();
 
-        // --- MODIFICATION PARTIE 3 : BLOC TEXTE (LOT & SÉRIE AGRANDIS ET BIEN POSITIONNÉS) ---
         ctx.save();
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
 
-        const textY = centerY + 38 * scale; // Position centrale inférieure harmonieuse
+        const textY = centerY + 48 * scale; 
 
-        // Boîte blanche lisible avec dimensions équilibrées
         ctx.fillStyle = 'rgba(255, 255, 255, 0.98)';
         ctx.beginPath();
-        ctx.roundRect(centerX - 155 * scale, textY - 28 * scale, 310 * scale, 56 * scale, 10 * scale);
+        ctx.roundRect(centerX - 155 * scale, textY - 26 * scale, 310 * scale, 54 * scale, 10 * scale);
         ctx.fill();
         
-        // Bordure du bloc texte
         ctx.strokeStyle = '#94A3B8';
         ctx.lineWidth = 1.8 * scale;
         ctx.stroke();
@@ -414,16 +392,14 @@ const sealRenderer = {
             ctx.fillText(text, x, y);
         };
 
-        // Nom du Lot (Police grand format lisible)
         drawOutlinedText(
             batchText,
             centerX,
-            textY - 10 * scale,
+            textY - 9 * scale,
             `bold ${Math.max(22, Math.round(28 * scale))}px sans-serif`,
             '#0F172A'
         );
 
-        // Numéro de série / DM (Police grand format lisible)
         drawOutlinedText(
             itemText,
             centerX,
