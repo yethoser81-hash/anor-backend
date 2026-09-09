@@ -1,7 +1,7 @@
 /**
  * ====================================================================
  * ANOR CHECK
- * SEAL RENDERER V6.8 - LOGO AU CENTRE & BLOC TEXTE EN BAS
+ * SEAL RENDERER V6.9 - BLOC TEXTE COMPACT & SÉRIE HAUTE LISIBILITÉ (2.5CM)
  * ====================================================================
  */
 
@@ -253,7 +253,7 @@ const sealRenderer = {
         if (fs.existsSync(logoPath)) {
             try {
                 const img = await loadImage(logoPath);
-                const logoOffsetY = 0; // Logo maintenu parfaitement au centre
+                const logoOffsetY = 0;
                 ctx.drawImage(
                     img,
                     centerX - logoRadius,
@@ -374,24 +374,24 @@ const sealRenderer = {
         ctx.restore();
 
         // ------------------------------------------------------------
-        // 7. BLOC TEXTE (LOT & SÉRIE) - DÉPLACÉ DANS L'ESPACE VIDE EN BAS
+        // 7. BLOC TEXTE (LOT & SÉRIE) - COMPACT ET HAUTE LISIBILITÉ
         // ------------------------------------------------------------
         ctx.save();
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
 
-        // Position Y abaissée à +130 pour placer le rectangle blanc tout en bas dans l'espace vide
-        const textY = centerY + 130 * scale; 
+        const textY = centerY + 128 * scale; 
+        const boxWidth = 230 * scale; // Largeur réduite et compacte
+        const boxHeight = 52 * scale;
 
-        // Boîte blanche lisible avec dimensions équilibrées
+        // Boîte blanche de fond
         ctx.fillStyle = 'rgba(255, 255, 255, 0.98)';
         ctx.beginPath();
-        ctx.roundRect(centerX - 155 * scale, textY - 26 * scale, 310 * scale, 54 * scale, 10 * scale);
+        ctx.roundRect(centerX - boxWidth / 2, textY - boxHeight / 2, boxWidth, boxHeight, 8 * scale);
         ctx.fill();
         
-        // Bordure du bloc texte
         ctx.strokeStyle = '#94A3B8';
-        ctx.lineWidth = 1.8 * scale;
+        ctx.lineWidth = 1.6 * scale;
         ctx.stroke();
 
         const drawOutlinedText = (
@@ -403,7 +403,7 @@ const sealRenderer = {
         ) => {
             ctx.font = font;
             ctx.strokeStyle = '#FFFFFF';
-            ctx.lineWidth = Math.max(4, 5 * scale);
+            ctx.lineWidth = Math.max(3, 4 * scale);
             ctx.lineJoin = 'round';
             ctx.strokeText(text, x, y);
             ctx.fillStyle = textColor;
@@ -415,16 +415,16 @@ const sealRenderer = {
             batchText,
             centerX,
             textY - 9 * scale,
-            `bold ${Math.max(22, Math.round(28 * scale))}px sans-serif`,
+            `bold ${Math.max(20, Math.round(24 * scale))}px sans-serif`,
             '#0F172A'
         );
 
-        // Numéro de série / DM
+        // Numéro de série / DM (agrandi et renforcé pour impression 2.5cm)
         drawOutlinedText(
             itemText,
             centerX,
-            textY + 14 * scale,
-            `bold ${Math.max(15, Math.round(19 * scale))}px monospace`,
+            textY + 13 * scale,
+            `bold ${Math.max(16, Math.round(20 * scale))}px monospace`,
             '#1D4ED8'
         );
 
