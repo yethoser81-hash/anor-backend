@@ -1,7 +1,7 @@
 /**
  * ====================================================================
  * ANOR CHECK
- * SEAL RENDERER V6.2 - OPTIMISÉ POUR FORMATS RÉDUITS (2.5 CM) & VITESSE
+ * SEAL RENDERER V6.3 - OPTIMISÉ POUR FORMATS RÉDUITS (2.5 CM) & LISIBILITÉ
  * ====================================================================
  */
 
@@ -246,7 +246,7 @@ const sealRenderer = {
         ctx.restore();
 
         // ------------------------------------------------------------
-        // 4. LOGO CENTRAL & ZONE TEXTE ÉPURÉE
+        // 4. LOGO CENTRAL (ISOLÉ ET DÉGAGÉ DE LA ZONE TEXTE)
         // ------------------------------------------------------------
         const logoPath =
             options.logoPath ||
@@ -256,10 +256,11 @@ const sealRenderer = {
         if (fs.existsSync(logoPath)) {
             try {
                 const img = await loadImage(logoPath);
+                // Le logo est positionné plus haut pour laisser l'espace central libre
                 ctx.drawImage(
                     img,
                     centerX - logoRadius,
-                    centerY - logoRadius - 35,
+                    centerY - logoRadius - 55,
                     logoSize,
                     logoSize
                 );
@@ -376,20 +377,25 @@ const sealRenderer = {
         ctx.restore();
 
         // ------------------------------------------------------------
-        // 7. TEXTE CENTRAL HAUTE VISIBILITÉ (FORMATS 2.5 CM)
+        // 7. TEXTE CENTRAL HAUTE VISIBILITÉ (FOND BLANC DÉDIÉ ET AGRANDI)
         // ------------------------------------------------------------
         ctx.save();
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
 
         const scale = outerRadius / CANONICAL_OUTER_RADIUS;
-        const textY = centerY + 8 * scale; 
+        const textY = centerY + 30 * scale; // Décalé sous le logo pour éviter toute superposition
 
-        // Fond semi-opaque blanc pour isoler nettement le texte du logo de fond
-        ctx.fillStyle = 'rgba(255, 255, 255, 0.92)';
+        // Fond blanc opaque haute visibilité pour isoler totalement le texte
+        ctx.fillStyle = 'rgba(255, 255, 255, 0.98)';
         ctx.beginPath();
-        ctx.roundRect(centerX - 120 * scale, textY - 26 * scale, 240 * scale, 56 * scale, 8 * scale);
+        ctx.roundRect(centerX - 135 * scale, textY - 28 * scale, 270 * scale, 60 * scale, 10 * scale);
         ctx.fill();
+        
+        // Bordure subtile autour du bloc texte pour un rendu professionnel
+        ctx.strokeStyle = '#CBD5E1';
+        ctx.lineWidth = 1.5 * scale;
+        ctx.stroke();
 
         const drawOutlinedText = (
             text,
@@ -407,21 +413,21 @@ const sealRenderer = {
             ctx.fillText(text, x, y);
         };
 
-        // Nom du Lot mis en valeur (Gras et lisible)
+        // Nom du Lot mis en valeur (Gras et police augmentée)
         drawOutlinedText(
             batchText,
             centerX,
-            textY - 10 * scale,
-            `bold ${Math.max(18, Math.round(24 * scale))}px sans-serif`,
+            textY - 11 * scale,
+            `bold ${Math.max(20, Math.round(26 * scale))}px sans-serif`,
             '#0F172A'
         );
 
-        // Numéro de série net
+        // Numéro de série net et lisible
         drawOutlinedText(
             itemText,
             centerX,
-            textY + 14 * scale,
-            `bold ${Math.max(14, Math.round(18 * scale))}px monospace`,
+            textY + 15 * scale,
+            `bold ${Math.max(15, Math.round(19 * scale))}px monospace`,
             '#1D4ED8'
         );
 

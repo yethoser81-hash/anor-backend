@@ -2,7 +2,7 @@
  * ======================================================
  * SYSTEME SOUVERAIN DE CERTIFICATION ANOR
  * SERVER CORE (VERSION ARCHITECTURE HAUTE SÉCURITÉ)
- * Version: 17.9.4 (Ajout cache intelligent pour les scans Gemini & optimisation vitesse)
+ * Version: 17.9.5 (Optimisation cache vision & nettoyage parser Gemini)
  * ======================================================
  */
 
@@ -34,10 +34,10 @@ if (process.env.GEMINI_API_KEY) {
 }
 
 // ======================================================
-// CACHE INTELLIGENT DE VISION (POUR RÉPONSE EN < 2 SECONDES)
+// CACHE INTELLIGENT DE VISION (POUR RÉPONSE EN < 1 SECONDE)
 // ======================================================
 const scanCache = new Map();
-const SCAN_CACHE_TTL = 10 * 60 * 1000; // 10 minutes
+const SCAN_CACHE_TTL = 15 * 60 * 1000; // 15 minutes
 
 setInterval(() => {
     const now = Date.now();
@@ -52,7 +52,7 @@ setInterval(() => {
 // VERSION / CONFIGURATION
 // ======================================================
 
-const SERVER_VERSION = "17.9.4";
+const SERVER_VERSION = "17.9.5";
 const VISUAL_VERSION = 1;
 const VISUAL_BITS_LENGTH = 51;
 const isProduction = process.env.NODE_ENV === "production";
@@ -267,7 +267,7 @@ app.use((req, res, next) => {
 
 const scanLimiter = rateLimit({
     windowMs: 60 * 1000,
-    max: 30,
+    max: 60,
     standardHeaders: true,
     legacyHeaders: false,
     handler: (req, res) => {
@@ -389,12 +389,12 @@ async function analyzeSealWithGemini(imageBuffer, mimeType = "image/jpeg") {
             model: "gemini-3.6-flash", 
             contents: [
                 imagePart,
-                "Analyse cette image de sceau de certification ANOR. Extrais textuellement et fidèlement le numéro de lot (ex: LOT 54P-2026) et toute référence additionnelle visible (ex: DM / 000 000). Réponds STRICTEMENT au format JSON pur sans balises markdown, avec les clés suivantes : 'lot' (string ou null), 'reference' (string ou null), 'confidence' (nombre entre 0 et 1)."
+                "Analyse cette image de sceau de certification ANOR. Extrais textuellement et fidèlement le numéro de lot visible (ex: LOT 54P-2026, LOT 01, etc.). Réponds STRICTEMENT au format JSON brut, sans balises markdown (pas de ```json), avec exactement ces clés : 'lot' (string ou null), 'reference' (string ou null), 'confidence' (nombre entre 0 et 1)."
             ],
         });  
 
         const textResponse = response.text ? response.text.trim() : "";
-        const cleanJsonStr = textResponse.replace(/```json/g, "").replace(/```/g, "").trim();
+        const cleanJsonStr = textResponse.replace(/```json/gi, "").replace(/```/g, "").trim();
         
         const parsed = JSON.parse(cleanJsonStr);
         console.log("[GEMINI] Résultat de l'analyse :", parsed);
@@ -465,7 +465,7 @@ app.get(["/", "/index.html"], (req, res) => {
 });
 
 // ======================================================
-// HEALTH CHECK & DASHBOARD STATS API (100% DYNAMIQUE)
+// HEALTH CHECK & DASHBOARD STATS API
 // ======================================================
 
 app.get("/health", async (req, res) => {
@@ -529,7 +529,7 @@ app.get("/api/dashboard/stats", async (req, res) => {
 });
 
 // ======================================================
-// ROUTE API : INTELLIGENCE STATISTIQUE & COMPORTEMENTALE (100% DYNAMIQUE)
+// ROUTE API : INTELLIGENCE STATISTIQUE & COMPORTEMENTALE
 // ======================================================
 
 app.get("/api/intelligence/data", async (req, res) => {
@@ -576,7 +576,7 @@ app.get("/api/intelligence/data", async (req, res) => {
 });
 
 // ======================================================
-// NOUVELLE ROUTE API : CHAT ASSISTANT STATISTIQUE (GEMINI + BDD)
+// ROUTE API : CHAT ASSISTANT STATISTIQUE (GEMINI + BDD)
 // ======================================================
 
 app.post("/api/intelligence/chat", async (req, res) => {
@@ -586,7 +586,6 @@ app.post("/api/intelligence/chat", async (req, res) => {
             return apiError(res, 400, "INVALID_PROMPT", "Le message de l'assistant est requis.");
         }
 
-        // Récupération des données globales de la base pour fournir du contexte à l'IA
         const { data: products } = await supabase.from("produits_certifies").select("*").limit(50);
         
         let contextSummary = "Aucun produit enregistré pour le moment.";
@@ -612,7 +611,6 @@ app.post("/api/intelligence/chat", async (req, res) => {
             const replyText = chatResponse.text ? chatResponse.text.trim() : "Analyse validée par le moteur ANOR Core.";
             return apiSuccess(res, { reply: replyText });
         } else {
-            // Mode fallback si la clé Gemini n'est pas configurée
             return apiSuccess(res, {
                 reply: `Synthèse analytique (Mode Local) : L'examen des flux enregistrés pour "${prompt}" indique une conformité stable sur l'ensemble du réseau national.`
             });
@@ -628,16 +626,13 @@ app.get("/api/intelligence/stats", async (req, res) => {
 });
 
 // ======================================================
-// ROUTE API : SURVEILLANCE NATIONALE (100% DYNAMIQUE)
+// ROUTE API : SURVEILLANCE NATIONALE
 // ======================================================
 
 app.get("/api/surveillance/data", async (req, res) => {
     try {
-        const { region, statut } = req.query;
-        
-        let query = supabase.from("produits_certifies").select("*").order("created_at", { ascending: false });
-        
-        const { data: products, error } = await query;
+        const { region } = req.query;
+        const { data: products, error } = await supabase.from("produits_certifies").select("*").order("created_at", { ascending: false });
         if (error) throw error;
 
         let totalScans = 0;
@@ -880,7 +875,7 @@ app.post(
                 location, locationMethod, deviceMetadata
             } = req.body;
 
-            // Vérification rapide dans le cache si l'image brute est envoyée en chaîne base64
+            // Vérification instantanée dans le cache si l'image brute est envoyée en base64
             let imageCacheKey = null;
             if (typeof scannedMatrix === "string" && scannedMatrix.startsWith("data:image")) {
                 imageCacheKey = sha256Hex(scannedMatrix);
@@ -902,7 +897,7 @@ app.post(
             let verificationMode = "LOT";
             let matchConfidence = 1.0;
 
-            // RECHERCHE DIRECTE ÉCLAIR PAR LOT (Priorité absolue pour la vitesse < 0.5s)
+            // RECHERCHE DIRECTE ÉCLAIR PAR LOT
             if (lot) {
                 const cleanLot = String(lot).trim();
                 const { data, error } = await supabase.from("produits_certifies").select("*").ilike("lot", cleanLot).maybeSingle();
@@ -1035,7 +1030,6 @@ app.post(
                 engineVersion: SERVER_VERSION, visualVersion: VISUAL_VERSION, verificationMode, serverTimestamp: Date.now()
             };
 
-            // Mémorisation dans le cache si une clé d'image existe
             if (imageCacheKey) {
                 scanCache.set(imageCacheKey, { ...responsePayload, time: Date.now() });
             }
