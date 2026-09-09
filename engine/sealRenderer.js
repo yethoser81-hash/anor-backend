@@ -1,30 +1,7 @@
 /**
  * ====================================================================
  * ANOR CHECK
- * SEAL RENDERER V6.1 - COMPATIBLE SEAL DECODER V7
- *
- * PROTOCOLE VISUEL
- *
- * 51 glyphes visibles :
- *   Interne  : 7
- *   Médian   : 24
- *   Externe : 20
- *
- * 4 mires cardinales = repères géométriques, PAS des bits.
- *
- * BIT :
- *   1 = glyphe plein
- *   0 = glyphe vide / contour
- *
- * POINT CRITIQUE :
- * Le type de glyphe est déterministe et identique à celui du
- * SealDecoder : GlyphsLibrary.resolveGlyph(visibleIndex).
- * L'ancien renderer choisissait les glyphes avec un hash différent
- * du decoder : cela rendait la classification incohérente.
- *
- * Le bit n'est plus placé dans un petit carré central séparé.
- * Le bit est porté directement par l'état FULL / EMPTY du glyphe,
- * exactement comme le moteur de lecture V7 le reconstruit.
+ * SEAL RENDERER V6.2 - OPTIMISÉ POUR FORMATS RÉDUITS (2.5 CM) & VITESSE
  * ====================================================================
  */
 
@@ -36,9 +13,6 @@ const GlyphsLibrary = require('../library/glyphsLibrary');
 
 const VISUAL_VERSION = 1;
 const VISIBLE_GLYPH_COUNT = 51;
-const INNER_VISIBLE_COUNT = 7;
-const MIDDLE_VISIBLE_COUNT = 24;
-const OUTER_VISIBLE_COUNT = 20;
 const CANONICAL_OUTER_RADIUS = 375;
 
 const sealRenderer = {
@@ -67,11 +41,6 @@ const sealRenderer = {
         return null;
     },
 
-    /**
-     * Retourne exactement le même type que le decoder pour un index
-     * visible donné. Le renderer et le decoder doivent partager cette
-     * règle : aucune génération aléatoire de glyphes ici.
-     */
     resolveProtocolGlyph(visibleIndex) {
         if (
             GlyphsLibrary &&
@@ -84,9 +53,6 @@ const sealRenderer = {
         return types[visibleIndex % types.length];
     },
 
-    /**
-     * Géométrie officielle. Elle doit rester identique au SealDecoder V7.
-     */
     getGeometry(width, height) {
         const outerRadius = Math.min(width, height) / 2 - 25;
         const centerX = width / 2;
@@ -135,7 +101,6 @@ const sealRenderer = {
     getVisiblePositions() {
         const positions = [];
 
-        // Anneau interne : 12 théoriques, 5 supprimées = 7.
         for (let i = 0; i < 12; i++) {
             const angle = (i / 12) * Math.PI * 2;
             const deg = angle * 180 / Math.PI;
@@ -149,7 +114,6 @@ const sealRenderer = {
             });
         }
 
-        // Anneau médian : 24/24.
         for (let i = 0; i < 24; i++) {
             positions.push({
                 ring: 'middle',
@@ -158,7 +122,6 @@ const sealRenderer = {
             });
         }
 
-        // Anneau externe : 32 théoriques, 12 supprimées = 20.
         for (let i = 0; i < 32; i++) {
             const angle = (i / 32) * Math.PI * 2;
             if (this.isOuterFinderCollision(angle)) {
@@ -210,7 +173,7 @@ const sealRenderer = {
         }
 
         // ------------------------------------------------------------
-        // 1. LOT / IDENTIFICATION
+        // 1. LOT / IDENTIFICATION ULTRA-LISIBLE
         // ------------------------------------------------------------
         const rawBatchName =
             payload.lot ||
@@ -283,7 +246,7 @@ const sealRenderer = {
         ctx.restore();
 
         // ------------------------------------------------------------
-        // 4. LOGO CENTRAL (Sécurisé)
+        // 4. LOGO CENTRAL & ZONE TEXTE ÉPURÉE
         // ------------------------------------------------------------
         const logoPath =
             options.logoPath ||
@@ -350,7 +313,6 @@ const sealRenderer = {
                 );
             }
 
-            // Le bit est directement le FULL / EMPTY du glyphe.
             const isFilled = visualBits[visibleIndex] === '1';
 
             ctx.save();
@@ -413,16 +375,21 @@ const sealRenderer = {
         }
         ctx.restore();
 
-     // ------------------------------------------------------------
-        // 7. TEXTE OPTIMISÉ POUR FORMAT 2.5 CM
+        // ------------------------------------------------------------
+        // 7. TEXTE CENTRAL HAUTE VISIBILITÉ (FORMATS 2.5 CM)
         // ------------------------------------------------------------
         ctx.save();
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
 
         const scale = outerRadius / CANONICAL_OUTER_RADIUS;
-        // Recentrage du bloc texte au cœur du sceau pour les petits formats
-        const textY = centerY + 5 * scale; 
+        const textY = centerY + 8 * scale; 
+
+        // Fond semi-opaque blanc pour isoler nettement le texte du logo de fond
+        ctx.fillStyle = 'rgba(255, 255, 255, 0.92)';
+        ctx.beginPath();
+        ctx.roundRect(centerX - 120 * scale, textY - 26 * scale, 240 * scale, 56 * scale, 8 * scale);
+        ctx.fill();
 
         const drawOutlinedText = (
             text,
@@ -432,30 +399,30 @@ const sealRenderer = {
             textColor
         ) => {
             ctx.font = font;
-            ctx.strokeStyle = '#000000';
-            ctx.lineWidth = Math.max(3, 4 * scale);
+            ctx.strokeStyle = '#FFFFFF';
+            ctx.lineWidth = Math.max(4, 5 * scale);
             ctx.lineJoin = 'round';
             ctx.strokeText(text, x, y);
             ctx.fillStyle = textColor;
             ctx.fillText(text, x, y);
         };
 
-        // Texte du Lot plus compact et ultra-lisible (ex: LOT 54P)
+        // Nom du Lot mis en valeur (Gras et lisible)
         drawOutlinedText(
             batchText,
             centerX,
-            textY - 12 * scale,
-            `bold ${Math.max(16, Math.round(22 * scale))}px sans-serif`,
-            '#FFFFFF'
+            textY - 10 * scale,
+            `bold ${Math.max(18, Math.round(24 * scale))}px sans-serif`,
+            '#0F172A'
         );
 
-        // Numéro de série court ou abrégé pour tenir dans 2.5 cm
+        // Numéro de série net
         drawOutlinedText(
             itemText,
             centerX,
             textY + 14 * scale,
-            `bold ${Math.max(15, Math.round(20 * scale))}px monospace`,
-            '#93C5FD'
+            `bold ${Math.max(14, Math.round(18 * scale))}px monospace`,
+            '#1D4ED8'
         );
 
         ctx.restore();
@@ -464,14 +431,6 @@ const sealRenderer = {
     }
 };
 
-/**
- * Dessine un glyphe dans son état logique.
- *
- * FULL  -> surface pleine.
- * EMPTY -> contour / trait.
- *
- * Le plus possède donc lui aussi deux états lisibles.
- */
 function drawGlyphFromDefinition(
     ctx,
     type,
