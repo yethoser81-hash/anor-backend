@@ -1,7 +1,7 @@
 /**
  * ====================================================================
  * ANOR CHECK
- * SEAL RENDERER V6.4 - CORRECTION GÉOMÉTRIQUE CENTRALE & ESPACEMENT
+ * SEAL RENDERER V6.5 - PLEINE EXPLOITATION DE L'ESPACE CENTRAL & TYPO AGRANDIE
  * ====================================================================
  */
 
@@ -57,10 +57,12 @@ const sealRenderer = {
         const outerRadius = Math.min(width, height) / 2 - 25;
         const centerX = width / 2;
         const centerY = height / 2;
-        const logoSize = 170; // Proportion optimisée pour laisser de l'espace aux glyphes intérieurs
+        
+        // Logo élargi pour occuper l'espace central de manière visible
+        const logoSize = 230; 
         const logoRadius = logoSize / 2;
 
-        const innerRingRadius = logoRadius + 55; // Éloigne parfaitement l'anneau intérieur du logo
+        const innerRingRadius = logoRadius + 45; 
         const outerRingRadius = outerRadius - 30;
         const midRingRadius = (innerRingRadius + outerRingRadius) / 2;
 
@@ -248,7 +250,7 @@ const sealRenderer = {
         ctx.restore();
 
         // ------------------------------------------------------------
-        // 4. LOGO CENTRAL (POSITIONNÉ SANS COLLISION AVEC LES GLYPHES)
+        // 4. LOGO CENTRAL (GRAND FORMAT OCCUPANT L'ESPACE)
         // ------------------------------------------------------------
         const logoPath =
             options.logoPath ||
@@ -258,8 +260,8 @@ const sealRenderer = {
         if (fs.existsSync(logoPath)) {
             try {
                 const img = await loadImage(logoPath);
-                // Décalage vertical mesuré (-32 * scale) pour laisser place au bloc de texte en bas du centre
-                const logoOffsetY = -32 * scale;
+                // Logo remonté légèrement pour laisser la place au grand bloc texte en bas du centre
+                const logoOffsetY = -45 * scale;
                 ctx.drawImage(
                     img,
                     centerX - logoRadius,
@@ -380,23 +382,23 @@ const sealRenderer = {
         ctx.restore();
 
         // ------------------------------------------------------------
-        // 7. TEXTE CENTRAL HAUTE VISIBILITÉ (BLOC LOT & SÉRIE SOUS LE LOGO)
+        // 7. TEXTE CENTRAL HAUTE VISIBILITÉ (GRAND FORMAT & LARGEUR PLEINE)
         // ------------------------------------------------------------
         ctx.save();
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
 
-        const textY = centerY + 38 * scale; // Positionné proprement sous le logo central
+        const textY = centerY + 52 * scale; // Positionné dans la large zone inférieure du centre
 
-        // Fond blanc opaque haute visibilité pour isoler le texte du fond et des glyphes
+        // Boîte blanche élargie pour occuper tout l'espace disponible
         ctx.fillStyle = 'rgba(255, 255, 255, 0.98)';
         ctx.beginPath();
-        ctx.roundRect(centerX - 130 * scale, textY - 24 * scale, 260 * scale, 48 * scale, 8 * scale);
+        ctx.roundRect(centerX - 165 * scale, textY - 32 * scale, 330 * scale, 64 * scale, 12 * scale);
         ctx.fill();
         
-        // Bordure élégante autour du bloc texte
-        ctx.strokeStyle = '#CBD5E1';
-        ctx.lineWidth = 1.5 * scale;
+        // Bordure élégante et marquée du bloc texte
+        ctx.strokeStyle = '#94A3B8';
+        ctx.lineWidth = 2 * scale;
         ctx.stroke();
 
         const drawOutlinedText = (
@@ -408,28 +410,28 @@ const sealRenderer = {
         ) => {
             ctx.font = font;
             ctx.strokeStyle = '#FFFFFF';
-            ctx.lineWidth = Math.max(4, 5 * scale);
+            ctx.lineWidth = Math.max(5, 6 * scale);
             ctx.lineJoin = 'round';
             ctx.strokeText(text, x, y);
             ctx.fillStyle = textColor;
             ctx.fillText(text, x, y);
         };
 
-        // Nom du Lot
+        // Nom du Lot FORTEMENT AGRANDI
         drawOutlinedText(
             batchText,
             centerX,
-            textY - 9 * scale,
-            `bold ${Math.max(18, Math.round(23 * scale))}px sans-serif`,
+            textY - 12 * scale,
+            `bold ${Math.max(24, Math.round(31 * scale))}px sans-serif`,
             '#0F172A'
         );
 
-        // Numéro de série / DM
+        // Numéro de série / DM FORTEMENT AGRANDI
         drawOutlinedText(
             itemText,
             centerX,
-            textY + 13 * scale,
-            `bold ${Math.max(13, Math.round(16 * scale))}px monospace`,
+            textY + 16 * scale,
+            `bold ${Math.max(16, Math.round(21 * scale))}px monospace`,
             '#1D4ED8'
         );
 
