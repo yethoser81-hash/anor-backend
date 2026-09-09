@@ -555,4 +555,4 @@ function drawGlyphFromDefinition(
     }
 }
 
-module.exports = sealRenderer;
+module.exports = sealRenderer;   
