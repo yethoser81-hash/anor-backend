@@ -1,7 +1,7 @@
 /**
  * ====================================================================
  * ANOR CHECK
- * SEAL RENDERER V6.3 - OPTIMISÉ POUR FORMATS RÉDUITS (2.5 CM) & LISIBILITÉ
+ * SEAL RENDERER V6.4 - CORRECTION GÉOMÉTRIQUE CENTRALE & ESPACEMENT
  * ====================================================================
  */
 
@@ -57,10 +57,10 @@ const sealRenderer = {
         const outerRadius = Math.min(width, height) / 2 - 25;
         const centerX = width / 2;
         const centerY = height / 2;
-        const logoSize = 220;
+        const logoSize = 170; // Proportion optimisée pour laisser de l'espace aux glyphes intérieurs
         const logoRadius = logoSize / 2;
 
-        const innerRingRadius = logoRadius + 45;
+        const innerRingRadius = logoRadius + 55; // Éloigne parfaitement l'anneau intérieur du logo
         const outerRingRadius = outerRadius - 30;
         const midRingRadius = (innerRingRadius + outerRingRadius) / 2;
 
@@ -165,6 +165,8 @@ const sealRenderer = {
             outerRingRadius
         } = geometry;
 
+        const scale = outerRadius / CANONICAL_OUTER_RADIUS;
+
         if (backgroundColor) {
             ctx.save();
             ctx.fillStyle = backgroundColor;
@@ -246,7 +248,7 @@ const sealRenderer = {
         ctx.restore();
 
         // ------------------------------------------------------------
-        // 4. LOGO CENTRAL (ISOLÉ ET DÉGAGÉ DE LA ZONE TEXTE)
+        // 4. LOGO CENTRAL (POSITIONNÉ SANS COLLISION AVEC LES GLYPHES)
         // ------------------------------------------------------------
         const logoPath =
             options.logoPath ||
@@ -256,11 +258,12 @@ const sealRenderer = {
         if (fs.existsSync(logoPath)) {
             try {
                 const img = await loadImage(logoPath);
-                // Le logo est positionné plus haut pour laisser l'espace central libre
+                // Décalage vertical mesuré (-32 * scale) pour laisser place au bloc de texte en bas du centre
+                const logoOffsetY = -32 * scale;
                 ctx.drawImage(
                     img,
                     centerX - logoRadius,
-                    centerY - logoRadius - 55,
+                    centerY + logoOffsetY - logoRadius,
                     logoSize,
                     logoSize
                 );
@@ -377,22 +380,21 @@ const sealRenderer = {
         ctx.restore();
 
         // ------------------------------------------------------------
-        // 7. TEXTE CENTRAL HAUTE VISIBILITÉ (FOND BLANC DÉDIÉ ET AGRANDI)
+        // 7. TEXTE CENTRAL HAUTE VISIBILITÉ (BLOC LOT & SÉRIE SOUS LE LOGO)
         // ------------------------------------------------------------
         ctx.save();
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
 
-        const scale = outerRadius / CANONICAL_OUTER_RADIUS;
-        const textY = centerY + 30 * scale; // Décalé sous le logo pour éviter toute superposition
+        const textY = centerY + 38 * scale; // Positionné proprement sous le logo central
 
-        // Fond blanc opaque haute visibilité pour isoler totalement le texte
+        // Fond blanc opaque haute visibilité pour isoler le texte du fond et des glyphes
         ctx.fillStyle = 'rgba(255, 255, 255, 0.98)';
         ctx.beginPath();
-        ctx.roundRect(centerX - 135 * scale, textY - 28 * scale, 270 * scale, 60 * scale, 10 * scale);
+        ctx.roundRect(centerX - 130 * scale, textY - 24 * scale, 260 * scale, 48 * scale, 8 * scale);
         ctx.fill();
         
-        // Bordure subtile autour du bloc texte pour un rendu professionnel
+        // Bordure élégante autour du bloc texte
         ctx.strokeStyle = '#CBD5E1';
         ctx.lineWidth = 1.5 * scale;
         ctx.stroke();
@@ -413,21 +415,21 @@ const sealRenderer = {
             ctx.fillText(text, x, y);
         };
 
-        // Nom du Lot mis en valeur (Gras et police augmentée)
+        // Nom du Lot
         drawOutlinedText(
             batchText,
             centerX,
-            textY - 11 * scale,
-            `bold ${Math.max(20, Math.round(26 * scale))}px sans-serif`,
+            textY - 9 * scale,
+            `bold ${Math.max(18, Math.round(23 * scale))}px sans-serif`,
             '#0F172A'
         );
 
-        // Numéro de série net et lisible
+        // Numéro de série / DM
         drawOutlinedText(
             itemText,
             centerX,
-            textY + 15 * scale,
-            `bold ${Math.max(15, Math.round(19 * scale))}px monospace`,
+            textY + 13 * scale,
+            `bold ${Math.max(13, Math.round(16 * scale))}px monospace`,
             '#1D4ED8'
         );
 
