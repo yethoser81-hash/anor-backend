@@ -2,7 +2,7 @@
  * ======================================================
  * SYSTEME SOUVERAIN DE CERTIFICATION ANOR
  * SERVER CORE (VERSION ARCHITECTURE HAUTE SÉCURITÉ)
- * Version: 17.9.11 (Sérialisation Asynchrone & Vision Chromatique Garantie)
+ * Version: 18.0.0 (Sérialisation Asynchrone & Vision Monochrome Binaire)
  * ======================================================
  */
 
@@ -24,7 +24,7 @@ const { GoogleGenAI } = require("@google/genai");
 const app = express();
 
 // ======================================================
-// CONFIGURATION GEMINI IA & PALETTE CHROMATIQUE 2.5 CM
+// CONFIGURATION GEMINI IA & MODE MONOCHROME QR CODE
 // ======================================================
 let ai = null;
 if (process.env.GEMINI_API_KEY) {
@@ -33,8 +33,6 @@ if (process.env.GEMINI_API_KEY) {
 } else {
     console.warn("[ANOR CORE] Avertissement : Clé GEMINI_API_KEY absente. Le module Vision IA sera inactif.");
 }
-
-const GLYPH_COLORS = Object.values(GlyphsLibrary.colorsPalette).map(c => c.hex);
 
 // ======================================================
 // CACHE INTELLIGENT DE VISION (< 10 SECONDES)
@@ -55,7 +53,7 @@ setInterval(() => {
 // VERSION / CONFIGURATION
 // ======================================================
 
-const SERVER_VERSION = "17.9.11";
+const SERVER_VERSION = "18.0.0";
 const VISUAL_VERSION = 1;
 const VISUAL_BITS_LENGTH = 51;
 const isProduction = process.env.NODE_ENV === "production";
@@ -321,7 +319,7 @@ const upload = multer({
 });
 
 // ======================================================
-// ANALYSE VISUELLE CLASSIQUE ET CHROMATIQUE PRIORITAIRE
+// ANALYSE VISUELLE MONOCHROME & BINAIRE (< 10s)
 // ======================================================
 
 async function intelligentVisualAnalysis(scannedMatrix) {
@@ -373,10 +371,6 @@ async function analyzeSealWithGemini(imageBuffer, mimeType = "image/jpeg") {
             },
         };
 
-        const paletteDescription = Object.entries(GlyphsLibrary.colorsPalette)
-            .map(([idx, data]) => `- Index ${idx}: ${data.hex} (${data.name})`)
-            .join("\n");
-
         // Timeout strict de 8 secondes maximum pour garantir le respect de la règle des < 10s
         const timeoutPromise = new Promise((_, reject) => 
             setTimeout(() => reject(new Error("GEMINI_TIMEOUT")), 8000)
@@ -386,12 +380,11 @@ async function analyzeSealWithGemini(imageBuffer, mimeType = "image/jpeg") {
             model: "gemini-3.6-flash", 
             contents: [
                 imagePart,
-                `Expertise optique universelle du sceau ANOR (fonctionne peu importe la taille, du grand format au minuscule sceau de 2 cm). 
-                Règle absolue de lecture : chaque couleur équivaut à une forme géométrique précise et chaque forme géométrique correspond à une couleur unique dans cette palette officielle :
-                ${paletteDescription}
-                Analyse la disposition de ces glyphes colorés pour décoder le sceau avec un taux de réussite de 100%.
+                `Expertise optique universelle du sceau ANOR monochrome binaire (style QR code haute densité, lisible à 2.5 cm). 
+                Règle absolue de lecture : chaque glyphe est soit plein (noir = 1), soit vide (blanc = 0). 
+                Analyse la disposition de ces 51 glyphes binaires circulaires pour décoder le sceau avec un taux de réussite de 100%.
                 Réponds STRICTEMENT au format JSON pur sans markdown :
-                { "lot": "...", "reference": "...", "detectedColorsSequence": [...], "confidence": 0.99 }`
+                { "lot": "...", "reference": "...", "visualBits": "...", "confidence": 0.99 }`
             ],
         });
 
@@ -518,7 +511,6 @@ app.get("/api/dashboard/stats", async (req, res) => {
             });
         }
 
-        // Récupération optionnelle des faux scans enregistrés dans la table d'audit
         const { data: auditAlerts } = await supabase.from("produits_alertes_audit").select("*").order("created_at", { ascending: false }).limit(10);
         if (auditAlerts && auditAlerts.length > 0) {
             alertesCount += auditAlerts.length;
@@ -676,7 +668,7 @@ app.get("/api/registry/data", async (req, res) => {
 });
 
 // ======================================================
-// GENERATION DU SCEAU & KIT DE SÉRIALISATION ASYNCHRONE
+// GENERATION DU SCEAU MONOCHROME & KIT DE SÉRIALISATION ASYNCHRONE
 // ======================================================
 
 app.post(
@@ -731,17 +723,17 @@ app.post(
                 date_certificat_conformite: date_certificat_conformite || null,
                 date_fabrication: date_fabrication || null, date_peremption: date_peremption || null,
                 certificat_pdf_url: pdfUrl, visuel_produit_url: visuelUrl,
-                glyph_payload: { visualVersion: VISUAL_VERSION, secureSignature, lot, visualBits, visualSignature, glyphColors: GLYPH_COLORS },
+                glyph_payload: { visualVersion: VISUAL_VERSION, secureSignature, lot, visualBits, visualSignature, glyphMode: "MONOCHROME_BINARY" },
                 visual_bits: visualBits, visual_signature: visualSignature,
                 matrix_hash: sha256Hex(visualBits), ai_signature_hash: secureSignature,
                 sha256_hash: secureSignature, signature_ia: secureSignature,
-                visual_geometry: { inner: 7, middle: 24, outer: 20, total: 51 },
+                visual_geometry: { inner: 12, middle: 24, outer: 15, total: 51 },
                 engine_version: SERVER_VERSION, statut: "CERTIFIÉ", scan_count: 0
             };
 
             await supabase.from("produits_certifies").upsert(payloadDB, { onConflict: "lot" });
 
-            // Lancement de la sérialisation en arrière-plan pour éviter tout délai de réponse
+            // Lancement de la sérialisation en arrière-plan
             generateUnitSerialsAndManifestAsync(certificateCode, parsedQuantite, secureSignature);
 
             const csvManifestContent = `Index,Numero_De_Serie,Hachage_Securise\n1,${certificateCode}-000001,${secureSignature}`;
@@ -751,7 +743,7 @@ app.post(
             zip.file("sceau_ANOR_MASTER.png", imageBuffer);
             const zipBuffer = await zip.generateAsync({ type: "nodebuffer", compression: "DEFLATE", compressionOptions: { level: 6 } });
 
-            console.log(`[PERFORMANCE] Génération instantanée du sceau exécutée en ${Date.now() - startTime}ms.`);
+            console.log(`[PERFORMANCE] Génération instantanée du sceau monochrome exécutée en ${Date.now() - startTime}ms.`);
 
             return apiSuccess(res, {
                 message: "Sceau généré avec succès. Sérialisation en cours en arrière-plan.", lot, sha256_hash: secureSignature,
@@ -767,7 +759,7 @@ app.post(
 );
 
 // ======================================================
-// VERIFICATION DU SCEAU CHROMATIQUE (< 10 SECONDES)
+// VERIFICATION DU SCEAU MONOCHROME (< 10 SECONDES)
 // ======================================================
 
 app.post(
@@ -814,11 +806,9 @@ app.post(
                 }
             }
 
-            // Si le sceau est introuvable, enregistrement du faux scan pour qu'il apparaisse dans le Dashboard
             if (!row) {
                 const attemptedLot = lot || (typeof scannedMatrix === "string" ? scannedMatrix.substring(0, 30) : "VISUEL_INCONNU");
                 
-                // Enregistrement asynchrone dans la table d'audit des alertes
                 supabase.from("produits_alertes_audit").insert([{
                     lot: attemptedLot,
                     localisation: location || "Yaoundé",
@@ -833,7 +823,7 @@ app.post(
             await supabase.from("produits_certifies").update({ scan_count: currentScanCount, last_scanned_at: new Date().toISOString() }).eq("lot", row.lot);
 
             const processingTimeMs = Date.now() - startTime;
-            console.log(`[PERFORMANCE] Vérification optique exécutée en ${processingTimeMs}ms (limite < 10s respectée).`);
+            console.log(`[PERFORMANCE] Vérification optique monochrome exécutée en ${processingTimeMs}ms (limite < 10s respectée).`);
 
             return apiSuccess(res, {
                 status: "AUTHENTIQUE", verified: true, confidence: matchConfidence,
@@ -866,7 +856,7 @@ app.use((err, req, res, next) => {
 
 const server = app.listen(PORT, "0.0.0.0", () => {
     console.log("======================================================");
-    console.log(`ANOR Backend v${SERVER_VERSION} (Sérialisation Async & Vision < 10s)`);
+    console.log(`ANOR Backend v${SERVER_VERSION} (Monochrome Binary & Vision < 10s)`);
     console.log(`Port: ${PORT}`);
     console.log("======================================================");
 });
