@@ -902,10 +902,15 @@ app.post(
             let verificationMode = "LOT";
             let matchConfidence = 1.0;
 
+            // RECHERCHE DIRECTE ÉCLAIR PAR LOT (Priorité absolue pour la vitesse < 0.5s)
             if (lot) {
                 const cleanLot = String(lot).trim();
                 const { data, error } = await supabase.from("produits_certifies").select("*").ilike("lot", cleanLot).maybeSingle();
-                if (!error && data) { row = data; }
+                if (!error && data) { 
+                    row = data; 
+                    verificationMode = "FAST_LOT_DIRECT_MATCH";
+                    matchConfidence = 1.0;
+                }
             }
 
             if (!row && scannedMatrix) {

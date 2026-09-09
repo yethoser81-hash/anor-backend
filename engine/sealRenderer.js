@@ -413,15 +413,16 @@ const sealRenderer = {
         }
         ctx.restore();
 
-        // ------------------------------------------------------------
-        // 7. TEXTE
+     // ------------------------------------------------------------
+        // 7. TEXTE OPTIMISÉ POUR FORMAT 2.5 CM
         // ------------------------------------------------------------
         ctx.save();
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
 
         const scale = outerRadius / CANONICAL_OUTER_RADIUS;
-        const textY = centerY + 115 * scale;
+        // Recentrage du bloc texte au cœur du sceau pour les petits formats
+        const textY = centerY + 5 * scale; 
 
         const drawOutlinedText = (
             text,
@@ -432,27 +433,29 @@ const sealRenderer = {
         ) => {
             ctx.font = font;
             ctx.strokeStyle = '#000000';
-            ctx.lineWidth = Math.max(4, 5.5 * scale);
+            ctx.lineWidth = Math.max(3, 4 * scale);
             ctx.lineJoin = 'round';
             ctx.strokeText(text, x, y);
             ctx.fillStyle = textColor;
             ctx.fillText(text, x, y);
         };
 
+        // Texte du Lot plus compact et ultra-lisible (ex: LOT 54P)
         drawOutlinedText(
             batchText,
             centerX,
-            textY - 18 * scale,
-            `bold ${Math.max(20, Math.round(28 * scale))}px sans-serif`,
+            textY - 12 * scale,
+            `bold ${Math.max(16, Math.round(22 * scale))}px sans-serif`,
             '#FFFFFF'
         );
 
+        // Numéro de série court ou abrégé pour tenir dans 2.5 cm
         drawOutlinedText(
             itemText,
             centerX,
-            textY + 22 * scale,
-            `bold ${Math.max(19, Math.round(26 * scale))}px monospace`,
-            '#E2E8F0'
+            textY + 14 * scale,
+            `bold ${Math.max(15, Math.round(20 * scale))}px monospace`,
+            '#93C5FD'
         );
 
         ctx.restore();
