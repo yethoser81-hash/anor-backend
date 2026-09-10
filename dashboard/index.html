@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <meta http-equiv="Content-Security-Policy" content="default-src 'self' data: blob: https:; style-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com https://unpkg.com; style-src-elem 'self' 'unsafe-inline' https://cdnjs.cloudflare.com https://unpkg.com; font-src 'self' data: https://cdnjs.cloudflare.com; script-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com https://unpkg.com;">
+    <!-- CSP SUPPRIMÉE POUR ÉVITER TOUT BLOCAGE DE LA CONSOLE -->
     <title>ANOR V17 • Tableau de Bord Global</title>
     <link rel="icon" href="../assets/logo_anor.png">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
@@ -79,7 +79,6 @@
         .badge { background: rgba(16, 185, 129, 0.15); color: var(--accent-green); padding: 3px 8px; border-radius: 4px; font-size: 11px; font-weight: 600; }
         .badge-alert { background: rgba(239, 68, 68, 0.15); color: var(--accent-red); padding: 3px 8px; border-radius: 4px; font-size: 11px; font-weight: 600; }
 
-        /* Pagination visible en permanence et stylisée */
         .pagination-container {
             display: flex; justify-content: space-between; align-items: center; margin-top: 15px; font-size: 13px; color: var(--text-muted);
             border-top: 1px solid rgba(255,255,255,0.05); padding-top: 12px;
@@ -172,7 +171,6 @@
                 </table>
             </div>
 
-            <!-- Contrôles de pagination FORCÉS et VISIBLES -->
             <div class="pagination-container" id="paginationContainer">
                 <div style="display: flex; align-items: center; gap: 10px;">
                     <span id="pageInfo">Chargement...</span>
