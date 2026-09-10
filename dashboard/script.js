@@ -1,6 +1,6 @@
 let globalFluxData = [];
 let currentPage = 1;
-const rowsPerPage = 10;
+let rowsPerPage = 10;
 
 document.addEventListener("DOMContentLoaded", () => {
     chargerDonneesServeur();
@@ -21,12 +21,14 @@ async function chargerDonneesServeur() {
 
         if (data.flux && data.flux.length > 0) {
             globalFluxData = data.flux;
-            currentPage = 1;
             rendreTableauPagine();
         } else {
             globalFluxData = [];
             document.getElementById("dynamicTableBody").innerHTML = `<tr><td colspan="5" style="text-align: center; color: var(--text-muted);">Aucun flux enregistré pour l'instant.</td></tr>`;
-            document.getElementById("paginationContainer").style.display = "none";
+            document.getElementById("pageInfo").textContent = "0 éléments";
+            document.getElementById("pageIndicator").textContent = "1 / 1";
+            document.getElementById("prevPageBtn").disabled = true;
+            document.getElementById("nextPageBtn").disabled = true;
         }
 
         document.getElementById("serverDot").style.background = "var(--accent-green)";
@@ -50,21 +52,22 @@ async function chargerDonneesServeur() {
         document.getElementById("kpiFraudes").textContent = "--";
 
         document.getElementById("dynamicTableBody").innerHTML = `<tr><td colspan="5" style="text-align: center; color: var(--accent-red);">Serveur non accessible. Veuillez lancer le back-end.</td></tr>`;
-        document.getElementById("paginationContainer").style.display = "none";
+        document.getElementById("pageInfo").textContent = "Erreur de connexion";
+        document.getElementById("pageIndicator").textContent = "1 / 1";
+        document.getElementById("prevPageBtn").disabled = true;
+        document.getElementById("nextPageBtn").disabled = true;
     }
 }
 
 function rendreTableauPagine() {
     const tbody = document.getElementById("dynamicTableBody");
-    const paginationContainer = document.getElementById("paginationContainer");
     
     if (!globalFluxData || globalFluxData.length === 0) {
         tbody.innerHTML = `<tr><td colspan="5" style="text-align: center; color: var(--text-muted);">Aucun flux enregistré pour l'instant.</td></tr>`;
-        paginationContainer.style.display = "none";
         return;
     }
 
-    const totalPages = Math.ceil(globalFluxData.length / rowsPerPage);
+    const totalPages = Math.max(1, Math.ceil(globalFluxData.length / rowsPerPage));
     if (currentPage > totalPages) currentPage = totalPages;
     if (currentPage < 1) currentPage = 1;
 
@@ -82,18 +85,22 @@ function rendreTableauPagine() {
         </tr>
     `).join('');
 
+    // Mise à jour des textes et des boutons de pagination
     document.getElementById("pageInfo").textContent = `Affichage ${startIdx + 1}-${Math.min(endIdx, globalFluxData.length)} sur ${globalFluxData.length} lots`;
+    document.getElementById("pageIndicator").textContent = `${currentPage} / ${totalPages}`;
     
-    if (globalFluxData.length > rowsPerPage) {
-        paginationContainer.style.display = "flex";
-        document.getElementById("prevPageBtn").disabled = currentPage === 1;
-        document.getElementById("nextPageBtn").disabled = currentPage === totalPages;
-    } else {
-        paginationContainer.style.display = "none";
-    }
+    document.getElementById("prevPageBtn").disabled = currentPage === 1;
+    document.getElementById("nextPageBtn").disabled = currentPage >= totalPages;
 }
 
 function changerPage(direction) {
     currentPage += direction;
+    rendreTableauPagine();
+}
+
+function changerLignesParPage() {
+    const select = document.getElementById("rowsPerPageSelect");
+    rowsPerPage = parseInt(select.value);
+    currentPage = 1; // Retour à la première page lors du changement de taille
     rendreTableauPagine();
 }

@@ -79,16 +79,23 @@
         .badge { background: rgba(16, 185, 129, 0.15); color: var(--accent-green); padding: 3px 8px; border-radius: 4px; font-size: 11px; font-weight: 600; }
         .badge-alert { background: rgba(239, 68, 68, 0.15); color: var(--accent-red); padding: 3px 8px; border-radius: 4px; font-size: 11px; font-weight: 600; }
 
+        /* Pagination visible en permanence et stylisée */
         .pagination-container {
             display: flex; justify-content: space-between; align-items: center; margin-top: 15px; font-size: 13px; color: var(--text-muted);
+            border-top: 1px solid rgba(255,255,255,0.05); padding-top: 12px;
         }
-        .pagination-buttons { display: flex; gap: 8px; }
+        .pagination-buttons { display: flex; gap: 8px; align-items: center; }
         .page-btn {
             background: var(--bg-card); color: var(--text-main); border: 1px solid var(--border-color);
             padding: 6px 12px; border-radius: 6px; cursor: pointer; transition: all 0.2s; font-size: 12px; font-weight: 600;
         }
         .page-btn:hover:not(:disabled) { background: var(--accent-blue); border-color: var(--accent-blue); }
-        .page-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+        .page-btn:disabled { opacity: 0.3; cursor: not-allowed; }
+        
+        .rows-select {
+            background: var(--bg-card); color: var(--text-main); border: 1px solid var(--border-color);
+            padding: 4px 8px; border-radius: 6px; font-size: 12px; outline: none; cursor: pointer;
+        }
 
         .footer-credit { text-align: center; font-size: 11px; color: var(--text-muted); padding: 10px 0; }
     </style>
@@ -164,10 +171,21 @@
                     </tbody>
                 </table>
             </div>
-            <div class="pagination-container" id="paginationContainer" style="display: none;">
-                <span id="pageInfo">Affichage 0-0 sur 0</span>
+
+            <!-- Contrôles de pagination FORCÉS et VISIBLES -->
+            <div class="pagination-container" id="paginationContainer">
+                <div style="display: flex; align-items: center; gap: 10px;">
+                    <span id="pageInfo">Chargement...</span>
+                    <select id="rowsPerPageSelect" class="rows-select" onchange="changerLignesParPage()">
+                        <option value="10">10 / page</option>
+                        <option value="25">25 / page</option>
+                        <option value="50">50 / page</option>
+                        <option value="100">100 / page</option>
+                    </select>
+                </div>
                 <div class="pagination-buttons">
                     <button class="page-btn" id="prevPageBtn" onclick="changerPage(-1)"><i class="fa-solid fa-chevron-left"></i> Précédent</button>
+                    <span id="pageIndicator" style="font-weight: 600; color: #fff; padding: 0 5px;">1 / 1</span>
                     <button class="page-btn" id="nextPageBtn" onclick="changerPage(1)">Suivant <i class="fa-solid fa-chevron-right"></i></button>
                 </div>
             </div>
