@@ -4,7 +4,6 @@ const rowsPerPage = 10;
 
 document.addEventListener("DOMContentLoaded", () => {
     chargerDonneesServeur();
-    // Actualisation automatique toutes les 30 secondes
     setInterval(chargerDonneesServeur, 30000);
 });
 
@@ -15,7 +14,6 @@ async function chargerDonneesServeur() {
         
         const data = await response.json();
         
-        // Synchronisation des KPIs (Région forcée à "Centre" selon la demande)
         document.getElementById("kpiPrecision").textContent = data.precision || "99.85%";
         document.getElementById("kpiScans").textContent = data.totalScans || "0";
         document.getElementById("kpiRegion").textContent = "Centre";
@@ -31,7 +29,6 @@ async function chargerDonneesServeur() {
             document.getElementById("paginationContainer").style.display = "none";
         }
 
-        // Indicateur visuel : Connecté
         document.getElementById("serverDot").style.background = "var(--accent-green)";
         document.getElementById("serverDot").style.boxShadow = "0 0 8px var(--accent-green)";
         document.getElementById("serverStatusText").textContent = "SYSTÈMES CONNECTÉS";
@@ -41,7 +38,6 @@ async function chargerDonneesServeur() {
     } catch (err) {
         console.error("Erreur de chargement du dashboard :", err);
         
-        // Indicateur visuel : Erreur serveur
         document.getElementById("serverDot").style.background = "var(--accent-red)";
         document.getElementById("serverDot").style.boxShadow = "0 0 8px var(--accent-red)";
         document.getElementById("serverStatusText").textContent = "EN ATTENTE SERVEUR";
@@ -86,7 +82,6 @@ function rendreTableauPagine() {
         </tr>
     `).join('');
 
-    // Mise à jour de l'affichage de la pagination
     document.getElementById("pageInfo").textContent = `Affichage ${startIdx + 1}-${Math.min(endIdx, globalFluxData.length)} sur ${globalFluxData.length} lots`;
     
     if (globalFluxData.length > rowsPerPage) {
