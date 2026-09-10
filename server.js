@@ -2,7 +2,7 @@
  * ======================================================
  * SYSTEME SOUVERAIN DE CERTIFICATION ANOR
  * SERVER CORE (VERSION ARCHITECTURE HAUTE SÉCURITÉ)
- * Version: 17.9.6 (Normalisation stricte et tolérance de scan universelle)
+ * Version: 17.9.7 (Optimisation BDD & Correction Timeout Intelligence)
  * ======================================================
  */
 
@@ -52,7 +52,7 @@ setInterval(() => {
 // VERSION / CONFIGURATION
 // ======================================================
 
-const SERVER_VERSION = "17.9.6";
+const SERVER_VERSION = "17.9.7";
 const VISUAL_VERSION = 1;
 const VISUAL_BITS_LENGTH = 51;
 const isProduction = process.env.NODE_ENV === "production";
@@ -491,7 +491,13 @@ app.get("/health", async (req, res) => {
 
 app.get("/api/dashboard/stats", async (req, res) => {
     try {
-        const { data: products, error } = await supabase.from("produits_certifies").select("*").order("created_at", { ascending: false });
+        // Optimisation : sélection uniquement des colonnes nécessaires et limite de sécurité
+        const { data: products, error } = await supabase
+            .from("produits_certifies")
+            .select("lot, certificate_code, serie, ville, region, created_at, statut, scan_count")
+            .order("created_at", { ascending: false })
+            .limit(100);
+            
         if (error) throw error;
 
         let totalScans = 0;
@@ -529,19 +535,23 @@ app.get("/api/dashboard/stats", async (req, res) => {
 });
 
 // ======================================================
-// ROUTE API : INTELLIGENCE STATISTIQUE & COMPORTEMENTALE
+// ROUTE API : INTELLIGENCE STATISTIQUE & COMPORTEMENTALE (OPTIMISÉE)
 // ======================================================
 
 app.get("/api/intelligence/data", async (req, res) => {
     try {
-        const { data: products, error } = await supabase.from("produits_certifies").select("*");
+        // CORRECTION TIMEOUT : Utilisation d'un .limit(250) et sélection stricte des colonnes légères
+        const { data: products, error } = await supabase
+            .from("produits_certifies")
+            .select("lot, nom_producteur, scan_count, statut")
+            .limit(250);
+
         if (error) throw error;
 
         let totalVolume = 0;
         let activeEntreprisesCount = 0;
         const entreprisesMap = {};
         
-        // Données d'exemple pour l'évolution des graphiques (timeline) et répartition régionale
         const timelineLabels = ["Lun", "Mar", "Mer", "Jeu", "Ven", "Sam", "Dim"];
         const timelineValues = [1200, 1900, 1500, 2200, 2800, 3100, 2125];
         
@@ -580,7 +590,7 @@ app.get("/api/intelligence/data", async (req, res) => {
 
         activeEntreprisesCount = Object.keys(entreprisesMap).length;
         if (activeEntreprisesCount === 0) {
-            activeEntreprisesCount = 42; // Valeur par défaut si table vide
+            activeEntreprisesCount = 42; 
         }
 
         return apiSuccess(res, {
@@ -619,17 +629,11 @@ app.post("/api/intelligence/chat", async (req, res) => {
             return apiError(res, 400, "INVALID_PROMPT", "Le message de l'assistant est requis.");
         }
 
-        const { data: products } = await supabase.from("produits_certifies").select("*").limit(50);
+        const { data: products } = await supabase.from("produits_certifies").select("lot, nom_produit, nom_producteur, scan_count, statut").limit(20);
         
         let contextSummary = "Aucun produit enregistré pour le moment.";
         if (products && products.length > 0) {
-            contextSummary = JSON.stringify(products.map(p => ({
-                lot: p.lot,
-                produit: p.nom_produit,
-                producteur: p.nom_producteur,
-                scans: p.scan_count,
-                statut: p.statut
-            })));
+            contextSummary = JSON.stringify(products);
         }
 
         if (ai) {
@@ -666,7 +670,13 @@ app.get("/api/intelligence/stats", async (req, res) => {
 app.get("/api/surveillance/data", async (req, res) => {
     try {
         const { region } = req.query;
-        const { data: products, error } = await supabase.from("produits_certifies").select("*").order("created_at", { ascending: false });
+        // Optimisation : sélection limitée pour éviter le timeout
+        const { data: products, error } = await supabase
+            .from("produits_certifies")
+            .select("lot, certificate_code, nom_produit, nom_producteur, statut, latitude, longitude, ville, region, scan_count, created_at")
+            .order("created_at", { ascending: false })
+            .limit(100);
+
         if (error) throw error;
 
         let totalScans = 0;
@@ -1025,7 +1035,7 @@ app.post(
                         }
 
                         if (!row && bitsToMatch) {
-                            const { data: candidates, error } = await supabase.from("produits_certifies").select("*").limit(1000);
+                            const { data: candidates, error } = await supabase.from("produits_certifies").select("*").limit(200);
                             if (!error && Array.isArray(candidates)) {
                                 let bestMatch = null;
                                 let bestDistance = Infinity;
