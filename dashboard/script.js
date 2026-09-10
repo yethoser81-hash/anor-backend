@@ -1,3 +1,7 @@
+let globalFluxData = [];
+let currentPage = 1;
+const rowsPerPage = 10;
+
 document.addEventListener("DOMContentLoaded", () => {
     chargerDonneesServeur();
     // Actualisation automatique toutes les 30 secondes
@@ -11,25 +15,20 @@ async function chargerDonneesServeur() {
         
         const data = await response.json();
         
-        // Synchronisation avec les propriétés renvoyées par server_2.js
+        // Synchronisation des KPIs (Région forcée à "Centre" selon la demande)
         document.getElementById("kpiPrecision").textContent = data.precision || "99.85%";
         document.getElementById("kpiScans").textContent = data.totalScans || "0";
-        document.getElementById("kpiRegion").textContent = data.regionActive || "Centre & Littoral";
+        document.getElementById("kpiRegion").textContent = "Centre";
         document.getElementById("kpiFraudes").textContent = data.anomalies || "0";
 
-        if(data.flux && data.flux.length > 0) {
-            const tbody = document.getElementById("dynamicTableBody");
-            tbody.innerHTML = data.flux.map(item => `
-                <tr>
-                    <td><strong>${item.lot || 'N/A'}</strong></td>
-                    <td><code>${item.serie || 'Série-000'}</code></td>
-                    <td>📍 ${item.localisation || 'Inconnue'}</td>
-                    <td>${item.horodatage || 'Récemment'}</td>
-                    <td><span class="${item.statut === 'ALERTE' || item.statut === 'CONTREFAÇON' ? 'badge-alert' : 'badge'}">${item.statut || 'CERTIFIÉ'}</span></td>
-                </tr>
-            `).join('');
+        if (data.flux && data.flux.length > 0) {
+            globalFluxData = data.flux;
+            currentPage = 1;
+            rendreTableauPagine();
         } else {
+            globalFluxData = [];
             document.getElementById("dynamicTableBody").innerHTML = `<tr><td colspan="5" style="text-align: center; color: var(--text-muted);">Aucun flux enregistré pour l'instant.</td></tr>`;
+            document.getElementById("paginationContainer").style.display = "none";
         }
 
         // Indicateur visuel : Connecté
@@ -51,9 +50,55 @@ async function chargerDonneesServeur() {
         
         document.getElementById("kpiPrecision").textContent = "--";
         document.getElementById("kpiScans").textContent = "--";
-        document.getElementById("kpiRegion").textContent = "--";
+        document.getElementById("kpiRegion").textContent = "Centre";
         document.getElementById("kpiFraudes").textContent = "--";
 
         document.getElementById("dynamicTableBody").innerHTML = `<tr><td colspan="5" style="text-align: center; color: var(--accent-red);">Serveur non accessible. Veuillez lancer le back-end.</td></tr>`;
+        document.getElementById("paginationContainer").style.display = "none";
     }
+}
+
+function rendreTableauPagine() {
+    const tbody = document.getElementById("dynamicTableBody");
+    const paginationContainer = document.getElementById("paginationContainer");
+    
+    if (!globalFluxData || globalFluxData.length === 0) {
+        tbody.innerHTML = `<tr><td colspan="5" style="text-align: center; color: var(--text-muted);">Aucun flux enregistré pour l'instant.</td></tr>`;
+        paginationContainer.style.display = "none";
+        return;
+    }
+
+    const totalPages = Math.ceil(globalFluxData.length / rowsPerPage);
+    if (currentPage > totalPages) currentPage = totalPages;
+    if (currentPage < 1) currentPage = 1;
+
+    const startIdx = (currentPage - 1) * rowsPerPage;
+    const endIdx = startIdx + rowsPerPage;
+    const currentSlice = globalFluxData.slice(startIdx, endIdx);
+
+    tbody.innerHTML = currentSlice.map(item => `
+        <tr>
+            <td><strong>${item.lot || 'N/A'}</strong></td>
+            <td><code>${item.serie || 'Série-000'}</code></td>
+            <td>📍 ${item.localisation || 'Inconnue'}</td>
+            <td>${item.horodatage || 'Récemment'}</td>
+            <td><span class="${item.statut === 'ALERTE' || item.statut === 'CONTREFAÇON' ? 'badge-alert' : 'badge'}">${item.statut || 'CERTIFIÉ'}</span></td>
+        </tr>
+    `).join('');
+
+    // Mise à jour de l'affichage de la pagination
+    document.getElementById("pageInfo").textContent = `Affichage ${startIdx + 1}-${Math.min(endIdx, globalFluxData.length)} sur ${globalFluxData.length} lots`;
+    
+    if (globalFluxData.length > rowsPerPage) {
+        paginationContainer.style.display = "flex";
+        document.getElementById("prevPageBtn").disabled = currentPage === 1;
+        document.getElementById("nextPageBtn").disabled = currentPage === totalPages;
+    } else {
+        paginationContainer.style.display = "none";
+    }
+}
+
+function changerPage(direction) {
+    currentPage += direction;
+    rendreTableauPagine();
 }

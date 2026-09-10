@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <meta http-equiv="Content-Security-Policy" content="style-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com https://unpkg.com;">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self' data: blob: https:; style-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com https://unpkg.com; font-src 'self' data: https://cdnjs.cloudflare.com; script-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com https://unpkg.com;">
     <title>ANOR V17 • Tableau de Bord Global</title>
     <link rel="icon" href="../assets/logo_anor.png">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
@@ -79,6 +79,18 @@
         .badge { background: rgba(16, 185, 129, 0.15); color: var(--accent-green); padding: 3px 8px; border-radius: 4px; font-size: 11px; font-weight: 600; }
         .badge-alert { background: rgba(239, 68, 68, 0.15); color: var(--accent-red); padding: 3px 8px; border-radius: 4px; font-size: 11px; font-weight: 600; }
 
+        /* Styles de la pagination */
+        .pagination-container {
+            display: flex; justify-content: space-between; align-items: center; margin-top: 15px; font-size: 13px; color: var(--text-muted);
+        }
+        .pagination-buttons { display: flex; gap: 8px; }
+        .page-btn {
+            background: var(--bg-card); color: var(--text-main); border: 1px solid var(--border-color);
+            padding: 6px 12px; border-radius: 6px; cursor: pointer; transition: all 0.2s; font-size: 12px; font-weight: 600;
+        }
+        .page-btn:hover:not(:disabled) { background: var(--accent-blue); border-color: var(--accent-blue); }
+        .page-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
         .footer-credit { text-align: center; font-size: 11px; color: var(--text-muted); padding: 10px 0; }
     </style>
 </head>
@@ -123,7 +135,7 @@
         </div>
         <div class="metric-card">
             <div class="label">Région la Plus Active</div>
-            <div class="value" id="kpiRegion">--</div>
+            <div class="value" id="kpiRegion">Centre</div>
             <div class="sub">Couverture territoriale</div>
         </div>
         <div class="metric-card">
@@ -154,6 +166,14 @@
                         </tr>
                     </tbody>
                 </table>
+            </div>
+            <!-- Contrôles de pagination -->
+            <div class="pagination-container" id="paginationContainer" style="display: none;">
+                <span id="pageInfo">Affichage 0-0 sur 0</span>
+                <div class="pagination-buttons">
+                    <button class="page-btn" id="prevPageBtn" onclick="changerPage(-1)"><i class="fa-solid fa-chevron-left"></i> Précédent</button>
+                    <button class="page-btn" id="nextPageBtn" onclick="changerPage(1)">Suivant <i class="fa-solid fa-chevron-right"></i></button>
+                </div>
             </div>
         </div>
 
