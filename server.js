@@ -516,6 +516,7 @@ app.get("/api/dashboard/stats", async (req, res) => {
         let totalScans = 0;
         let alertesCount = 0;
         const fluxRecents = [];
+        const regionCounts = {};
 
         if (products && products.length > 0) {
             products.forEach(p => {
@@ -524,6 +525,11 @@ app.get("/api/dashboard/stats", async (req, res) => {
                 if (p.statut === "ALERTE" || p.statut === "CONTREFAÇON") {
                     alertesCount++;
                 }
+
+                // Comptage par région pour rendre l'indicateur dynamique
+                const reg = p.region || "Centre";
+                regionCounts[reg] = (regionCounts[reg] || 0) + (scans > 0 ? scans : 1);
+
                 fluxRecents.push({
                     lot: p.lot || p.certificate_code || "N/A",
                     serie: p.serie || "N/A",
@@ -534,12 +540,22 @@ app.get("/api/dashboard/stats", async (req, res) => {
             });
         }
 
+        // Détermination dynamique de la région la plus active
+        let activeRegion = "Centre";
+        let maxCount = -1;
+        for (const [reg, count] of Object.entries(regionCounts)) {
+            if (count > maxCount) {
+                maxCount = count;
+                activeRegion = reg;
+            }
+        }
+
         return apiSuccess(res, {
             precision: "99.85%",
             totalScans: totalScans.toLocaleString("fr-FR"),
-            regionActive: "Centre & Littoral",
+            regionActive: activeRegion, // <-- Devient dynamique selon la BDD
             anomalies: String(alertesCount),
-            flux: fluxRecents.slice(0, 10)
+            flux: fluxRecents // <-- Suppression du .slice(0, 10) pour laisser le front gérer la pagination complète
         });
     } catch (err) {
         console.error("[DASHBOARD STATS ERROR]", err.message);
