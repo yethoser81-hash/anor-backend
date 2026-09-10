@@ -62,23 +62,24 @@ async function loadIntelligenceData() {
         if (!response.ok) throw new Error("Erreur de communication avec le serveur");
         const result = await response.json();
         
-        if (result.success && result.data) {
-            document.getElementById('volume-global').innerText = result.data.volumeGlobal ?? '0';
-            document.getElementById('pic-affluence').innerText = result.data.picAffluence ?? '--';
-            document.getElementById('indice-conformite').innerText = result.data.indiceConformite ?? '100%';
-            document.getElementById('entreprises-auditees').innerText = result.data.entreprisesAuditees ?? '0';
-            if(result.data.statPeakLocation) {
-                document.getElementById('statPeakLocation').innerText = result.data.statPeakLocation;
+        // Correction : Utilisation directe de result au lieu de result.data
+        if (result.success) {
+            document.getElementById('volume-global').innerText = result.volumeGlobal ?? '0';
+            document.getElementById('pic-affluence').innerText = result.picAffluence ?? '--';
+            document.getElementById('indice-conformite').innerText = result.indiceConformite ?? '100%';
+            document.getElementById('entreprises-auditees').innerText = result.entreprisesAuditees ?? '0';
+            if(result.statPeakLocation) {
+                document.getElementById('statPeakLocation').innerText = result.statPeakLocation;
             }
 
             const tbody = document.getElementById('companyBehaviorTable');
             if (tbody) {
-                const comportementList = result.data.comportement || [];
+                const comportementList = result.comportement || [];
                 if (comportementList.length === 0) {
                     tbody.innerHTML = `<tr><td colspan="5" style="text-align: center; color: var(--text-muted);">Aucune donnée comportementale disponible dans la base.</td></tr>`;
                 } else {
                     tbody.innerHTML = comportementList.map(row => {
-                        let badgeClass = 'badge-success';
+                        let badgeClass = 'badge';
                         if(row.statutConformite && row.statutConformite.includes('SURVEILLANCE')) {
                             badgeClass = 'badge-warning';
                         } else if(row.statutConformite && row.statutConformite.includes('CRITIQUE')) {
@@ -97,15 +98,15 @@ async function loadIntelligenceData() {
                 }
             }
 
-            if(scansChart && result.data.chartTimeline) {
-                scansChart.data.labels = result.data.chartTimeline.labels || [];
-                scansChart.data.datasets[0].data = result.data.chartTimeline.values || [];
+            if(scansChart && result.chartTimeline) {
+                scansChart.data.labels = result.chartTimeline.labels || [];
+                scansChart.data.datasets[0].data = result.chartTimeline.values || [];
                 scansChart.update();
             }
 
-            if(pieChart && result.data.regionsDistribution) {
-                pieChart.data.labels = result.data.regionsDistribution.labels || [];
-                pieChart.data.datasets[0].data = result.data.regionsDistribution.values || [];
+            if(pieChart && result.regionsDistribution) {
+                pieChart.data.labels = result.regionsDistribution.labels || [];
+                pieChart.data.datasets[0].data = result.regionsDistribution.values || [];
                 pieChart.update();
             }
         }
