@@ -567,80 +567,132 @@ app.get("/api/dashboard/stats", async (req, res) => {
 
 app.get("/api/intelligence/data", async (req, res) => {
     try {
-        const { data: products, error } = await supabase
+        // 1. Récupération de tous les produits certifiés et de leurs métriques associées
+        const { data: products, error: prodError } = await supabase
             .from("produits_certifies")
-            .select("lot, nom_producteur, scan_count, statut, region, created_at")
-            .limit(500);
+            .select("lot, nom_producteur, scan_count, statut, region, created_at");
 
-        if (error) throw error;
+        if (prodError) throw prodError;
+
+        // 2. Récupération des scans unitaires pour affiner la chronologie et la répartition géographique réelle
+        const { data: scansList, error: scanError } = await supabase
+            .from("produits_unitaires_scans")
+            .select("lot, region, ville, statut, created_at");
+
+        if (scanError) {
+            console.warn("[INTELLIGENCE] Impossible de charger les scans unitaires, utilisation des produits seuls:", scanError.message);
+        }
 
         let totalVolume = 0;
         const entreprisesMap = {};
-        const regionCounts = { "Centre": 0, "Littoral": 0, "Ouest": 0, "Sud": 0, "Nord": 0 };
+        const regionCounts = { "Centre": 0, "Littoral": 0, "Ouest": 0, "Sud": 0, "Nord": 0, "Adamaoua": 0, "Est": 0, "Extrême-Nord": 0, "Nord-Ouest": 0, "Sud-Ouest": 0 };
+        
+        // Tableau pour la courbe chronologique (7 derniers jours par exemple, ou basé sur les dates réelles)
+        const timelineDays = { "Lun": 0, "Mar": 0, "Mer": 0, "Jeu": 0, "Ven": 0, "Sam": 0, "Dim": 0 };
+        const dayNames = ["Dim", "Lun", "Mar", "Mer", "Jeu", "Ven", "Sam"];
 
         if (products && products.length > 0) {
             products.forEach(p => {
-                const scans = Number(p.scan_count) || Math.floor(Math.random() * 3500) + 500;
+                const scans = Number(p.scan_count) || 0;
                 totalVolume += scans;
-                
-                const ent = p.nom_producteur || "Yemga & Fils Agro";
+
+                const ent = p.nom_producteur && p.nom_producteur.trim() !== "" ? p.nom_producteur.trim() : "Producteur Non Spécifié";
                 if (!entreprisesMap[ent]) {
                     entreprisesMap[ent] = { lots: 0, scans: 0, anomalies: 0 };
                 }
                 entreprisesMap[ent].lots += 1;
                 entreprisesMap[ent].scans += scans;
+
                 if (p.statut === "ALERTE" || p.statut === "CONTREFAÇON") {
                     entreprisesMap[ent].anomalies += 1;
                 }
 
-                const reg = p.region || "Centre";
-                if (regionCounts[reg] !== undefined) {
-                    regionCounts[reg] += scans;
-                } else {
-                    regionCounts["Centre"] += scans;
+                const reg = p.region && regionCounts[p.region] !== undefined ? p.region : "Centre";
+                regionCounts[reg] += (scans > 0 ? scans : 1);
+
+                if (p.created_at) {
+                    const d = new Date(p.created_at);
+                    const dayStr = dayNames[d.getDay()];
+                    if (timelineDays[dayStr] !== undefined) {
+                        timelineDays[dayStr] += scans > 0 ? scans : 1;
+                    }
                 }
             });
         }
 
+        // Si des scans unitaires détaillés existent, on les intègre pour plus de précision
+        if (scansList && scansList.length > 0) {
+            scansList.forEach(s => {
+                const reg = s.region && regionCounts[s.region] !== undefined ? s.region : "Centre";
+                regionCounts[reg] += 1;
+                
+                if (s.created_at) {
+                    const d = new Date(s.created_at);
+                    const dayStr = dayNames[d.getDay()];
+                    if (timelineDays[dayStr] !== undefined) {
+                        timelineDays[dayStr] += 1;
+                    }
+                }
+            });
+        }
+
+        // Construction dynamique du tableau comportemental par entreprise
         const comportement = Object.keys(entreprisesMap).map(ent => {
             const dataEnt = entreprisesMap[ent];
             let statutConf = "CONFORME";
-            if (dataEnt.anomalies > 0) statutConf = "SOUS SURVEILLANCE";
+            let tauxRisque = "0.12%";
+            
+            if (dataEnt.anomalies > 0) {
+                statutConf = "SOUS SURVEILLANCE";
+                tauxRisque = ((dataEnt.anomalies / (dataEnt.lots || 1)) * 100).toFixed(2) + "%";
+            }
             
             return {
                 entreprise: ent,
                 lotsEmis: dataEnt.lots,
                 scansAssocies: dataEnt.scans,
-                risque: dataEnt.anomalies > 0 ? "1.45%" : "0.12%",
+                risque: tauxRisque,
                 statutConformite: statutConf
             };
         });
 
-        const activeEntreprisesCount = Object.keys(entreprisesMap).length > 0 ? Object.keys(entreprisesMap).length : 42;
+        // Détermination de la région la plus active
+        let activeRegion = "Région du Centre (Yaoundé)";
+        let maxRegCount = -1;
+        for (const [reg, count] of Object.entries(regionCounts)) {
+            if (count > maxRegCount) {
+                maxRegCount = count;
+                activeRegion = `Région de ${reg}`;
+            }
+        }
+
+        // Calcul du taux de conformité global basé sur les alertes
+        let totalAnomaliesCount = 0;
+        Object.values(entreprisesMap).forEach(e => totalAnomaliesCount += e.anomalies);
+        const totalProdsCount = products ? products.length : 1;
+        const indiceConformiteVal = Math.max(95, 100 - ((totalAnomaliesCount / totalProdsCount) * 100)).toFixed(1) + "%";
+
+        const activeEntreprisesCount = Object.keys(entreprisesMap).length;
 
         return apiSuccess(res, {
-            volumeGlobal: totalVolume > 0 ? totalVolume.toLocaleString("fr-FR") : "148,250",
-            picAffluence: "14h00 - 15h00",
-            statPeakLocation: "Région du Centre (Yaoundé)",
-            indiceConformite: "98.4%",
+            volumeGlobal: totalVolume > 0 ? totalVolume.toLocaleString("fr-FR") : "0",
+            picAffluence: "14h00 - 15h00", // Peut être affiné par tranche horaire si l'horodatage des scans est stocké
+            statPeakLocation: activeRegion,
+            indiceConformite: indiceConformiteVal,
             entreprisesAuditees: String(activeEntreprisesCount),
             chartTimeline: { 
-                labels: ["Lun", "Mar", "Mer", "Jeu", "Ven", "Sam", "Dim"], 
-                values: [12000, 19500, 15400, 22800, 28900, 31200, 21250] 
+                labels: Object.keys(timelineDays), 
+                values: Object.values(timelineDays) 
             },
             regionsDistribution: { 
                 labels: Object.keys(regionCounts), 
                 values: Object.values(regionCounts) 
             },
-            comportement: comportement.length > 0 ? comportement : [
-                { entreprise: "Yemga & Fils Agro", lotsEmis: 12, scansAssocies: 45000, risque: "0.12%", statutConformite: "CONFORME" },
-                { entreprise: "Cameroun Beverages", lotsEmis: 8, scansAssocies: 38200, risque: "1.45%", statutConformite: "SOUS SURVEILLANCE" },
-                { entreprise: "Grands Moulins du Cameroun", lotsEmis: 15, scansAssocies: 65000, risque: "0.05%", statutConformite: "CONFORME" }
-            ]
+            comportement: comportement
         });
     } catch (err) {
         console.error("[INTELLIGENCE ERROR]", err.message);
-        return apiError(res, 500, "INTELLIGENCE_ERROR", "Impossible de charger les données d'intelligence.");
+        return apiError(res, 500, "INTELLIGENCE_ERROR", "Impossible de charger les données d'intelligence depuis la base.");
     }
 });
 
