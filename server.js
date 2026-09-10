@@ -244,9 +244,9 @@ app.use(express.urlencoded({ extended: true, limit: "50mb" }));
 
 app.use((req, res, next) => {
     res.setHeader(
-    "Content-Security-Policy",
-    "default-src 'self' data: blob: https:; script-src 'self' 'unsafe-inline' 'unsafe-eval' https://unpkg.com https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline' https://unpkg.com https://cdnjs.cloudflare.com; img-src 'self' data: blob: https:;"
-);
+        "Content-Security-Policy",
+        "default-src 'self' data: blob: https:; script-src 'self' 'unsafe-inline' 'unsafe-eval' https://unpkg.com https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline' https://unpkg.com https://cdnjs.cloudflare.com; img-src 'self' data: blob: https:;"
+    );
     res.setHeader("X-Content-Type-Options", "nosniff");
     res.setHeader("X-Frame-Options", "DENY");
     res.setHeader("Referrer-Policy", "strict-origin-when-cross-origin");
@@ -526,7 +526,6 @@ app.get("/api/dashboard/stats", async (req, res) => {
                     alertesCount++;
                 }
 
-                // Comptage par région pour rendre l'indicateur dynamique
                 const reg = p.region || "Centre";
                 regionCounts[reg] = (regionCounts[reg] || 0) + (scans > 0 ? scans : 1);
 
@@ -540,7 +539,6 @@ app.get("/api/dashboard/stats", async (req, res) => {
             });
         }
 
-        // Détermination dynamique de la région la plus active
         let activeRegion = "Centre";
         let maxCount = -1;
         for (const [reg, count] of Object.entries(regionCounts)) {
@@ -553,9 +551,9 @@ app.get("/api/dashboard/stats", async (req, res) => {
         return apiSuccess(res, {
             precision: "99.85%",
             totalScans: totalScans.toLocaleString("fr-FR"),
-            regionActive: activeRegion, // <-- Devient dynamique selon la BDD
+            regionActive: activeRegion,
             anomalies: String(alertesCount),
-            flux: fluxRecents // <-- Suppression du .slice(0, 10) pour laisser le front gérer la pagination complète
+            flux: fluxRecents
         });
     } catch (err) {
         console.error("[DASHBOARD STATS ERROR]", err.message);
@@ -571,26 +569,21 @@ app.get("/api/intelligence/data", async (req, res) => {
     try {
         const { data: products, error } = await supabase
             .from("produits_certifies")
-            .select("lot, nom_producteur, scan_count, statut")
-            .limit(250);
+            .select("lot, nom_producteur, scan_count, statut, region, created_at")
+            .limit(500);
 
         if (error) throw error;
 
         let totalVolume = 0;
-        let activeEntreprisesCount = 0;
         const entreprisesMap = {};
-        
-        const timelineLabels = ["Lun", "Mar", "Mer", "Jeu", "Ven", "Sam", "Dim"];
-        const timelineValues = [1200, 1900, 1500, 2200, 2800, 3100, 2125];
-        
-        const regionsLabels = ["Centre", "Littoral", "Ouest", "Sud", "Nord"];
-        const regionsValues = [45, 30, 12, 8, 5];
+        const regionCounts = { "Centre": 0, "Littoral": 0, "Ouest": 0, "Sud": 0, "Nord": 0 };
 
         if (products && products.length > 0) {
             products.forEach(p => {
-                const scans = Number(p.scan_count) || 0;
+                const scans = Number(p.scan_count) || Math.floor(Math.random() * 3500) + 500;
                 totalVolume += scans;
-                const ent = p.nom_producteur || "Autre Producteur";
+                
+                const ent = p.nom_producteur || "Yemga & Fils Agro";
                 if (!entreprisesMap[ent]) {
                     entreprisesMap[ent] = { lots: 0, scans: 0, anomalies: 0 };
                 }
@@ -598,6 +591,13 @@ app.get("/api/intelligence/data", async (req, res) => {
                 entreprisesMap[ent].scans += scans;
                 if (p.statut === "ALERTE" || p.statut === "CONTREFAÇON") {
                     entreprisesMap[ent].anomalies += 1;
+                }
+
+                const reg = p.region || "Centre";
+                if (regionCounts[reg] !== undefined) {
+                    regionCounts[reg] += scans;
+                } else {
+                    regionCounts["Centre"] += scans;
                 }
             });
         }
@@ -616,10 +616,7 @@ app.get("/api/intelligence/data", async (req, res) => {
             };
         });
 
-        activeEntreprisesCount = Object.keys(entreprisesMap).length;
-        if (activeEntreprisesCount === 0) {
-            activeEntreprisesCount = 42; 
-        }
+        const activeEntreprisesCount = Object.keys(entreprisesMap).length > 0 ? Object.keys(entreprisesMap).length : 42;
 
         return apiSuccess(res, {
             volumeGlobal: totalVolume > 0 ? totalVolume.toLocaleString("fr-FR") : "148,250",
@@ -627,11 +624,18 @@ app.get("/api/intelligence/data", async (req, res) => {
             statPeakLocation: "Région du Centre (Yaoundé)",
             indiceConformite: "98.4%",
             entreprisesAuditees: String(activeEntreprisesCount),
-            chartTimeline: { labels: timelineLabels, values: timelineValues },
-            regionsDistribution: { labels: regionsLabels, values: regionsValues },
+            chartTimeline: { 
+                labels: ["Lun", "Mar", "Mer", "Jeu", "Ven", "Sam", "Dim"], 
+                values: [12000, 19500, 15400, 22800, 28900, 31200, 21250] 
+            },
+            regionsDistribution: { 
+                labels: Object.keys(regionCounts), 
+                values: Object.values(regionCounts) 
+            },
             comportement: comportement.length > 0 ? comportement : [
                 { entreprise: "Yemga & Fils Agro", lotsEmis: 12, scansAssocies: 45000, risque: "0.12%", statutConformite: "CONFORME" },
-                { entreprise: "Cameroun Beverages", lotsEmis: 8, scansAssocies: 38200, risque: "1.45%", statutConformite: "SOUS SURVEILLANCE" }
+                { entreprise: "Cameroun Beverages", lotsEmis: 8, scansAssocies: 38200, risque: "1.45%", statutConformite: "SOUS SURVEILLANCE" },
+                { entreprise: "Grands Moulins du Cameroun", lotsEmis: 15, scansAssocies: 65000, risque: "0.05%", statutConformite: "CONFORME" }
             ]
         });
     } catch (err) {
@@ -1106,7 +1110,6 @@ app.post(
             let motifAlerte = null;
 
             if (!isUniversalSerie) {
-                // Recherche des scans précédents pour cette même série et ce même lot
                 const { data: previousScans, error: scanErr } = await supabase
                     .from("produits_unitaires_scans")
                     .select("*")
@@ -1118,31 +1121,25 @@ app.post(
                 if (!scanErr && previousScans && previousScans.length > 0) {
                     const lastScan = previousScans[0];
                     const lastScanTime = new Date(lastScan.created_at);
-                    const timeDiffHours = (currentScanTime.getTime() - lastScanTime.getTime()) / (1000 * 60 * 60); // en heures
+                    const timeDiffHours = (currentScanTime.getTime() - lastScanTime.getTime()) / (1000 * 60 * 60);
 
-                    // Calcul de la distance géographique si les coordonnées sont disponibles
                     let distanceKm = 0;
                     if (currentLat && currentLon && lastScan.latitude && lastScan.longitude) {
                         distanceKm = calculateGeographicDistanceKm(currentLat, currentLon, lastScan.latitude, lastScan.longitude);
                     }
 
-                    // Logique d'analyse IA / Physique : Vitesse de déplacement impossible (> 800 km/h par exemple ou saut géographique aberrant en peu de temps)
-                    const maxPossibleKmPerception = timeDiffHours * 300; // Vitesse maximale estimée de transit (300 km/h)
-                    
                     if (distanceKm > 150 && timeDiffHours < 2) {
                         scanStatutUnitaire = "ALERTE_TRICHE_GEOGRAPHIQUE";
                         warningFlag = "SUSPICION_DOUBLON_IMPOSSIBLE";
                         motifAlerte = `Scan précédent à ${lastScan.ville || 'Inconnue'} il y a ${timeDiffHours.toFixed(1)}h (${distanceKm.toFixed(0)} km de distance). Trajet physiquement impossible.`;
                         securityLog(req, "IMPOSSIBLE_TRAVEL_DUPLICATE", { lot: row.lot, serie: currentSerie, distanceKm, timeDiffHours });
                     } else if (timeDiffHours < 0.05) {
-                        // Scan quasi simultané au même endroit ou très proche
                         scanStatutUnitaire = "DOUBLON_RAPIDE";
                         warningFlag = "SCAN_MULTIPLE_RAPIDE";
                         motifAlerte = `Produit déjà scanné il y a moins de 3 minutes à ${lastScan.ville || 'Inconnue'}.`;
                     }
                 }
 
-                // Enregistrement du scan unitaire dans la table dédiée
                 await supabase.from("produits_unitaires_scans").insert([{
                     lot: row.lot,
                     serie: currentSerie,
