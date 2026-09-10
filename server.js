@@ -1111,7 +1111,6 @@ app.post(
                     }
 
                     // Logique d'analyse IA / Physique : Vitesse de déplacement impossible (> 800 km/h par exemple ou saut géographique aberrant en peu de temps)
-                    // Exemple : Distance > 150 km en moins de 2 heures
                     const maxPossibleKmPerception = timeDiffHours * 300; // Vitesse maximale estimée de transit (300 km/h)
                     
                     if (distanceKm > 150 && timeDiffHours < 2) {
