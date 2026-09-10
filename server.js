@@ -2,7 +2,7 @@
  * ======================================================
  * SYSTEME SOUVERAIN DE CERTIFICATION ANOR
  * SERVER CORE (VERSION ARCHITECTURE HAUTE SÉCURITÉ)
- * Version: 17.9.7 (Optimisation BDD & Correction Timeout Intelligence)
+ * Version: 17.9.8 (Traçabilité Avancée & Gestion des Séries)
  * ======================================================
  */
 
@@ -52,7 +52,7 @@ setInterval(() => {
 // VERSION / CONFIGURATION
 // ======================================================
 
-const SERVER_VERSION = "17.9.7";
+const SERVER_VERSION = "17.9.8";
 const VISUAL_VERSION = 1;
 const VISUAL_BITS_LENGTH = 51;
 const isProduction = process.env.NODE_ENV === "production";
@@ -94,6 +94,20 @@ function calculateHammingDistance(str1, str2) {
         }
     }
     return distance;
+}
+
+// Formule de Haversine pour calculer la distance géographique en kilomètres entre deux points GPS
+function calculateGeographicDistanceKm(lat1, lon1, lat2, lon2) {
+    if (!lat1 || !lon1 || !lat2 || !lon2) return 0;
+    const toRad = (val) => (val * Math.PI) / 180;
+    const R = 6371; // Rayon de la terre en km
+    const dLat = toRad(lat2 - lat1);
+    const dLon = toRad(lon2 - lon1);
+    const a =
+        Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+        Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLon / 2) * Math.sin(dLon / 2);
+    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+    return R * c;
 }
 
 function sanitizeFileName(filename) {
@@ -491,7 +505,6 @@ app.get("/health", async (req, res) => {
 
 app.get("/api/dashboard/stats", async (req, res) => {
     try {
-        // Optimisation : sélection uniquement des colonnes nécessaires et limite de sécurité
         const { data: products, error } = await supabase
             .from("produits_certifies")
             .select("lot, certificate_code, serie, ville, region, created_at, statut, scan_count")
@@ -535,12 +548,11 @@ app.get("/api/dashboard/stats", async (req, res) => {
 });
 
 // ======================================================
-// ROUTE API : INTELLIGENCE STATISTIQUE & COMPORTEMENTALE (OPTIMISÉE)
+// ROUTE API : INTELLIGENCE STATISTIQUE & COMPORTEMENTALE
 // ======================================================
 
 app.get("/api/intelligence/data", async (req, res) => {
     try {
-        // CORRECTION TIMEOUT : Utilisation d'un .limit(250) et sélection stricte des colonnes légères
         const { data: products, error } = await supabase
             .from("produits_certifies")
             .select("lot, nom_producteur, scan_count, statut")
@@ -599,14 +611,8 @@ app.get("/api/intelligence/data", async (req, res) => {
             statPeakLocation: "Région du Centre (Yaoundé)",
             indiceConformite: "98.4%",
             entreprisesAuditees: String(activeEntreprisesCount),
-            chartTimeline: {
-                labels: timelineLabels,
-                values: timelineValues
-            },
-            regionsDistribution: {
-                labels: regionsLabels,
-                values: regionsValues
-            },
+            chartTimeline: { labels: timelineLabels, values: timelineValues },
+            regionsDistribution: { labels: regionsLabels, values: regionsValues },
             comportement: comportement.length > 0 ? comportement : [
                 { entreprise: "Yemga & Fils Agro", lotsEmis: 12, scansAssocies: 45000, risque: "0.12%", statutConformite: "CONFORME" },
                 { entreprise: "Cameroun Beverages", lotsEmis: 8, scansAssocies: 38200, risque: "1.45%", statutConformite: "SOUS SURVEILLANCE" }
@@ -670,7 +676,6 @@ app.get("/api/intelligence/stats", async (req, res) => {
 app.get("/api/surveillance/data", async (req, res) => {
     try {
         const { region } = req.query;
-        // Optimisation : sélection limitée pour éviter le timeout
         const { data: products, error } = await supabase
             .from("produits_certifies")
             .select("lot, certificate_code, nom_produit, nom_producteur, statut, latitude, longitude, ville, region, scan_count, created_at")
@@ -780,7 +785,7 @@ app.post(
             const {
                 nom_produit, nom_producteur, lot, quantite, type_emballage,
                 composition, pays_origine, date_certificat_conformite,
-                date_fabrication, date_peremption
+                date_fabrication, date_peremption, serie
             } = req.body;
 
             if (!lot || !quantite || !type_emballage) {
@@ -800,8 +805,9 @@ app.post(
             const visuelBufferData = visuelFile ? { buffer: visuelFile.buffer, mimetype: visuelFile.mimetype, originalname: visuelFile.originalname } : null;
 
             const certificateCode = String(lot).trim();
+            const productSerie = serie ? String(serie).trim() : "000000";
 
-            const secureSignature = crypto.createHash("sha256").update(`${certificateCode}-${Date.now()}-${crypto.randomUUID()}`).digest("hex");
+            const secureSignature = crypto.createHash("sha256").update(`${certificateCode}-${productSerie}-${Date.now()}-${crypto.randomUUID()}`).digest("hex");
             const visualBits = normalizeVisualBits(SealRenderer.deriveVisualBits(secureSignature));
 
             if (!visualBits) {
@@ -816,7 +822,7 @@ app.post(
                     lot, quantite: parsedQuantite, type_emballage,
                     productName: nom_produit, nom_produit, nom_producteur,
                     isMasterSeal: true,
-                    masterSerialLabel: `SÉRIE : DM / ${parsedQuantite.toLocaleString("fr-FR")}`
+                    masterSerialLabel: `SÉRIE : ${productSerie} / ${parsedQuantite.toLocaleString("fr-FR")}`
                 }
             );
 
@@ -852,13 +858,13 @@ app.post(
             }
 
             const payloadDB = {
-                certificate_code: certificateCode, lot: certificateCode, quantite: parsedQuantite, type_emballage,
+                certificate_code: certificateCode, lot: certificateCode, serie: productSerie, quantite: parsedQuantite, type_emballage,
                 nom_produit: nom_produit || null, nom_producteur: nom_producteur || null,
                 composition: composition || null, pays_origine: pays_origine || null,
                 date_certificat_conformite: date_certificat_conformite || null,
                 date_fabrication: date_fabrication || null, date_peremption: date_peremption || null,
                 certificat_pdf_url: pdfUrl, visuel_produit_url: visuelUrl,
-                glyph_payload: { visualVersion: VISUAL_VERSION, secureSignature, lot: certificateCode, visualBits, visualSignature },
+                glyph_payload: { visualVersion: VISUAL_VERSION, secureSignature, lot: certificateCode, serie: productSerie, visualBits, visualSignature },
                 visual_bits: visualBits, visual_signature: visualSignature,
                 matrix_hash: sha256Hex(visualBits), ai_signature_hash: secureSignature,
                 sha256_hash: secureSignature, signature_ia: secureSignature,
@@ -881,6 +887,7 @@ SYSTEME SOUVERAIN DE CERTIFICATION - NOTICE OFFICIELLE DE LOT
 
 1. IDENTIFICATION DU LOT ET DU PRODUIT :
    - Numéro de Lot global    : ${certificateCode}
+   - Série Initiale/Plage   : ${productSerie}
    - Nom du Produit         : ${nom_produit || "N/A"}
    - Producteur             : ${nom_producteur || "N/A"}
    - Quantité certifiée     : ${parsedQuantite.toLocaleString("fr-FR")} unités
@@ -899,12 +906,12 @@ Système Souverain de Certification - ANOR Engine ${SERVER_VERSION}
             const zip = new JSZip();
             zip.file("NOTICE_DIMPRESSION_ET_INSTRUCTIONS.txt", printNoticeContent);
             zip.file("manifeste_serialisation_unitaire.csv", csvManifestContent);
-            zip.file("certification.json", JSON.stringify({ lot: certificateCode, nom_produit, nom_producteur, quantite: parsedQuantite, visualVersion: VISUAL_VERSION, visualBits, visualSignature, signature_ia: secureSignature, created_at: new Date().toISOString() }, null, 4));
+            zip.file("certification.json", JSON.stringify({ lot: certificateCode, serie: productSerie, nom_produit, nom_producteur, quantite: parsedQuantite, visualVersion: VISUAL_VERSION, visualBits, visualSignature, signature_ia: secureSignature, created_at: new Date().toISOString() }, null, 4));
             zip.file("sceau_ANOR_MASTER.png", imageBuffer);
             const zipBuffer = await zip.generateAsync({ type: "nodebuffer", compression: "DEFLATE", compressionOptions: { level: 9 } });
 
             return apiSuccess(res, {
-                message: "Sceau et sérialisation unitaire générés avec succès.", lot: certificateCode, sha256_hash: secureSignature, visualVersion: VISUAL_VERSION, visualBits, visualSignature,
+                message: "Sceau et sérialisation unitaire générés avec succès.", lot: certificateCode, serie: productSerie, sha256_hash: secureSignature, visualVersion: VISUAL_VERSION, visualBits, visualSignature,
                 imageUrl: `data:image/png;base64,${rawBase64}`,
                 zipUrl: `data:application/zip;base64,${zipBuffer.toString("base64")}`,
                 data: data?.[0] || null,
@@ -918,7 +925,7 @@ Système Souverain de Certification - ANOR Engine ${SERVER_VERSION}
 );
 
 // ======================================================
-// VERIFICATION DU SCEAU AVEC INTÉGRATION GEMINI (OPTIMISÉ CACHE)
+// VERIFICATION DU SCEAU, GESTION DE LA SÉRIE ET TRAÇABILITÉ TEMPO-GÉOGRAPHIQUE
 // ======================================================
 
 app.post(
@@ -933,8 +940,8 @@ app.post(
             }
 
             const {
-                scannedMatrix, lot, visualBits: requestVisualBits, visualSignature: requestVisualSignature,
-                location, locationMethod, deviceMetadata
+                scannedMatrix, lot, serie: requestSerie, visualBits: requestVisualBits, visualSignature: requestVisualSignature,
+                location, locationMethod, deviceMetadata, latitude, longitude, ville, region
             } = req.body;
 
             let imageCacheKey = null;
@@ -1067,17 +1074,83 @@ app.post(
                 return apiError(res, 404, "UNKNOWN_SEAL", "Sceau inconnu ou non authentifié.", { status: "CONTREFAÇON_REJETEE", processingTime: Date.now() - startTime, engineVersion: SERVER_VERSION });
             }
 
-            const currentScanCount = Number(row.scan_count || 0) + 1;
-            const currentLocation = location || "Inconnue";
-            let warningFlag = null;
+            // ======================================================
+            // GESTION ET ANALYSE DE LA SÉRIE (TRAÇABILITÉ / DOUBLONS)
+            // ======================================================
+            const currentSerie = requestSerie ? String(requestSerie).trim() : (row.serie || "000000");
+            const isUniversalSerie = currentSerie === "000000" || currentSerie.startsWith("000000");
+            const currentScanTime = new Date();
+            const currentVille = ville || location || "Inconnue";
+            const currentRegion = region || "Centre";
+            const currentLat = latitude ? Number(latitude) : null;
+            const currentLon = longitude ? Number(longitude) : null;
 
-            if (row.last_scan_location && row.last_scan_location !== currentLocation && row.last_scanned_at) {
-                const timeDiffMinutes = (Date.now() - new Date(row.last_scanned_at).getTime()) / (1000 * 60);
-                if (timeDiffMinutes < 15) { warningFlag = "SUSPICION_DUPLICATION_SCEAU"; }
+            let scanStatutUnitaire = "CONFORME";
+            let warningFlag = null;
+            let motifAlerte = null;
+
+            if (!isUniversalSerie) {
+                // Recherche des scans précédents pour cette même série et ce même lot
+                const { data: previousScans, error: scanErr } = await supabase
+                    .from("produits_unitaires_scans")
+                    .select("*")
+                    .eq("lot", row.lot)
+                    .eq("serie", currentSerie)
+                    .order("created_at", { ascending: false })
+                    .limit(1);
+
+                if (!scanErr && previousScans && previousScans.length > 0) {
+                    const lastScan = previousScans[0];
+                    const lastScanTime = new Date(lastScan.created_at);
+                    const timeDiffHours = (currentScanTime.getTime() - lastScanTime.getTime()) / (1000 * 60 * 60); // en heures
+
+                    // Calcul de la distance géographique si les coordonnées sont disponibles
+                    let distanceKm = 0;
+                    if (currentLat && currentLon && lastScan.latitude && lastScan.longitude) {
+                        distanceKm = calculateGeographicDistanceKm(currentLat, currentLon, lastScan.latitude, lastScan.longitude);
+                    }
+
+                    // Logique d'analyse IA / Physique : Vitesse de déplacement impossible (> 800 km/h par exemple ou saut géographique aberrant en peu de temps)
+                    // Exemple : Distance > 150 km en moins de 2 heures
+                    const maxPossibleKmPerception = timeDiffHours * 300; // Vitesse maximale estimée de transit (300 km/h)
+                    
+                    if (distanceKm > 150 && timeDiffHours < 2) {
+                        scanStatutUnitaire = "ALERTE_TRICHE_GEOGRAPHIQUE";
+                        warningFlag = "SUSPICION_DOUBLON_IMPOSSIBLE";
+                        motifAlerte = `Scan précédent à ${lastScan.ville || 'Inconnue'} il y a ${timeDiffHours.toFixed(1)}h (${distanceKm.toFixed(0)} km de distance). Trajet physiquement impossible.`;
+                        securityLog(req, "IMPOSSIBLE_TRAVEL_DUPLICATE", { lot: row.lot, serie: currentSerie, distanceKm, timeDiffHours });
+                    } else if (timeDiffHours < 0.05) {
+                        // Scan quasi simultané au même endroit ou très proche
+                        scanStatutUnitaire = "DOUBLON_RAPIDE";
+                        warningFlag = "SCAN_MULTIPLE_RAPIDE";
+                        motifAlerte = `Produit déjà scanné il y a moins de 3 minutes à ${lastScan.ville || 'Inconnue'}.`;
+                    }
+                }
+
+                // Enregistrement du scan unitaire dans la table dédiée
+                await supabase.from("produits_unitaires_scans").insert([{
+                    lot: row.lot,
+                    serie: currentSerie,
+                    ville: currentVille,
+                    region: currentRegion,
+                    latitude: currentLat,
+                    longitude: currentLon,
+                    statut: scanStatutUnitaire,
+                    motif_alerte: motifAlerte,
+                    created_at: currentScanTime
+                }]).catch(err => console.warn("[SERIE LOG ERROR]", err.message));
             }
 
-            const updatePayload = { scan_count: currentScanCount, last_scan_location: currentLocation, location_method: locationMethod || null, last_scanned_at: new Date() };
+            const currentScanCount = Number(row.scan_count || 0) + 1;
+
+            const updatePayload = { 
+                scan_count: currentScanCount, 
+                last_scan_location: currentVille, 
+                location_method: locationMethod || null, 
+                last_scanned_at: currentScanTime 
+            };
             if (deviceMetadata) { updatePayload.device_metadata = deviceMetadata; }
+            if (warningFlag) { updatePayload.statut = "ALERTE"; }
 
             supabase.from("produits_certifies").update(updatePayload).eq("lot", row.lot)
                 .then(({ error }) => { if (error) { console.warn("Mise à jour scan échouée:", error.message); } })
@@ -1086,20 +1159,46 @@ app.post(
             const score = `${(matchConfidence * 100).toFixed(1)}%`;
 
             const responsePayload = {
-                status: "AUTHENTIQUE", verified: true, confidence: matchConfidence, score, confidenceScore: matchConfidence,
-                security_alert: warningFlag, securityAlert: warningFlag, lot: row.lot, batch: row.lot,
-                nom_produit: row.nom_produit || "Produit Certifié Conforme", nomProduit: row.nom_produit || "Produit Certifié Conforme",
-                nom_producteur: row.nom_producteur || "Producteur Agréé", nomProducteur: row.nom_producteur || "Producteur Agréé",
-                pays: row.pays_origine || "Cameroun", pays_origine: row.pays_origine || "Cameroun",
-                quantite: row.quantite, type_emballage: row.type_emballage, typeEmballage: row.type_emballage,
-                composition: row.composition || null, packaging: row.type_emballage || null,
-                visualUrl: row.visuel_produit_url || null, visuel_produit_url: row.visuel_produit_url || null, visualProduitUrl: row.visuel_produit_url || null,
-                certificat_pdf_url: row.certificat_pdf_url || null, certificatPdfUrl: row.certificat_pdf_url || null,
-                scan_count: currentScanCount, scanCount: currentScanCount,
-                certified_at: row.created_at || row.date_certificat_conformite, certDate: row.date_certificat_conformite || row.created_at,
-                prodDate: row.date_fabrication || "N/A", expDate: row.date_peremption || "N/A",
-                norme: "ANOR NC-ISO", processingTime: Date.now() - startTime, processingTimeMs: Date.now() - startTime,
-                engineVersion: SERVER_VERSION, visualVersion: VISUAL_VERSION, verificationMode, serverTimestamp: Date.now()
+                status: warningFlag ? "ALERTE" : "AUTHENTIQUE",
+                verified: true, 
+                confidence: matchConfidence, 
+                score, 
+                confidenceScore: matchConfidence,
+                security_alert: warningFlag || row.security_alert, 
+                securityAlert: warningFlag || row.security_alert,
+                motif_alerte: motifAlerte,
+                lot: row.lot, 
+                batch: row.lot,
+                serie: currentSerie,
+                nom_produit: row.nom_produit || "Produit Certifié Conforme", 
+                nomProduit: row.nom_produit || "Produit Certifié Conforme",
+                nom_producteur: row.nom_producteur || "Producteur Agréé", 
+                nomProducteur: row.nom_producteur || "Producteur Agréé",
+                pays: row.pays_origine || "Cameroun", 
+                pays_origine: row.pays_origine || "Cameroun",
+                quantite: row.quantite, 
+                type_emballage: row.type_emballage, 
+                typeEmballage: row.type_emballage,
+                composition: row.composition || null, 
+                packaging: row.type_emballage || null,
+                visualUrl: row.visuel_produit_url || null, 
+                visuel_produit_url: row.visuel_produit_url || null, 
+                visualProduitUrl: row.visuel_produit_url || null,
+                certificat_pdf_url: row.certificat_pdf_url || null, 
+                certificatPdfUrl: row.certificat_pdf_url || null,
+                scan_count: currentScanCount, 
+                scanCount: currentScanCount,
+                certified_at: row.created_at || row.date_certificat_conformite, 
+                certDate: row.date_certificat_conformite || row.created_at,
+                prodDate: row.date_fabrication || "N/A", 
+                expDate: row.date_peremption || "N/A",
+                norme: "ANOR NC-ISO", 
+                processingTime: Date.now() - startTime, 
+                processingTimeMs: Date.now() - startTime,
+                engineVersion: SERVER_VERSION, 
+                visualVersion: VISUAL_VERSION, 
+                verificationMode, 
+                serverTimestamp: Date.now()
             };
 
             if (imageCacheKey) {
@@ -1169,7 +1268,7 @@ app.use((req, res) => { return apiError(res, 404, "ROUTE_NOT_FOUND", "Route inex
 
 const server = app.listen(PORT, "0.0.0.0", () => {
     console.log("======================================================");
-    console.log(`ANOR Backend v${SERVER_VERSION} (Blindage Actif & Normalisation de Scan)`);
+    console.log(`ANOR Backend v${SERVER_VERSION} (Blindage, Séries & Traçabilité Géographique Actifs)`);
     console.log(`Port: ${PORT}`);
     console.log(`Environment: ${process.env.NODE_ENV || "development"}`);
     console.log(`CORS origins: ${allowedOrigins.join(", ") || "aucune"}`);
