@@ -1289,19 +1289,22 @@ app.post(
             let warningFlag = null;
             let motifAlerte = null;
 
-            // Enregistrement systématique de chaque scan unitaire avec ses coordonnées géographiques précises
-            // pour alimenter les points de la carte de surveillance (cercles des scans affichés en direct).
-            await supabase.from("produits_unitaires_scans").insert([{
-                lot: row.lot,
-                serie: currentSerie,
-                ville: currentVille,
-                region: currentRegion,
-                latitude: currentLat,
-                longitude: currentLon,
-                statut: scanStatutUnitaire,
-                motif_alerte: null,
-                created_at: currentScanTime
-            }]).catch(err => console.warn("[SERIE LOG ERROR]", err.message));
+            // Enregistrement sécurisé par bloc try/catch pour éviter tout plantage du serveur Node.js (Correction apportée)
+            try {
+                await supabase.from("produits_unitaires_scans").insert([{
+                    lot: row.lot,
+                    serie: currentSerie,
+                    ville: currentVille,
+                    region: currentRegion,
+                    latitude: currentLat,
+                    longitude: currentLon,
+                    statut: scanStatutUnitaire,
+                    motif_alerte: null,
+                    created_at: currentScanTime
+                }]);
+            } catch (err) {
+                console.warn("[SERIE LOG ERROR]", err.message);
+            }
 
             if (!isUniversalSerie) {
                 const { data: previousScans, error: scanErr } = await supabase
