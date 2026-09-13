@@ -822,9 +822,6 @@ app.get("/api/surveillance/data", async (req, res) => {
         const alerts = [];
         const points = [];
 
-        const defaultLat = 3.8480;
-        const defaultLng = 11.5021;
-
         if (products && products.length > 0) {
             products.forEach(p => {
                 const stat = p.statut || "CONFORME";
@@ -1103,7 +1100,7 @@ app.post(
                 deviceMetadata
             } = req.body;
 
-            // R Résolution intelligente de la position (GPS direct, Pylônes cellulaires ou Fallback)
+            // Résolution intelligente de la position (GPS direct, Pylônes cellulaires ou Fallback)
             const geoResolved = resolveScanCoordinates(req.body);
             const currentLat = geoResolved.latitude;
             const currentLon = geoResolved.longitude;
@@ -1251,6 +1248,20 @@ app.post(
             let warningFlag = null;
             let motifAlerte = null;
 
+            // Enregistrement systématique de chaque scan unitaire avec ses coordonnées géographiques précises
+            // pour alimenter les points de la carte de surveillance.
+            await supabase.from("produits_unitaires_scans").insert([{
+                lot: row.lot,
+                serie: currentSerie,
+                ville: currentVille,
+                region: currentRegion,
+                latitude: currentLat,
+                longitude: currentLon,
+                statut: scanStatutUnitaire,
+                motif_alerte: null,
+                created_at: currentScanTime
+            }]).catch(err => console.warn("[SERIE LOG ERROR]", err.message));
+
             if (!isUniversalSerie) {
                 const { data: previousScans, error: scanErr } = await supabase
                     .from("produits_unitaires_scans")
@@ -1258,10 +1269,10 @@ app.post(
                     .eq("lot", row.lot)
                     .eq("serie", currentSerie)
                     .order("created_at", { ascending: false })
-                    .limit(1);
+                    .limit(2);
 
-                if (!scanErr && previousScans && previousScans.length > 0) {
-                    const lastScan = previousScans[0];
+                if (!scanErr && previousScans && previousScans.length > 1) {
+                    const lastScan = previousScans[1]; // Le scan précédent (le premier étant celui qu'on vient d'insérer)
                     const lastScanTime = new Date(lastScan.created_at);
                     const timeDiffHours = (currentScanTime.getTime() - lastScanTime.getTime()) / (1000 * 60 * 60);
 
@@ -1281,18 +1292,6 @@ app.post(
                         motifAlerte = `Produit déjà scanné il y a moins de 3 minutes à ${lastScan.ville || 'Inconnue'}.`;
                     }
                 }
-
-                await supabase.from("produits_unitaires_scans").insert([{
-                    lot: row.lot,
-                    serie: currentSerie,
-                    ville: currentVille,
-                    region: currentRegion,
-                    latitude: currentLat,
-                    longitude: currentLon,
-                    statut: scanStatutUnitaire,
-                    motif_alerte: motifAlerte,
-                    created_at: currentScanTime
-                }]).catch(err => console.warn("[SERIE LOG ERROR]", err.message));
             }
 
             const currentScanCount = Number(row.scan_count || 0) + 1;
