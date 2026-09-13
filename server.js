@@ -791,18 +791,18 @@ app.get("/api/surveillance/data", async (req, res) => {
     try {
         const { region } = req.query;
 
-        // Récupération dynamique des inspecteurs actifs / entités depuis la BDD sans valeur en dur
-        let totalInspecteursActifs = 1;
+        // Calcul dynamique basé strictement sur les producteurs ou les points de contrôle enregistrés (fini les chiffres imaginaires)
+        let totalInspecteursActifs = 0;
         try {
             const { data: prodProducers, error: prodErr } = await supabase
                 .from("produits_certifies")
                 .select("nom_producteur");
             if (!prodErr && prodProducers) {
                 const uniqueProducers = new Set(prodProducers.map(p => p.nom_producteur).filter(Boolean));
-                totalInspecteursActifs = Math.max(1, uniqueProducers.size);
+                totalInspecteursActifs = uniqueProducers.size;
             }
         } catch (e) {
-            totalInspecteursActifs = 12;
+            totalInspecteursActifs = 0;
         }
 
         const { data: tousLesScans, error: scanErr } = await supabase
@@ -880,13 +880,16 @@ app.get("/api/surveillance/data", async (req, res) => {
             });
         }
 
-        // INCLUSION DE TOUS LES POINTS DE SCANS DÉJÀ FAITS DANS LA BASE DE DONNÉES SUR LA CARTE
+        // Intégration de tous les scans unitaires pour alimenter dynamiquement la carte avec les codes couleurs appropriés
         if (tousLesScans && tousLesScans.length > 0) {
             tousLesScans.forEach(s => {
                 if (s.latitude && s.longitude) {
-                    let sColor = "green";
-                    if (s.statut === "ALERTE" || s.statut === "ALERTE_TRICHE_GEOGRAPHIQUE") sColor = "red";
-                    else if (s.statut === "DOUBLON_RAPIDE") sColor = "yellow";
+                    let sColor = "green"; // Vert par défaut (Scan bien vert)
+                    if (s.statut === "ALERTE" || s.statut === "ALERTE_TRICHE_GEOGRAPHIQUE") {
+                        sColor = "red"; // Rouge (Scan défectueux)
+                    } else if (s.statut === "DOUBLON_RAPIDE") {
+                        sColor = "yellow"; // Jaune (Scan douteux)
+                    }
 
                     points.push({
                         nom: `Scan (Lot ${s.lot || 'N/A'})`,

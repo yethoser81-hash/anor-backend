@@ -116,7 +116,8 @@ function mettreAJourKPIs(stats) {
 }
 
 /**
- * Dessine les points réels sur la carte selon leur statut (Vert, Jaune, Rouge)
+ * Dessine les points et cercles concentriques de zones de scan sur la carte
+ * selon leur état exact (Vert : Conforme, Jaune : Douteux/Doublon, Rouge : Défectueux/Alerte)
  */
 function mettreAJourCarte(points) {
     if (!markersLayer) return;
@@ -125,20 +126,21 @@ function mettreAJourCarte(points) {
     if (!points || points.length === 0) return;
 
     points.forEach(p => {
-        let couleur = '#10b981'; // 🟢 Vert par défaut (Conforme)
+        let couleur = '#10b981'; // 🟢 Vert par défaut (Scan bien vert / Conforme)
         
         if (p.type === 'DOUBLON_RAPIDE' || p.type === 'SOUS SURVEILLANCE' || p.color === 'yellow') {
-            couleur = '#f59e0b'; // 🟡 Jaune (Doublon / Attention)
+            couleur = '#f59e0b'; // 🟡 Jaune (Scan douteux / Attention)
         } else if (p.type === 'ALERTE' || p.type === 'CONTREFAÇON' || p.type === 'ALERTE_TRICHE_GEOGRAPHIQUE' || p.color === 'red') {
-            couleur = '#ef4444'; // 🔴 Rouge (Alerte / Faux scan)
+            couleur = '#ef4444'; // 🔴 Rouge (Scan défectueux / Alerte)
         }
         
+        // Cercle concentrique de zone de scan
         const zoneCircle = L.circle(p.coords, {
-            radius: 15000, 
+            radius: 12000, 
             color: couleur,
             fillColor: couleur,
-            fillOpacity: 0.2,
-            weight: 1.5
+            fillOpacity: 0.22,
+            weight: 1.8
         });
 
         const marker = L.circleMarker(p.coords, {
