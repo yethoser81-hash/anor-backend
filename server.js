@@ -1447,7 +1447,6 @@ const server = app.listen(PORT, "0.0.0.0", () => {
     console.log("Serveur prêt avec routage statique complet des dossiers.");
     console.log("======================================================");
 });
-
 function shutdown(signal) {
     console.log(`[ANOR] Arrêt demandé (${signal}).`);
     server.close(() => { process.exit(0); });
