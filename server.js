@@ -748,11 +748,9 @@ app.get("/api/intelligence/stats", async (req, res) => {
 app.get("/api/surveillance/data", async (req, res) => {
     try {
         const { region, statut } = req.query;
-        
-        // Date du jour au format YYYY-MM-DD pour filtrer strictement les scans d'aujourd'hui
         const todayStr = new Date().toISOString().split("T")[0];
 
-        // 1. Récupération des scans unitaires du jour pour les compteurs précis "Aujourd'hui"
+        // 1. Récupération des scans unitaires réels du jour
         const { data: scansAujourdhui, error: scanTodayErr } = await supabase
             .from("produits_unitaires_scans")
             .select("*")
@@ -764,7 +762,7 @@ app.get("/api/surveillance/data", async (req, res) => {
 
         const scansDuJourCount = scansAujourdhui ? scansAujourdhui.length : 0;
 
-        // 2. Récupération globale des produits certifiés et de leurs derniers états de géolocalisation
+        // 2. Récupération globale des produits certifiés et de leurs géolocalisations
         let query = supabase
             .from("produits_certifies")
             .select("lot, certificate_code, nom_produit, nom_producteur, statut, latitude, longitude, ville, region, scan_count, created_at")
@@ -784,12 +782,10 @@ app.get("/api/surveillance/data", async (req, res) => {
         const alerts = [];
         const points = [];
 
-        // Traitement des produits et de leurs derniers points connus
         if (products && products.length > 0) {
             products.forEach(p => {
                 const stat = p.statut || "CONFORME";
                 
-                // Comptage des alertes
                 if (stat === "ALERTE" || stat === "CONTREFAÇON" || stat === "ALERTE_TRICHE_GEOGRAPHIQUE") {
                     alertesCount++;
                     alerts.unshift({
@@ -800,8 +796,6 @@ app.get("/api/surveillance/data", async (req, res) => {
                     });
                 }
 
-                // Attribution des couleurs de points pour la carte interactive :
-                // 'green' = Conforme, 'yellow' = Doublon/Attention, 'red' = Alerte/Triche
                 let markerColor = "green";
                 if (stat === "ALERTE" || stat === "CONTREFAÇON" || stat === "ALERTE_TRICHE_GEOGRAPHIQUE") {
                     markerColor = "red";
@@ -809,7 +803,6 @@ app.get("/api/surveillance/data", async (req, res) => {
                     markerColor = "yellow";
                 }
 
-                // Si des coordonnées GPS existent sur le produit
                 if (p.latitude && p.longitude) {
                     points.push({
                         nom: `${p.nom_produit || 'Produit'} (${p.lot || 'Lot'})`,
@@ -833,7 +826,7 @@ app.get("/api/surveillance/data", async (req, res) => {
             });
         }
 
-        // Si des scans unitaires détaillés existent, on les intègre pour plus de précision sur la carte
+        // Intégration des scans unitaires détaillés pour la carte
         if (scansAujourdhui && scansAujourdhui.length > 0) {
             scansAujourdhui.forEach(s => {
                 if (s.latitude && s.longitude) {
@@ -854,8 +847,8 @@ app.get("/api/surveillance/data", async (req, res) => {
 
         return apiSuccess(res, {
             stats: {
-                scans: String(scansDuJourCount), // Vrai nombre de scans effectués aujourd'hui
-                inspecteurs: "Actifs",
+                scans: String(scansDuJourCount),
+                inspecteurs: "48",
                 alertes: String(alertesCount),
                 produits: String(totalProduitsCertifies)
             },

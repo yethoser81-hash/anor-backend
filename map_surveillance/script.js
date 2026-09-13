@@ -1,5 +1,5 @@
 /**
- * ANOR V17 • Script de Gestion de la Carte de Surveillance & Traçabilité des Flux
+ * ANOR V17 • Script de Gestion de la Carte de Surveillance & Traçabilité des Flux Réels
  */
 
 let mapInstance = null;
@@ -8,6 +8,9 @@ let markersLayer = null;
 document.addEventListener("DOMContentLoaded", () => {
     initialiserCarteVide();
     verifierServeurEtCharger();
+    
+    // Actualisation automatique des données de surveillance toutes les 30 secondes
+    setInterval(chargerDonneesSurveillance, 30000);
 });
 
 /**
@@ -20,7 +23,6 @@ function initialiserCarteVide() {
 
     mapInstance = L.map('map').setView([4.0511, 11.5021], 6);
     
-    // Fond de carte OpenStreetMap de base stylisé en mode sombre natif via CSS Filter (Zéro restriction, Zéro clé API)
     const osmDarkTileLayer = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
         attribution: '&copy; OpenStreetMap contributors',
         maxZoom: 18,
@@ -29,7 +31,6 @@ function initialiserCarteVide() {
 
     osmDarkTileLayer.addTo(mapInstance);
 
-    // Injection d'un filtre CSS directement sur le conteneur des tuiles pour obtenir un rendu sombre immédiat et propre sans CartoCDN
     setTimeout(() => {
         const pane = mapInstance.getPane('tilePane');
         if (pane) {
@@ -41,7 +42,7 @@ function initialiserCarteVide() {
 }
 
 /**
- * Vérifie l'état de santé du serveur et charge les données de surveillance
+ * Vérifie l'état de santé du serveur et déclenche le chargement
  */
 async function verifierServeurEtCharger() {
     const dot = document.getElementById("serverDot");
@@ -66,90 +67,56 @@ async function verifierServeurEtCharger() {
         text.textContent = "SERVEUR HORS LIGNE / ERREUR API";
         badge.style.color = "var(--accent-red)";
         badge.style.borderColor = "rgba(239, 68, 68, 0.3)";
-        
-        chargerDonneesParDefautDepuisServeur();
     }
 }
 
 /**
- * Interroge l'API de surveillance
+ * Interroge l'API de surveillance pour récupérer les données réelles de la BDD
  */
 async function chargerDonneesSurveillance() {
-    const region = document.getElementById("regionFilter").value;
-    const statut = document.getElementById("statusFilter").value;
-    const dateDebut = document.getElementById("dateDebut").value;
-    const dateFin = document.getElementById("dateFin").value;
+    const region = document.getElementById("regionFilter")?.value || '';
+    const statut = document.getElementById("statusFilter")?.value || '';
+    const dateDebut = document.getElementById("dateDebut")?.value || '';
+    const dateFin = document.getElementById("dateFin")?.value || '';
     
     try {
         const queryParams = new URLSearchParams({
-            region: region || '',
-            statut: statut || '',
-            dateDebut: dateDebut || '',
-            dateFin: dateFin || ''
+            region: region !== "Toutes les 10 Régions (Cameroun)" ? region : '',
+            statut: statut !== "Tous les statuts" ? statut : '',
+            dateDebut,
+            dateFin
         });
 
         const response = await fetch(`/api/surveillance/data?${queryParams.toString()}`);
-        
-        if (!response.ok) {
-            chargerDonneesParDefautDepuisServeur();
-            return;
-        }
+        if (!response.ok) return;
 
         const json = await response.json();
-        if (json.success && json.points && json.points.length > 0) {
-            mettreAJourKPIs(json.stats);
-            mettreAJourCarte(json.points);
-            mettreAJourFluxAlertes(json.alerts);
-            mettreAJourHistorique(json.history);
-        } else {
-            chargerDonneesParDefautDepuisServeur();
+        if (json.success) {
+            if (json.stats) mettreAJourKPIs(json.stats);
+            if (json.points) mettreAJourCarte(json.points);
+            if (json.alerts) mettreAJourFluxAlertes(json.alerts);
+            if (json.history) mettreAJourHistorique(json.history);
         }
     } catch (e) {
-        chargerDonneesParDefautDepuisServeur();
-    }
-}
-
-/**
- * Charge les données de démonstration avec les cercles et statuts exacts (Vert, Jaune, Rouge)
- */
-async function chargerDonneesParDefautDepuisServeur() {
-    try {
-        const res = await fetch('/api/dashboard/stats');
-        const data = await res.json().catch(() => ({}));
-        
-        document.getElementById("kpiScans").textContent = data.stats?.totalScans || "1,420";
-        document.getElementById("kpiInspecteurs").textContent = data.stats?.activeInspectors || "48";
-        document.getElementById("kpiAlertes").textContent = data.stats?.aiAlerts || "2";
-        document.getElementById("kpiProduits").textContent = data.stats?.verifiedProducts || "640k";
-
-        // Définition explicite des zones de scans avec les 3 couleurs demandées
-        const pointsScansDemande = [
-            { nom: "Yaoundé (Centre)", coords: [3.8480, 11.5021], type: "CONFORME", details: "Scan unitaire validé - Conforme (Certifié ANOR)" },
-            { nom: "Douala (Littoral)", coords: [4.0511, 9.7679], type: "CONFORME", details: "Zone Portuaire - Traçabilité standard approuvée" },
-            { nom: "Bafoussam (Ouest)", coords: [5.4751, 10.4160], type: "DOUBLON", details: "Alerte : Risque de doublon détecté sur ce code de lot" },
-            { nom: "Garoua (Nord)", coords: [9.3000, 13.4000], type: "CONFORME", details: "Contrôle régional Nord - OK" },
-            { nom: "Bamenda (Nord-Ouest)", coords: [5.9631, 10.1591], type: "FAUX", details: "ALERTE ROUGE : Faux scan / Contrefaçon bloquée par le système" },
-            { nom: "Maroua (Extrême-Nord)", coords: [10.5942, 14.3159], type: "DOUBLON", details: "Avertissement : Tentative d'utilisation multiple du sceau" },
-            { nom: "Buea (Sud-Ouest)", coords: [4.1550, 9.2300], type: "CONFORME", details: "Vérification de l'unité de production conforme" }
-        ];
-
-        mettreAJourCarte(pointsScansDemande);
-    } catch (ex) {
-        console.error("Erreur:", ex);
+        console.error("Erreur lors du chargement des données de surveillance réelles :", e);
     }
 }
 
 function mettreAJourKPIs(stats) {
     if (!stats) return;
-    document.getElementById("kpiScans").textContent = stats.scans || "1,420";
-    document.getElementById("kpiInspecteurs").textContent = stats.inspecteurs || "48";
-    document.getElementById("kpiAlertes").textContent = stats.alertes || "2";
-    document.getElementById("kpiProduits").textContent = stats.produits || "640k";
+    const elScans = document.getElementById("kpiScans");
+    const elInspecteurs = document.getElementById("kpiInspecteurs");
+    const elAlertes = document.getElementById("kpiAlertes");
+    const elProduits = document.getElementById("kpiProduits");
+
+    if (elScans) elScans.textContent = stats.scans || "0";
+    if (elInspecteurs) elInspecteurs.textContent = stats.inspecteurs || "0";
+    if (elAlertes) elAlertes.textContent = stats.alertes || "0";
+    if (elProduits) elProduits.textContent = stats.produits || "0";
 }
 
 /**
- * Dessine les cercles et marqueurs avec le code couleur strict :
- * Vert (Conforme) | Jaune (Doublon) | Rouge (Faux scan)
+ * Dessine les points réels sur la carte selon leur statut (Vert, Jaune, Rouge)
  */
 function mettreAJourCarte(points) {
     if (!markersLayer) return;
@@ -160,24 +127,22 @@ function mettreAJourCarte(points) {
     points.forEach(p => {
         let couleur = '#10b981'; // 🟢 Vert par défaut (Conforme)
         
-        if (p.type === 'DOUBLON') {
-            couleur = '#f59e0b'; // 🟡 Jaune (Risque de doublon)
-        } else if (p.type === 'FAUX') {
-            couleur = '#ef4444'; // 🔴 Rouge (Faux scan)
+        if (p.type === 'DOUBLON_RAPIDE' || p.type === 'SOUS SURVEILLANCE' || p.color === 'yellow') {
+            couleur = '#f59e0b'; // 🟡 Jaune (Doublon / Attention)
+        } else if (p.type === 'ALERTE' || p.type === 'CONTREFAÇON' || p.type === 'ALERTE_TRICHE_GEOGRAPHIQUE' || p.color === 'red') {
+            couleur = '#ef4444'; // 🔴 Rouge (Alerte / Faux scan)
         }
         
-        // Cercle de zone de balayage du scan
         const zoneCircle = L.circle(p.coords, {
-            radius: 35000, 
+            radius: 15000, 
             color: couleur,
             fillColor: couleur,
-            fillOpacity: 0.25,
-            weight: 2
+            fillOpacity: 0.2,
+            weight: 1.5
         });
 
-        // Point central précis de l'activité
         const marker = L.circleMarker(p.coords, {
-            radius: 8,
+            radius: 7,
             color: '#ffffff',
             fillColor: couleur,
             fillOpacity: 1,
@@ -187,7 +152,7 @@ function mettreAJourCarte(points) {
         marker.bindPopup(`
             <div style="color:#0f172a; font-family:sans-serif; padding: 6px; min-width: 160px;">
                 <strong style="font-size: 14px; color: #1e293b;">${p.nom}</strong><br>
-                <p style="margin: 6px 0; font-size: 12px; color: #475569;">${p.details}</p>
+                <p style="margin: 6px 0; font-size: 12px; color: #475569;">${p.details || ''}</p>
                 <div style="margin-top: 4px;">
                     <span style="display:inline-block; padding: 3px 8px; border-radius: 4px; background: ${couleur}; color: #fff; font-weight: bold; font-size: 11px;">
                         STATUT : ${p.type}
@@ -204,20 +169,28 @@ function mettreAJourCarte(points) {
 function mettreAJourFluxAlertes(alerts) {
     const container = document.getElementById("alertFeedContainer");
     if (!container) return;
-    container.innerHTML = `
-        <div class="feed-item warning">
-            <div class="title">Alerte Doublon détectée à Bafoussam</div>
-            <div class="meta"><span>Module IA ANOR</span><span>Il y a 5 min</span></div>
+    
+    if (!alerts || alerts.length === 0) {
+        container.innerHTML = `<div class="feed-item"><div class="title">Aucune alerte active sur le réseau</div><div class="meta"><span>Système ANOR</span><span>En direct</span></div></div>`;
+        return;
+    }
+
+    container.innerHTML = alerts.map(a => `
+        <div class="feed-item ${a.niveau || 'normal'}">
+            <div class="title">${a.titre}</div>
+            <div class="meta"><span>${a.source}</span><span>${a.temps}</span></div>
         </div>
-        <div class="feed-item danger">
-            <div class="title">Faux scan identifié à Bamenda</div>
-            <div class="meta"><span>Sécurité Unitaire</span><span>Il y a 12 min</span></div>
-        </div>`;
+    `).join('');
 }
 
 function mettreAJourHistorique(history) {
     const tbody = document.getElementById("historyTableBody");
-    if (!tbody || !history || history.length === 0) return;
+    if (!tbody) return;
+
+    if (!history || history.length === 0) {
+        tbody.innerHTML = `<tr><td colspan="8" style="text-align:center; color:#64748b;">Aucun historique de scan disponible pour le moment.</td></tr>`;
+        return;
+    }
     
     tbody.innerHTML = history.map(h => `
         <tr>
@@ -228,7 +201,7 @@ function mettreAJourHistorique(history) {
             <td>${h.ville}</td>
             <td>${h.region}</td>
             <td>${h.inspecteur}</td>
-            <td><span class="badge-statut">${h.resultat}</span></td>
+            <td><span class="badge-statut ${h.resultat === 'CONFORME' ? 'conforme' : 'alerte'}">${h.resultat}</span></td>
         </tr>
     `).join('');
 }
