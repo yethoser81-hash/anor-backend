@@ -11,14 +11,14 @@ document.addEventListener("DOMContentLoaded", () => {
 });
 
 /**
- * Initialise la carte avec un fond sombre 100% libre (sans API Key requise)
+ * Initialise la carte avec le fond sombre professionnel souhaité (sans aucune erreur de clé)
  */
 function initialiserCarteVide() {
     mapInstance = L.map('map').setView([4.0511, 11.5021], 6);
     
-    // Utilisation d'un fond de tuiles sombre OpenStreetMap / Stadia / Stamen 100% gratuit et sans restriction
-    L.tileLayer('https://{s}.tile.openstreetmap.fr/osmfr/{z}/{x}/{y}.png', {
-        attribution: '&copy; OpenStreetMap France | ANOR Cameroon',
+    // Utilisation d'un fond de tuiles sombre CartoDB Dark Matter (100% gratuit, sans clé API requise)
+    L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+        attribution: '&copy; OpenStreetMap contributors & CARTO',
         maxZoom: 18
     }).addTo(mapInstance);
 
@@ -101,7 +101,7 @@ async function chargerDonneesSurveillance() {
 }
 
 /**
- * Charge les données et dessine les zones de scans ainsi que les courbures de flux réseau
+ * Charge les données et applique les statuts exacts (Vert = Conforme, Jaune = Doublon, Rouge = Faux scan)
  */
 async function chargerDonneesParDefautDepuisServeur() {
     try {
@@ -110,18 +110,18 @@ async function chargerDonneesParDefautDepuisServeur() {
         
         document.getElementById("kpiScans").textContent = data.stats?.totalScans || "1,420";
         document.getElementById("kpiInspecteurs").textContent = data.stats?.activeInspectors || "48";
-        document.getElementById("kpiAlertes").textContent = data.stats?.aiAlerts || "0";
+        document.getElementById("kpiAlertes").textContent = data.stats?.aiAlerts || "2";
         document.getElementById("kpiProduits").textContent = data.stats?.verifiedProducts || "640k";
 
-        // Points de contrôle à travers les régions du Cameroun
+        // Définition des points de scan avec les 3 états rigoureux demandés : CONFORME (Vert), DOUBLON (Jaune), FAUX (Rouge)
         const pointsDynamiques = [
-            { nom: "Yaoundé (Centre)", coords: [3.8480, 11.5021], type: "CONFORME", details: "Centre de contrôle unitaire - 420 scans validés" },
-            { nom: "Douala (Littoral)", coords: [4.0511, 9.7679], type: "CONFORME", details: "Zone Portuaire & Industrielle - 610 scans validés" },
-            { nom: "Bafoussam (Ouest)", coords: [5.4751, 10.4160], type: "CONFORME", details: "Contrôle Agro-alimentaire - 180 scans" },
-            { nom: "Garoua (Nord)", coords: [9.3000, 13.4000], type: "CONFORME", details: "Inspection Régionale Nord - 95 scans" },
-            { nom: "Bamenda (Nord-Ouest)", coords: [5.9631, 10.1591], type: "ALERTE", details: "Alerte IA: Lot suspect détecté et bloqué" },
-            { nom: "Maroua (Extrême-Nord)", coords: [10.5942, 14.3159], type: "CONFORME", details: "Vérification marchés frontaliers - 65 scans" },
-            { nom: "Buea (Sud-Ouest)", coords: [4.1550, 9.2300], type: "CONFORME", details: "Contrôle des unités de production - 50 scans" }
+            { nom: "Yaoundé (Centre)", coords: [3.8480, 11.5021], type: "CONFORME", details: "Centre de contrôle unitaire - Scan valide et authentique" },
+            { nom: "Douala (Littoral)", coords: [4.0511, 9.7679], type: "CONFORME", details: "Zone Portuaire & Industrielle - Traçabilité conforme" },
+            { nom: "Bafoussam (Ouest)", coords: [5.4751, 10.4160], type: "DOUBLON", details: "Alerte : Risque de doublon détecté sur ce lot de produits" },
+            { nom: "Garoua (Nord)", coords: [9.3000, 13.4000], type: "CONFORME", details: "Inspection Régionale Nord - Vérification réussie" },
+            { nom: "Bamenda (Nord-Ouest)", coords: [5.9631, 10.1591], type: "FAUX", details: "ALERTE CRITIQUE : Faux scan / Contrefaçon identifiée" },
+            { nom: "Maroua (Extrême-Nord)", coords: [10.5942, 14.3159], type: "DOUBLON", details: "Attention : Tentative de réutilisation de code-barres" },
+            { nom: "Buea (Sud-Ouest)", coords: [4.1550, 9.2300], type: "CONFORME", details: "Contrôle des unités de production validé" }
         ];
 
         mettreAJourCarte(pointsDynamiques);
@@ -150,12 +150,12 @@ function mettreAJourKPIs(stats) {
     if (!stats) return;
     document.getElementById("kpiScans").textContent = stats.scans || "1,420";
     document.getElementById("kpiInspecteurs").textContent = stats.inspecteurs || "48";
-    document.getElementById("kpiAlertes").textContent = stats.alertes || "0";
+    document.getElementById("kpiAlertes").textContent = stats.alertes || "2";
     document.getElementById("kpiProduits").textContent = stats.produits || "640k";
 }
 
 /**
- * Dessine les zones de balayage, les marqueurs et les courbes de liaison (flux de scans)
+ * Dessine les zones de balayage avec attribution exacte des couleurs (Vert, Jaune, Rouge)
  */
 function mettreAJourCarte(points) {
     if (!markersLayer) return;
@@ -163,22 +163,27 @@ function mettreAJourCarte(points) {
 
     if (!points || points.length === 0) return;
 
-    // 1. Dessiner les zones de balayage et les marqueurs pour chaque point
     points.forEach(p => {
-        const couleur = p.type === 'ALERTE' ? '#ef4444' : '#10b981';
+        // Attribution stricte des couleurs selon le type de scan
+        let couleur = '#10b981'; // Vert par défaut (CONFORME)
+        if (p.type === 'DOUBLON') {
+            couleur = '#f59e0b'; // Jaune / Orange (Risque de doublon)
+        } else if (p.type === 'FAUX') {
+            couleur = '#ef4444'; // Rouge (Faux scan)
+        }
         
-        // Cercle de zone de scan (portée de contrôle)
+        // Cercle de zone de scan sur la carte
         const zoneCircle = L.circle(p.coords, {
-            radius: 30000, 
+            radius: 28000, 
             color: couleur,
             fillColor: couleur,
-            fillOpacity: 0.15,
-            weight: 1
+            fillOpacity: 0.22,
+            weight: 1.5
         });
 
-        // Marqueur précis du point
+        // Marqueur précis du point de scan
         const marker = L.circleMarker(p.coords, {
-            radius: 8,
+            radius: 9,
             color: '#ffffff',
             fillColor: couleur,
             fillOpacity: 1,
@@ -186,10 +191,10 @@ function mettreAJourCarte(points) {
         });
 
         marker.bindPopup(`
-            <div style="color:#0f172a; font-family:sans-serif; padding: 4px;">
+            <div style="color:#0f172a; font-family:sans-serif; padding: 6px;">
                 <strong style="font-size: 14px; color: #1e293b;">${p.nom}</strong><br>
-                <p style="margin: 4px 0; font-size: 12px;">${p.details}</p>
-                <span style="display:inline-block; padding: 2px 8px; border-radius: 4px; background: ${couleur}; color: #fff; font-weight: bold; font-size: 11px;">
+                <p style="margin: 6px 0; font-size: 12px;">${p.details}</p>
+                <span style="display:inline-block; padding: 3px 10px; border-radius: 4px; background: ${couleur}; color: #fff; font-weight: bold; font-size: 11px;">
                     STATUT : ${p.type}
                 </span>
             </div>
@@ -198,39 +203,19 @@ function mettreAJourCarte(points) {
         markersLayer.addLayer(zoneCircle);
         markersLayer.addLayer(marker);
     });
-
-    // 2. Dessiner les courbures de liaison (flux réseau entre le hub central Yaoundé/Douala et les autres régions)
-    const yaoundeCoords = [3.8480, 11.5021];
-    const doualaCoords = [4.0511, 9.7679];
-
-    points.forEach(p => {
-        if (p.coords[0] !== yaoundeCoords[0] && p.coords[1] !== yaoundeCoords[1]) {
-            // Création d'une courbure géodésique / arc reliant Yaoundé au point de contrôle
-            const latLngs = [
-                yaoundeCoords,
-                [(yaoundeCoords[0] + p.coords[0]) / 2 + 0.8, (yaoundeCoords[1] + p.coords[1]) / 2], // Point intermédiaire courbé
-                p.coords
-            ];
-
-            const arcLine = L.polyline(latLngs, {
-                color: p.type === 'ALERTE' ? '#ef4444' : '#3b82f6',
-                weight: 2,
-                opacity: 0.6,
-                dashArray: '5, 5' // Style de ligne pointillée dynamique représentant le flux de données de scan
-            });
-
-            markersLayer.addLayer(arcLine);
-        }
-    });
 }
 
 function mettreAJourFluxAlertes(alerts) {
     const container = document.getElementById("alertFeedContainer");
     if (!alerts || alerts.length === 0) {
         container.innerHTML = `
-            <div class="feed-item">
-                <div class="title">Réseau de surveillance stable (ANOR)</div>
-                <div class="meta"><span>En direct • Connexion établie</span><span>Maintenant</span></div>
+            <div class="feed-item warning">
+                <div class="title">Alerte Doublon détectée à Bafoussam</div>
+                <div class="meta"><span>Module IA ANOR</span><span>Il y a 5 min</span></div>
+            </div>
+            <div class="feed-item danger">
+                <div class="title">Faux scan identifié à Bamenda</div>
+                <div class="meta"><span>Sécurité Unitaire</span><span>Il y a 12 min</span></div>
             </div>`;
         return;
     }
@@ -255,7 +240,7 @@ function mettreAJourHistorique(history) {
             <td>${h.ville}</td>
             <td>${h.region}</td>
             <td>${h.inspecteur}</td>
-            <td><span class="badge-statut">${h.resultat}</span></td>
+            <td><span class="badge-statut" style="background:${h.resultat === 'FAUX' ? 'rgba(239,68,68,0.15); color:var(--accent-red)' : (h.resultat === 'DOUBLON' ? 'rgba(245,158,11,0.15); color:#f59e0b' : '')}">${h.resultat}</span></td>
         </tr>
     `).join('');
 }
