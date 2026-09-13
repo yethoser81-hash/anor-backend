@@ -147,14 +147,20 @@
         </div>
     </div>
 
-    <!-- Filtres -->
+    <!-- Filtres (10 Régions du Cameroun) -->
     <div class="filters-panel">
         <select class="filter-control" id="regionFilter" onchange="chargerDonneesSurveillance()">
-            <option value="">Toutes les régions (Cameroun)</option>
+            <option value="">Toutes les 10 Régions (Cameroun)</option>
+            <option value="Adamaoua">Adamaoua (Ngaoundéré)</option>
             <option value="Centre">Centre (Yaoundé)</option>
+            <option value="Est">Est (Bertoua)</option>
+            <option value="Extrême-Nord">Extrême-Nord (Maroua)</option>
             <option value="Littoral">Littoral (Douala)</option>
-            <option value="Ouest">Ouest (Bafoussam)</option>
             <option value="Nord">Nord (Garoua)</option>
+            <option value="Nord-Ouest">Nord-Ouest (Bamenda)</option>
+            <option value="Ouest">Ouest (Bafoussam)</option>
+            <option value="Sud">Sud (Ebolowa)</option>
+            <option value="Sud-Ouest">Sud-Ouest (Buea)</option>
         </select>
         <select class="filter-control" id="statusFilter" onchange="chargerDonneesSurveillance()">
             <option value="">Tous les statuts</option>
@@ -214,7 +220,6 @@
 </main>
 
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-<!-- Fichier script externe mis à jour et synchronisé -->
 <script src="script.js"></script>
 </body>
 </html>

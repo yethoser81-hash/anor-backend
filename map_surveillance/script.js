@@ -11,14 +11,17 @@ document.addEventListener("DOMContentLoaded", () => {
 });
 
 /**
- * Initialise le conteneur de la carte Leaflet (fond sombre cartographique)
+ * Initialise le conteneur de la carte Leaflet avec des tuiles libres (sans restriction d'API Key)
  */
 function initialiserCarteVide() {
     mapInstance = L.map('map').setView([4.0511, 9.7679], 6);
-    L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
-        attribution: '&copy; CARTO | ANOR Cameroon',
+    
+    // Utilisation d'un fond de tuiles sombre OpenStreetMap / Basemap entièrement gratuit sans clé API requise
+    L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', {
+        attribution: '&copy; OpenStreetMap contributors & CARTO',
         maxZoom: 18
     }).addTo(mapInstance);
+
     markersLayer = L.layerGroup().addTo(mapInstance);
 }
 
@@ -79,7 +82,6 @@ async function chargerDonneesSurveillance() {
         const response = await fetch(`/api/surveillance/data?${queryParams.toString()}`);
         
         if (!response.ok) {
-            // Bascule transparente vers les statistiques globales par défaut si l'endpoint spécifique n'est pas encore actif
             chargerDonneesParDefautDepuisServeur();
             return;
         }
