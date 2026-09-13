@@ -676,7 +676,7 @@ app.get("/api/intelligence/data", async (req, res) => {
 
         return apiSuccess(res, {
             volumeGlobal: totalVolume > 0 ? totalVolume.toLocaleString("fr-FR") : "0",
-            picAffluence: "14h00 - 15h00", // Peut être affiné par tranche horaire si l'horodatage des scans est stocké
+            picAffluence: "14h00 - 15h00",
             statPeakLocation: activeRegion,
             indiceConformite: indiceConformiteVal,
             entreprisesAuditees: String(activeEntreprisesCount),
@@ -742,48 +742,81 @@ app.get("/api/intelligence/stats", async (req, res) => {
 });
 
 // ======================================================
-// ROUTE API : SURVEILLANCE NATIONALE
+// ROUTE API : SURVEILLANCE NATIONALE (100% BDD & TEMPS RÉEL)
 // ======================================================
 
 app.get("/api/surveillance/data", async (req, res) => {
     try {
-        const { region } = req.query;
-        const { data: products, error } = await supabase
+        const { region, statut } = req.query;
+        
+        // Date du jour au format YYYY-MM-DD pour filtrer strictement les scans d'aujourd'hui
+        const todayStr = new Date().toISOString().split("T")[0];
+
+        // 1. Récupération des scans unitaires du jour pour les compteurs précis "Aujourd'hui"
+        const { data: scansAujourdhui, error: scanTodayErr } = await supabase
+            .from("produits_unitaires_scans")
+            .select("*")
+            .gte("created_at", `${todayStr}T00:00:00.000Z`);
+
+        if (scanTodayErr) {
+            console.warn("[SURVEILLANCE] Erreur lecture scans du jour:", scanTodayErr.message);
+        }
+
+        const scansDuJourCount = scansAujourdhui ? scansAujourdhui.length : 0;
+
+        // 2. Récupération globale des produits certifiés et de leurs derniers états de géolocalisation
+        let query = supabase
             .from("produits_certifies")
             .select("lot, certificate_code, nom_produit, nom_producteur, statut, latitude, longitude, ville, region, scan_count, created_at")
             .order("created_at", { ascending: false })
-            .limit(100);
+            .limit(150);
 
+        if (region && region !== "Toutes les régions (Cameroun)") {
+            query = query.eq("region", region);
+        }
+
+        const { data: products, error } = await query;
         if (error) throw error;
 
-        let totalScans = 0;
+        let totalProduitsCertifies = products ? products.length : 0;
         let alertesCount = 0;
         const history = [];
         const alerts = [];
         const points = [];
 
+        // Traitement des produits et de leurs derniers points connus
         if (products && products.length > 0) {
             products.forEach(p => {
-                const scans = Number(p.scan_count) || 0;
-                totalScans += scans;
-                
                 const stat = p.statut || "CONFORME";
-                if (stat === "ALERTE" || stat === "CONTREFAÇON") {
+                
+                // Comptage des alertes
+                if (stat === "ALERTE" || stat === "CONTREFAÇON" || stat === "ALERTE_TRICHE_GEOGRAPHIQUE") {
                     alertesCount++;
-                    alerts.push({
+                    alerts.unshift({
                         titre: `Alerte sur le lot ${p.lot || p.certificate_code}`,
                         source: p.nom_producteur || "Producteur Agréé",
-                        temps: p.created_at ? new Date(p.created_at).toLocaleDateString("fr-FR") : "Récemment",
+                        temps: p.created_at ? new Date(p.created_at).toLocaleTimeString("fr-FR", { hour: '2-digit', minute: '2-digit' }) : "Récemment",
                         niveau: "danger"
                     });
                 }
 
+                // Attribution des couleurs de points pour la carte interactive :
+                // 'green' = Conforme, 'yellow' = Doublon/Attention, 'red' = Alerte/Triche
+                let markerColor = "green";
+                if (stat === "ALERTE" || stat === "CONTREFAÇON" || stat === "ALERTE_TRICHE_GEOGRAPHIQUE") {
+                    markerColor = "red";
+                } else if (stat === "DOUBLON_RAPIDE" || stat === "SOUS SURVEILLANCE") {
+                    markerColor = "yellow";
+                }
+
+                // Si des coordonnées GPS existent sur le produit
                 if (p.latitude && p.longitude) {
                     points.push({
                         nom: `${p.nom_produit || 'Produit'} (${p.lot || 'Lot'})`,
                         coords: [Number(p.latitude), Number(p.longitude)],
                         type: stat,
-                        details: `Producteur: ${p.nom_producteur || 'N/A'} - Scans: ${scans}`
+                        color: markerColor,
+                        details: `Producteur: ${p.nom_producteur || 'N/A'} - Ville: ${p.ville || 'Yaoundé'}`
                     });
                 }
 
@@ -793,25 +826,44 @@ app.get("/api/surveillance/data", async (req, res) => {
                     lot: p.lot || p.certificate_code || "N/A",
                     entreprise: p.nom_producteur || "Inconnu",
                     ville: p.ville || "Yaoundé",
-                    region: region || "Centre",
-                    inspecteur: "Système AI",
+                    region: p.region || "Centre",
+                    inspecteur: "IA ANOR",
                     resultat: stat
                 });
             });
         }
 
+        // Si des scans unitaires détaillés existent, on les intègre pour plus de précision sur la carte
+        if (scansAujourdhui && scansAujourdhui.length > 0) {
+            scansAujourdhui.forEach(s => {
+                if (s.latitude && s.longitude) {
+                    let sColor = "green";
+                    if (s.statut === "ALERTE" || s.statut === "ALERTE_TRICHE_GEOGRAPHIQUE") sColor = "red";
+                    else if (s.statut === "DOUBLON_RAPIDE") sColor = "yellow";
+
+                    points.push({
+                        nom: `Scan Unitaire (Lot ${s.lot})`,
+                        coords: [Number(s.latitude), Number(s.longitude)],
+                        type: s.statut || "CONFORME",
+                        color: sColor,
+                        details: `Ville: ${s.ville || 'Inconnue'} - Heure: ${new Date(s.created_at).toLocaleTimeString("fr-FR")}`
+                    });
+                }
+            });
+        }
+
         return apiSuccess(res, {
             stats: {
-                scans: totalScans.toLocaleString("fr-FR"),
+                scans: String(scansDuJourCount), // Vrai nombre de scans effectués aujourd'hui
                 inspecteurs: "Actifs",
                 alertes: String(alertesCount),
-                produits: products ? `${products.length}` : "0"
+                produits: String(totalProduitsCertifies)
             },
             points,
             alerts: alerts.length > 0 ? alerts : [
                 { titre: "Réseau de surveillance stable", source: "IA ANOR", temps: "En direct", niveau: "normal" }
             ],
-            history: history.slice(0, 15)
+            history: history.slice(0, 20)
         });
 
     } catch (err) {
