@@ -449,7 +449,7 @@ async function analyzeSealWithGemini(imageBuffer, mimeType = "image/jpeg") {
         };
 
         const response = await ai.models.generateContent({
-            model: "gemini-3.6-flash", 
+            model: "gemini-2.5-flash", 
             contents: [
                 imagePart,
                 "Analyse cette image de sceau de certification ANOR. Extrais textuellement et fidèlement le numéro de lot visible (ex: LOT 54P-2026, LOT 01, etc.). Réponds STRICTEMENT au format JSON brut, sans balises markdown (pas de ```json), avec exactement ces clés : 'lot' (string ou null), 'reference' (string ou null), 'confidence' (nombre entre 0 et 1)."
@@ -758,7 +758,7 @@ app.post("/api/intelligence/chat", async (req, res) => {
 
         if (ai) {
             const chatResponse = await ai.models.generateContent({
-                model: "gemini-3.6-flash",
+                model: "gemini-2.5-flash",
                 contents: [
                     `Tu es l'assistant statistique intelligent de l'ANOR (Agence des Normes et de la Qualité du Cameroun). Réponds de manière professionnelle et analytique. Voici un extrait des données actuelles : ${contextSummary}`,
                     `Question de l'utilisateur : ${prompt}`
