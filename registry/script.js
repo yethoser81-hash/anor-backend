@@ -29,13 +29,32 @@ async function chargerRegistreDonnees() {
         const response = await fetch('/api/registry/data');
         const json = await response.json();
         if(json.success) {
-            globalRegistryData = json.items || [];
+            globalRegistryData = json.items || json.data || json.registry || [];
+            console.log("Données chargées avec succès :", globalRegistryData);
             afficherRegistre(globalRegistryData);
         }
     } catch (err) {
         console.error("Erreur de chargement du registre", err);
         document.getElementById("registryTableBody").innerHTML = `<tr><td colspan="7" style="text-align: center; color: var(--accent-red);">Erreur lors de la récupération des données du registre.</td></tr>`;
     }
+}
+
+// Fonction utilitaire ultra-robuste pour récupérer une propriété peu importe sa casse ou son nom exact
+function getVal(item, possibleKeys) {
+    if (!item) return '';
+    const itemKeys = Object.keys(item);
+    for (const target of possibleKeys) {
+        // 1. Correspondance exacte
+        if (item[target] !== undefined && item[target] !== null && item[target] !== '') {
+            return item[target];
+        }
+        // 2. Correspondance insensible à la casse
+        const found = itemKeys.find(k => k.toLowerCase() === target.toLowerCase());
+        if (found && item[found] !== undefined && item[found] !== null && item[found] !== '') {
+            return item[found];
+        }
+    }
+    return '';
 }
 
 function afficherRegistre(data) {
@@ -46,19 +65,24 @@ function afficherRegistre(data) {
     }
 
     tbody.innerHTML = data.map((item, index) => {
-        const numeroLot = item.lot || item.certificate_code || 'N/A';
-        const producteur = item.nom_producteur || 'N/A';
-        const produit = item.type_emballage || 'N/A';
-        const quantite = item.quantite || 0;
-        const dateDemande = item.created_at ? new Date(item.created_at).toLocaleDateString() : 'N/A';
-        const statut = item.statut || 'CERTIFIÉ';
+        const numeroLot = getVal(item, ['lot', 'certificate_code', 'numero_lot', 'code']) || 'N/A';
+        const producteur = getVal(item, ['nom_producteur', 'producteur', 'nom_vendeur', 'vendeur', 'entreprise']) || 'N/A';
+        const produit = getVal(item, ['type_emballage', 'produit', 'composition', 'nom_produit', 'libelle']) || 'N/A';
+        
+        const rawQty = getVal(item, ['quantite', 'qty', 'quantity', 'qte']);
+        const quantite = rawQty !== '' && !isNaN(Number(rawQty)) ? Number(rawQty).toLocaleString() : '0';
+        
+        const rawDate = getVal(item, ['created_at', 'date_demande', 'date', 'inserted_at']);
+        const dateDemande = rawDate ? new Date(rawDate).toLocaleDateString() : 'N/A';
+        
+        const statut = getVal(item, ['statut', 'status']) || 'CERTIFIÉ';
 
         return `
             <tr>
                 <td><strong>${numeroLot}</strong></td>
                 <td>${producteur}</td>
                 <td>${produit}</td>
-                <td>${Number(quantite).toLocaleString()}</td>
+                <td>${quantite}</td>
                 <td>${dateDemande}</td>
                 <td><span class="badge-cert">${statut}</span></td>
                 <td><button class="btn-details" id="btn-details-${index}">Détails</button></td>
@@ -82,12 +106,17 @@ function ouvrirModalDetails(item) {
     const modalDetailsText = document.getElementById("modalDetailsText");
     const modalImageContainer = document.getElementById("modalImageContainer") || document.getElementById("modalProductImage")?.parentElement;
 
-    const numeroLot = item.lot || item.certificate_code || 'N/A';
-    const producteur = item.nom_producteur || 'N/A';
-    const produit = item.type_emballage || 'N/A';
-    const quantite = item.quantite || 0;
-    const dateDemande = item.created_at ? new Date(item.created_at).toLocaleString() : 'N/A';
-    const statut = item.statut || 'CERTIFIÉ';
+    const numeroLot = getVal(item, ['lot', 'certificate_code', 'numero_lot', 'code']) || 'N/A';
+    const producteur = getVal(item, ['nom_producteur', 'producteur', 'nom_vendeur', 'vendeur', 'entreprise']) || 'N/A';
+    const produit = getVal(item, ['type_emballage', 'produit', 'composition', 'nom_produit', 'libelle']) || 'N/A';
+    
+    const rawQty = getVal(item, ['quantite', 'qty', 'quantity', 'qte']);
+    const quantite = rawQty !== '' && !isNaN(Number(rawQty)) ? Number(rawQty).toLocaleString() : '0';
+    
+    const rawDate = getVal(item, ['created_at', 'date_demande', 'date', 'inserted_at']);
+    const dateDemande = rawDate ? new Date(rawDate).toLocaleString() : 'N/A';
+    
+    const statut = getVal(item, ['statut', 'status']) || 'CERTIFIÉ';
 
     modalTitle.textContent = `Détails du Lot : ${numeroLot}`;
     
@@ -107,8 +136,8 @@ function ouvrirModalDetails(item) {
 
     modalDetailsText.innerHTML = `
         <p><strong>Producteur :</strong> ${producteur}</p>
-        <p><strong>Type / Produit :</strong> ${produit}</p>
-        <p><strong>Quantité :</strong> ${Number(quantite).toLocaleString()} unités</p>
+        <p><strong>Produit / Emballage :</strong> ${produit}</p>
+        <p><strong>Quantité :</strong> ${quantite} unités</p>
         <p><strong>Date d'émission :</strong> ${dateDemande}</p>
         <p><strong>Statut :</strong> <span style="color: #10b981; font-weight: bold;">${statut}</span></p>
     `;
@@ -135,15 +164,13 @@ function filtrerRegistre() {
     const status = document.getElementById("statusFilter").value;
 
     const filtered = globalRegistryData.filter(item => {
-        const lotVal = String(item.lot || item.certificate_code || '');
-        const prodVal = String(item.nom_producteur || '');
-        const typeVal = String(item.type_emballage || '');
+        const lotVal = String(getVal(item, ['lot', 'certificate_code'])).toLowerCase();
+        const prodVal = String(getVal(item, ['nom_producteur', 'producteur'])).toLowerCase();
+        const typeVal = String(getVal(item, ['type_emballage', 'produit'])).toLowerCase();
 
-        const matchText = lotVal.toLowerCase().includes(query) ||
-                          prodVal.toLowerCase().includes(query) ||
-                          typeVal.toLowerCase().includes(query);
+        const matchText = lotVal.includes(query) || prodVal.includes(query) || typeVal.includes(query);
         
-        const itemStatut = item.statut || 'CERTIFIÉ';
+        const itemStatut = getVal(item, ['statut', 'status']) || 'CERTIFIÉ';
         const matchStatus = status === "" || itemStatut === status;
         
         return matchText && matchStatus;
