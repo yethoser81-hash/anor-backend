@@ -29,7 +29,6 @@ async function chargerRegistreDonnees() {
         const response = await fetch('/api/registry/data');
         const json = await response.json();
         if(json.success) {
-            // Correction effectuée : utilisation de json.items au lieu de json.registry
             globalRegistryData = json.items || [];
             afficherRegistre(globalRegistryData);
         }
@@ -46,17 +45,32 @@ function afficherRegistre(data) {
         return;
     }
 
-    tbody.innerHTML = data.map((item, index) => `
-        <tr>
-            <td><strong>${item.numero_lot}</strong></td>
-            <td>${item.producteur}</td>
-            <td>${item.produit}</td>
-            <td>${item.quantite.toLocaleString()}</td>
-            <td>${item.date_demande}</td>
-            <td><span class="badge-cert">${item.statut}</span></td>
-            <td><button class="btn-details" id="btn-details-${index}">Détails</button></td>
-        </tr>
-    `).join('');
+    // DIAGNOSTIC DIRECT : Affiche le premier objet brut dans la console F12 de ton navigateur
+    console.log("STRUCTURE REÇUE DU SERVEUR (Premier élément) :", data[0]);
+
+    tbody.innerHTML = data.map((item, index) => {
+        const keys = Object.keys(item);
+
+        // Recherche dynamique et sécurisée basée sur les clés réelles de l'objet
+        const numeroLot = item.lot || item.certificate_code || item[keys.find(k => k.toLowerCase().includes('lot') || k.toLowerCase().includes('code'))] || 'N/A';
+        const producteur = item.nom_producteur || item[keys.find(k => k.toLowerCase().includes('producteur') || k.toLowerCase().includes('prod') || k.toLowerCase().includes('nom'))] || 'N/A';
+        const produit = item.type_emballage || item[keys.find(k => k.toLowerCase().includes('produit') || k.toLowerCase().includes('emballage') || k.toLowerCase().includes('type'))] || 'N/A';
+        const quantite = item.quantite || item[keys.find(k => k.toLowerCase().includes('quantite') || k.toLowerCase().includes('qty'))] || 0;
+        const dateDemande = item.created_at || item[keys.find(k => k.toLowerCase().includes('date') || k.toLowerCase().includes('created'))] || 'N/A';
+        const statut = item.statut || item.status || 'CERTIFIÉ';
+
+        return `
+            <tr>
+                <td><strong>${numeroLot}</strong></td>
+                <td>${producteur}</td>
+                <td>${produit}</td>
+                <td>${Number(quantite).toLocaleString()}</td>
+                <td>${dateDemande}</td>
+                <td><span class="badge-cert">${statut}</span></td>
+                <td><button class="btn-details" id="btn-details-${index}">Détails</button></td>
+            </tr>
+        `;
+    }).join('');
 
     data.forEach((item, index) => {
         const btnDetails = document.getElementById(`btn-details-${index}`);
@@ -74,12 +88,20 @@ function ouvrirModalDetails(item) {
     const modalDetailsText = document.getElementById("modalDetailsText");
     const modalImageContainer = document.getElementById("modalImageContainer") || document.getElementById("modalProductImage")?.parentElement;
 
-    modalTitle.textContent = `Détails du Lot : ${item.numero_lot}`;
+    const keys = Object.keys(item);
+    const numeroLot = item.lot || item.certificate_code || item[keys.find(k => k.toLowerCase().includes('lot') || k.toLowerCase().includes('code'))] || 'N/A';
+    const producteur = item.nom_producteur || item[keys.find(k => k.toLowerCase().includes('producteur') || k.toLowerCase().includes('prod') || k.toLowerCase().includes('nom'))] || 'N/A';
+    const produit = item.type_emballage || item[keys.find(k => k.toLowerCase().includes('produit') || k.toLowerCase().includes('emballage') || k.toLowerCase().includes('type'))] || 'N/A';
+    const quantite = item.quantite || item[keys.find(k => k.toLowerCase().includes('quantite') || k.toLowerCase().includes('qty'))] || 0;
+    const dateDemande = item.created_at || item[keys.find(k => k.toLowerCase().includes('date') || k.toLowerCase().includes('created'))] || 'N/A';
+    const statut = item.statut || item.status || 'CERTIFIÉ';
+
+    modalTitle.textContent = `Détails du Lot : ${numeroLot}`;
     
     if (modalImageContainer) {
         if (item.image_url) {
             modalImageContainer.innerHTML = `
-                <img id="modalProductImage" src="${item.image_url}" alt="Visuel du produit ${item.produit}" style="max-width: 100%; max-height: 220px; border-radius: 8px; object-fit: contain; background: #0f172a; padding: 8px; border: 1px solid #334155;">
+                <img id="modalProductImage" src="${item.image_url}" alt="Visuel du produit" style="max-width: 100%; max-height: 220px; border-radius: 8px; object-fit: contain; background: #0f172a; padding: 8px; border: 1px solid #334155;">
             `;
         } else {
             modalImageContainer.innerHTML = `
@@ -88,19 +110,14 @@ function ouvrirModalDetails(item) {
                 </div>
             `;
         }
-    } else {
-        const modalProductImage = document.getElementById("modalProductImage");
-        if (modalProductImage) {
-            modalProductImage.src = item.image_url || "https://images.unsplash.com/photo-1584308666744-24d5c474f2ae?w=400";
-        }
     }
 
     modalDetailsText.innerHTML = `
-        <p><strong>Producteur :</strong> ${item.producteur}</p>
-        <p><strong>Produit :</strong> ${item.produit}</p>
-        <p><strong>Quantité :</strong> ${item.quantite.toLocaleString()} unités</p>
-        <p><strong>Date d'émission :</strong> ${item.date_demande}</p>
-        <p><strong>Statut :</strong> <span style="color: #10b981; font-weight: bold;">${item.statut}</span></p>
+        <p><strong>Producteur :</strong> ${producteur}</p>
+        <p><strong>Produit / Type :</strong> ${produit}</p>
+        <p><strong>Quantité :</strong> ${Number(quantite).toLocaleString()} unités</p>
+        <p><strong>Date d'émission :</strong> ${dateDemande}</p>
+        <p><strong>Statut :</strong> <span style="color: #10b981; font-weight: bold;">${statut}</span></p>
     `;
 
     modal.style.display = "flex";
@@ -125,10 +142,18 @@ function filtrerRegistre() {
     const status = document.getElementById("statusFilter").value;
 
     const filtered = globalRegistryData.filter(item => {
-        const matchText = (item.numero_lot && item.numero_lot.toLowerCase().includes(query)) ||
-                          (item.producteur && item.producteur.toLowerCase().includes(query)) ||
-                          (item.produit && item.produit.toLowerCase().includes(query));
-        const matchStatus = status === "" || item.statut === status;
+        const keys = Object.keys(item);
+        const lotVal = String(item.lot || item.certificate_code || '');
+        const vendVal = String(item.nom_producteur || '');
+        const prodVal = String(item.type_emballage || '');
+
+        const matchText = lotVal.toLowerCase().includes(query) ||
+                          vendVal.toLowerCase().includes(query) ||
+                          prodVal.toLowerCase().includes(query);
+        
+        const itemStatut = item.statut || item.status || 'CERTIFIÉ';
+        const matchStatus = status === "" || itemStatut === status;
+        
         return matchText && matchStatus;
     });
 
