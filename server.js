@@ -784,6 +784,36 @@ app.get("/api/intelligence/stats", async (req, res) => {
 });
 
 // ======================================================
+// ROUTE API : REGISTRE NATIONAL DES LOTS & ENTREPRISES
+// ======================================================
+
+app.get("/api/registry/data", async (req, res) => {
+    try {
+        const { data: products, error } = await supabase
+            .from("produits_certifies")
+            .select("lot, certificate_code, nom_produit, nom_producteur, quantite, created_at, statut")
+            .order("created_at", { ascending: false })
+            .limit(200);
+
+        if (error) throw error;
+
+        const items = (products || []).map(p => ({
+            lot: p.lot || p.certificate_code || "N/A",
+            entreprise: p.nom_producteur || "Producteur Agréé",
+            produit: p.nom_produit || "Produit Certifié",
+            quantite: p.quantite ? Number(p.quantite).toLocaleString("fr-FR") : "0",
+            dateEmission: p.created_at ? new Date(p.created_at).toLocaleDateString("fr-FR") : "Récemment",
+            statut: p.statut || "CERTIFIÉ"
+        }));
+
+        return apiSuccess(res, { items });
+    } catch (err) {
+        console.error("[REGISTRY API ERROR]", err.message);
+        return apiError(res, 500, "REGISTRY_ERROR", "Impossible de charger les données du registre.");
+    }
+});
+
+// ======================================================
 // ROUTE API : SURVEILLANCE NATIONALE (AVEC FALLBACK GÉOGRAPHIQUE AUTOMATIQUE)
 // ======================================================
 
