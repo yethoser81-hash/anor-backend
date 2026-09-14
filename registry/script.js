@@ -29,7 +29,8 @@ async function chargerRegistreDonnees() {
         const response = await fetch('/api/registry/data');
         const json = await response.json();
         if(json.success) {
-            globalRegistryData = json.registry || [];
+            // Correction effectuée : utilisation de json.items au lieu de json.registry
+            globalRegistryData = json.items || [];
             afficherRegistre(globalRegistryData);
         }
     } catch (err) {
@@ -75,7 +76,6 @@ function ouvrirModalDetails(item) {
 
     modalTitle.textContent = `Détails du Lot : ${item.numero_lot}`;
     
-    // Injection dynamique et sécurisée de l'image issue de la base de données (ou message de repli propre)
     if (modalImageContainer) {
         if (item.image_url) {
             modalImageContainer.innerHTML = `
@@ -89,7 +89,6 @@ function ouvrirModalDetails(item) {
             `;
         }
     } else {
-        // Fallback direct si le conteneur n'est qu'une balise <img>
         const modalProductImage = document.getElementById("modalProductImage");
         if (modalProductImage) {
             modalProductImage.src = item.image_url || "https://images.unsplash.com/photo-1584308666744-24d5c474f2ae?w=400";
@@ -114,7 +113,6 @@ function fermerModal() {
     }
 }
 
-// Fermer la modale en cliquant en dehors de celle-ci
 window.onclick = function(event) {
     const modal = document.getElementById("lotModal");
     if (event.target === modal) {
