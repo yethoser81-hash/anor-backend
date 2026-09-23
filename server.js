@@ -23,12 +23,12 @@ const { GoogleGenAI } = require("@google/genai");
 const app = express();
 
 // ======================================================
-// CONFIGURATION GEMINI IA
+// CONFIGURATION GEMINI IA (SDK OFFICIEL @google/genai)
 // ======================================================
 let ai = null;
 if (process.env.GEMINI_API_KEY) {
     ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
-    console.log("[ANOR CORE] Module Vision IA initialisé avec succès.");
+    console.log("[ANOR CORE] Module Vision IA initialisé avec succès via @google/genai.");
 } else {
     console.warn("[ANOR CORE] Avertissement : Clé GEMINI_API_KEY absente. Le module Vision IA sera inactif.");
 }
@@ -441,17 +441,17 @@ async function analyzeSealWithGemini(imageBuffer, mimeType = "image/jpeg") {
         }
 
         console.log("[GEMINI] Début de l'analyse visuelle du sceau...");
-        const imagePart = {
-            inlineData: {
-                data: imageBuffer.toString("base64"),
-                mimeType: mimeType
-            },
-        };
-
+        
+        // Utilisation correcte du SDK @google/genai (Modèle Flash mis à jour)
         const response = await ai.models.generateContent({
-            model: "models/gemini-3.6-flash", 
+            model: "gemini-2.5-flash", 
             contents: [
-                imagePart,
+                {
+                    inlineData: {
+                        data: imageBuffer.toString("base64"),
+                        mimeType: mimeType
+                    },
+                },
                 "Analyse cette image de sceau de certification ANOR. Extrais textuellement et fidèlement le numéro de lot visible (ex: LOT 54P-2026, LOT 01, etc.). Réponds STRICTEMENT au format JSON brut, sans balises markdown (pas de ```json), avec exactement ces clés : 'lot' (string ou null), 'reference' (string ou null), 'confidence' (nombre entre 0 et 1)."
             ],
         });  
@@ -757,8 +757,9 @@ app.post("/api/intelligence/chat", async (req, res) => {
         }
 
         if (ai) {
+            // Utilisation correcte du SDK @google/genai mis à jour
             const chatResponse = await ai.models.generateContent({
-                model: "models/gemini-3.6-flash",
+                model: "gemini-2.5-flash",
                 contents: [
                     `Tu es l'assistant statistique intelligent de l'ANOR (Agence des Normes et de la Qualité du Cameroun). Réponds de manière professionnelle et analytique. Voici un extrait des données actuelles : ${contextSummary}`,
                     `Question de l'utilisateur : ${prompt}`
@@ -817,7 +818,6 @@ app.get("/api/registry/data", async (req, res) => {
 // ROUTE API : SURVEILLANCE NATIONALE (AVEC FALLBACK GÉOGRAPHIQUE AUTOMATIQUE)
 // ======================================================
 
-// Dictionnaire des coordonnées par défaut des principales villes du Cameroun
 const VILLES_CAMEROUN_GPS = {
     "yaounde": [3.8480, 11.5021],
     "douala": [4.0511, 9.7679],
@@ -835,12 +835,10 @@ function obtenirCoordonnees(ville, lat, lng) {
     if (lat && lng && !isNaN(lat) && !isNaN(lng)) {
         return [Number(lat), Number(lng)];
     }
-    // Fallback intelligent basé sur la ville
     if (ville) {
         const vNorm = ville.toLowerCase().trim();
         for (const [nomVille, coords] of Object.entries(VILLES_CAMEROUN_GPS)) {
             if (vNorm.includes(nomVille)) {
-                // Ajout d'un léger décalage aléatoire (dispersion) pour éviter que tous les points se superforcent au même endroit exact
                 return [
                     coords[0] + (Math.random() - 0.5) * 0.05,
                     coords[1] + (Math.random() - 0.5) * 0.05
@@ -848,7 +846,6 @@ function obtenirCoordonnees(ville, lat, lng) {
             }
         }
     }
-    // Défaut par défaut : Yaoundé centre avec légère dispersion
     return [
         3.8480 + (Math.random() - 0.5) * 0.08,
         11.5021 + (Math.random() - 0.5) * 0.08
@@ -859,7 +856,6 @@ app.get("/api/surveillance/data", async (req, res) => {
     try {
         const { region } = req.query;
 
-        // Récupération de tous les scans unitaires
         const { data: tousLesScans, error: scanErr } = await supabase
             .from("produits_unitaires_scans")
             .select("*")
@@ -933,7 +929,6 @@ app.get("/api/surveillance/data", async (req, res) => {
             });
         }
 
-        // Intégration massive des scans unitaires pour alimenter la carte
         if (tousLesScans && tousLesScans.length > 0) {
             tousLesScans.forEach(s => {
                 let sColor = "green";
@@ -958,7 +953,7 @@ app.get("/api/surveillance/data", async (req, res) => {
         return apiSuccess(res, {
             stats: {
                 scans: String(totalScansCount),
-                inspecteurs: String(producteursSet.size > 0 ? producteursSet.size : 12), // Nombre de producteurs actifs
+                inspecteurs: String(producteursSet.size > 0 ? producteursSet.size : 12),
                 alertes: String(alertesCount),
                 produits: String(totalProduitsCertifies)
             },
@@ -1171,7 +1166,6 @@ app.post(
                 deviceMetadata
             } = req.body;
 
-            // Résolution intelligente de la position (GPS direct, Pylônes cellulaires ou Fallback)
             const geoResolved = resolveScanCoordinates(req.body);
             const currentLat = geoResolved.latitude;
             const currentLon = geoResolved.longitude;
@@ -1308,9 +1302,6 @@ app.post(
                 return apiError(res, 404, "UNKNOWN_SEAL", "Sceau inconnu ou non authentifié.", { status: "CONTREFAÇON_REJETEE", processingTime: Date.now() - startTime, engineVersion: SERVER_VERSION });
             }
 
-            // ======================================================
-            // GESTION ET ANALYSE DE LA SÉRIE (TRAÇABILITÉ / DOUBLONS)
-            // ======================================================
             const currentSerie = requestSerie ? String(requestSerie).trim() : (row.serie || "000000");
             const isUniversalSerie = currentSerie === "000000" || currentSerie.startsWith("000000");
             const currentScanTime = new Date();
@@ -1319,7 +1310,6 @@ app.post(
             let warningFlag = null;
             let motifAlerte = null;
 
-            // Enregistrement sécurisé par bloc try/catch pour éviter tout plantage du serveur Node.js (Correction apportée)
             try {
                 await supabase.from("produits_unitaires_scans").insert([{
                     lot: row.lot,
@@ -1346,7 +1336,7 @@ app.post(
                     .limit(2);
 
                 if (!scanErr && previousScans && previousScans.length > 1) {
-                    const lastScan = previousScans[1]; // Le scan précédent (le premier étant celui qu'on vient d'insérer)
+                    const lastScan = previousScans[1];
                     const lastScanTime = new Date(lastScan.created_at);
                     const timeDiffHours = (currentScanTime.getTime() - lastScanTime.getTime()) / (1000 * 60 * 60);
 
