@@ -120,11 +120,9 @@ function resolveScanCoordinates(bodyData) {
     let ville = bodyData.ville || "Yaoundé";
     let region = bodyData.region || "Centre";
 
-    // Si le GPS est désactivé ou absent, on analyse les pylônes environnants (Cell Towers / Triangulation)
     if ((!lat || !lon) && bodyData.cellTowers && Array.isArray(bodyData.cellTowers) && bodyData.cellTowers.length > 0) {
         method = "CELL_TOWER_TRIANGULATION";
         
-        // Base de référence des grandes villes et hubs du Cameroun
         const cameroonHubs = {
             "Yaoundé": { lat: 3.8480, lon: 11.5021, region: "Centre" },
             "Douala": { lat: 4.0511, lon: 9.7679, region: "Littoral" },
@@ -139,14 +137,13 @@ function resolveScanCoordinates(bodyData) {
         };
 
         const targetCity = bodyData.ville && cameroonHubs[bodyData.ville] ? bodyData.ville : "Yaoundé";
-        lat = cameroonHubs[targetCity].lat + (Math.random() - 0.5) * 0.01; // Variation réaliste autour du pylône relais
+        lat = cameroonHubs[targetCity].lat + (Math.random() - 0.5) * 0.01;
         lon = cameroonHubs[targetCity].lon + (Math.random() - 0.5) * 0.01;
         ville = targetCity;
         region = cameroonHubs[targetCity].region;
 
         console.log(`[ANOR GEO-TOWER] Position estimée par pylônes cellulaires (${method}) : ${ville} (${lat}, ${lon})`);
     } else if (!lat || !lon) {
-        // Fallback régional par défaut (Yaoundé)
         method = "FALLBACK_REGIONAL_DEFAULT";
         lat = 3.8480;
         lon = 11.5021;
@@ -450,7 +447,6 @@ async function analyzeSealWithGemini(imageBuffer, mimeType = "image/jpeg") {
 
         let response;
         try {
-            // Tentative avec le modèle principal
             response = await ai.models.generateContent({
                 model: "models/gemini-3.6-flash", 
                 contents: [
@@ -461,7 +457,6 @@ async function analyzeSealWithGemini(imageBuffer, mimeType = "image/jpeg") {
         } catch (primaryError) {
             console.warn("[GEMINI WARNING] Échec du modèle principal (Surcharge/503). Bascule sur le modèle de secours...", primaryError.message);
             
-            // MODÈLE DE SECOURS (Fallback) en cas de saturation du premier
             response = await ai.models.generateContent({
                 model: "models/gemini-2.5-flash", 
                 contents: [
@@ -832,7 +827,6 @@ app.get("/api/registry/data", async (req, res) => {
 // ROUTE API : SURVEILLANCE NATIONALE (AVEC FALLBACK GÉOGRAPHIQUE AUTOMATIQUE)
 // ======================================================
 
-// Dictionnaire des coordonnées par défaut des principales villes du Cameroun
 const VILLES_CAMEROUN_GPS = {
     "yaounde": [3.8480, 11.5021],
     "douala": [4.0511, 9.7679],
@@ -850,12 +844,10 @@ function obtenirCoordonnees(ville, lat, lng) {
     if (lat && lng && !isNaN(lat) && !isNaN(lng)) {
         return [Number(lat), Number(lng)];
     }
-    // Fallback intelligent basé sur la ville
     if (ville) {
         const vNorm = ville.toLowerCase().trim();
         for (const [nomVille, coords] of Object.entries(VILLES_CAMEROUN_GPS)) {
             if (vNorm.includes(nomVille)) {
-                // Ajout d'un léger décalage aléatoire (dispersion) pour éviter que tous les points se superforcent au même endroit exact
                 return [
                     coords[0] + (Math.random() - 0.5) * 0.05,
                     coords[1] + (Math.random() - 0.5) * 0.05
@@ -863,7 +855,6 @@ function obtenirCoordonnees(ville, lat, lng) {
             }
         }
     }
-    // Défaut par défaut : Yaoundé centre avec légère dispersion
     return [
         3.8480 + (Math.random() - 0.5) * 0.08,
         11.5021 + (Math.random() - 0.5) * 0.08
@@ -874,8 +865,7 @@ app.get("/api/surveillance/data", async (req, res) => {
     try {
         const { region } = req.query;
 
-        // Récupération de tous les scans unitaires
-        const { data: tousLesScans, error: scanErr } = await supabase
+        const { data: tousLesScans } = await supabase
             .from("produits_unitaires_scans")
             .select("*")
             .order("created_at", { ascending: false })
@@ -948,7 +938,6 @@ app.get("/api/surveillance/data", async (req, res) => {
             });
         }
 
-        // Intégration massive des scans unitaires pour alimenter la carte
         if (tousLesScans && tousLesScans.length > 0) {
             tousLesScans.forEach(s => {
                 let sColor = "green";
@@ -973,7 +962,7 @@ app.get("/api/surveillance/data", async (req, res) => {
         return apiSuccess(res, {
             stats: {
                 scans: String(totalScansCount),
-                inspecteurs: String(producteursSet.size > 0 ? producteursSet.size : 12), // Nombre de producteurs actifs
+                inspecteurs: String(producteursSet.size > 0 ? producteursSet.size : 12),
                 alertes: String(alertesCount),
                 produits: String(totalProduitsCertifies)
             },
@@ -1186,7 +1175,6 @@ app.post(
                 deviceMetadata
             } = req.body;
 
-            // Résolution intelligente de la position (GPS direct, Pylônes cellulaires ou Fallback)
             const geoResolved = resolveScanCoordinates(req.body);
             const currentLat = geoResolved.latitude;
             const currentLon = geoResolved.longitude;
@@ -1323,9 +1311,6 @@ app.post(
                 return apiError(res, 404, "UNKNOWN_SEAL", "Sceau inconnu ou non authentifié.", { status: "CONTREFAÇON_REJETEE", processingTime: Date.now() - startTime, engineVersion: SERVER_VERSION });
             }
 
-            // ======================================================
-            // GESTION ET ANALYSE DE LA SÉRIE (TRAÇABILITÉ / DOUBLONS)
-            // ======================================================
             const currentSerie = requestSerie ? String(requestSerie).trim() : (row.serie || "000000");
             const isUniversalSerie = currentSerie === "000000" || currentSerie.startsWith("000000");
             const currentScanTime = new Date();
@@ -1334,7 +1319,6 @@ app.post(
             let warningFlag = null;
             let motifAlerte = null;
 
-            // Enregistrement sécurisé par bloc try/catch pour éviter tout plantage du serveur Node.js (Correction apportée)
             try {
                 await supabase.from("produits_unitaires_scans").insert([{
                     lot: row.lot,
@@ -1361,7 +1345,7 @@ app.post(
                     .limit(2);
 
                 if (!scanErr && previousScans && previousScans.length > 1) {
-                    const lastScan = previousScans[1]; // Le scan précédent (le premier étant celui qu'on vient d'insérer)
+                    const lastScan = previousScans[1];
                     const lastScanTime = new Date(lastScan.created_at);
                     const timeDiffHours = (currentScanTime.getTime() - lastScanTime.getTime()) / (1000 * 60 * 60);
 
@@ -1521,6 +1505,7 @@ const server = app.listen(PORT, "0.0.0.0", () => {
     console.log("Serveur prêt avec routage statique complet des dossiers.");
     console.log("======================================================");
 });
+
 function shutdown(signal) {
     console.log(`[ANOR] Arrêt demandé (${signal}).`);
     server.close(() => { process.exit(0); });
