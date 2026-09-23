@@ -450,10 +450,10 @@ async function analyzeSealWithGemini(imageBuffer, mimeType = "image/jpeg") {
 
         let response;
         
-        // Cascade de modèles active et stable uniquement (suppression des modèles obsolètes/inexistants)
+        // Cascade de modèles active et stable mise à jour (gemini-3.7-flash et gemini-3.8-flash)
         const modelsToTry = [
-            "models/gemini-2.5-flash",
-            "models/gemini-1.5-flash"
+            "models/gemini-3.7-flash",
+            "models/gemini-3.8-flash"
         ];
 
         let successModel = null;
@@ -805,7 +805,7 @@ app.post("/api/intelligence/chat", async (req, res) => {
             let chatResponse;
             try {
                 chatResponse = await ai.models.generateContent({
-                    model: "models/gemini-2.5-flash",
+                    model: "models/gemini-3.7-flash",
                     contents: [
                         `Tu es l'assistant statistique intelligent de pointe de l'ANOR (Agence des Normes et de la Qualité du Cameroun) propulsé par Gemini. Réponds de manière professionnelle, analytique et souveraine. Voici un extrait des données actuelles : ${contextSummary}`,
                         `Question de l'utilisateur : ${prompt}`
@@ -814,7 +814,7 @@ app.post("/api/intelligence/chat", async (req, res) => {
             } catch (chatErr) {
                 console.warn("[CHAT WARNING] Échec Gemini principal, bascule sur modèle secondaire...", chatErr.message);
                 chatResponse = await ai.models.generateContent({
-                    model: "models/gemini-1.5-flash",
+                    model: "models/gemini-3.8-flash",
                     contents: [
                         `Tu es l'assistant statistique intelligent de l'ANOR. Voici les données actuelles : ${contextSummary}`,
                         `Question : ${prompt}`
