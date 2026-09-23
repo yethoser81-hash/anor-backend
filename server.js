@@ -394,7 +394,7 @@ const upload = multer({
 });
 
 // ======================================================
-// ANALYSE VISUELLE CLASSIQUE ET GEMINI IA (ROBUSTESSE 6.7 / 3.8 / 3.6)
+// ANALYSE VISUELLE CLASSIQUE ET GEMINI IA (ROBUSTESSE NETTOYÉE ET SECURISEE)
 // ======================================================
 
 async function intelligentVisualAnalysis(scannedMatrix) {
@@ -440,7 +440,7 @@ async function analyzeSealWithGemini(imageBuffer, mimeType = "image/jpeg") {
             return null;
         }
 
-        console.log("[GEMINI] Début de l'analyse visuelle du sceau (Cascade multi-modèles)...");
+        console.log("[GEMINI] Début de l'analyse visuelle du sceau (Cascade nettoyée et robuste)...");
         const imagePart = {
             inlineData: {
                 data: imageBuffer.toString("base64"),
@@ -450,36 +450,54 @@ async function analyzeSealWithGemini(imageBuffer, mimeType = "image/jpeg") {
 
         let response;
         
-        // Ordre de priorité étendu et renforcé : 6.7 -> 3.8 -> 3.6 -> Fallback 2.5
+        // Cascade de modèles active et stable uniquement (suppression des modèles obsolètes/inexistants)
         const modelsToTry = [
-            "models/gemini-6.7-flash",
-            "models/gemini-3.8-flash",
-            "models/gemini-3.6-flash",
-            "models/gemini-2.5-flash"
+            "models/gemini-2.5-flash",
+            "models/gemini-1.5-flash"
         ];
 
         let successModel = null;
         for (const modelName of modelsToTry) {
-            try {
-                console.log(`[GEMINI] Tentative d'analyse avec le modèle : ${modelName}`);
-                response = await ai.models.generateContent({
-                    model: modelName, 
-                    contents: [
-                        imagePart,
-                        "Analyse cette image de sceau de certification ANOR. Extrais textuellement et fidèlement le numéro de lot visible (ex: LOT 54P-2026, LOT 01, etc.). Réponds STRICTEMENT au format JSON brut, sans balises markdown (pas de ```json), avec exactement ces clés : 'lot' (string ou null), 'reference' (string ou null), 'confidence' (nombre entre 0 et 1)."
-                    ],
-                });
-                if (response && response.text) {
-                    successModel = modelName;
+            let attempts = 0;
+            const maxRetries = 1;
+            
+            while (attempts <= maxRetries) {
+                try {
+                    console.log(`[GEMINI] Tentative d'analyse avec le modèle : ${modelName} (Essai ${attempts + 1})`);
+                    response = await ai.models.generateContent({
+                        model: modelName, 
+                        contents: [
+                            imagePart,
+                            "Analyse cette image de sceau de certification ANOR. Extrais textuellement et fidèlement le numéro de lot visible (ex: LOT 54P-2026, LOT 01, etc.). Réponds STRICTEMENT au format JSON brut, sans balises markdown (pas de ```json), avec exactement ces clés : 'lot' (string ou null), 'reference' (string ou null), 'confidence' (nombre entre 0 et 1)."
+                        ],
+                    });
+                    if (response && response.text) {
+                        successModel = modelName;
+                        break;
+                    }
+                } catch (modelErr) {
+                    console.warn(`[GEMINI WARNING] Échec du modèle ${modelName} (Essai ${attempts + 1}):`, modelErr.message);
+                    
+                    // Gestion du repli robuste sur erreur 503 (forte demande) avec exponential backoff
+                    if (modelErr.message && modelErr.message.includes("503")) {
+                        attempts++;
+                        if (attempts <= maxRetries) {
+                            const delay = 1000 * Math.pow(2, attempts - 1); // Exponential backoff court
+                            console.log(`[GEMINI] Erreur 503 détectée. Attente de ${delay}ms avant nouvelle tentative...`);
+                            await new Promise(resolve => setTimeout(resolve, delay));
+                            continue;
+                        }
+                    }
                     break;
                 }
-            } catch (modelErr) {
-                console.warn(`[GEMINI WARNING] Échec du modèle ${modelName}:`, modelErr.message);
             }
+            if (successModel) break;
         }
 
+        // Modèle ou bascule secondaire configurée localement si l'API Gemini est indisponible ou en erreur 503
         if (!response || !response.text) {
-            throw new Error("Tous les modèles Gemini configurés ont échoué à répondre.");
+            console.warn("[GEMINI FALLBACK] Échec des modèles distants. Bascule sur l'analyseur textuel/vision secondaire local...");
+            return { lot: null, reference: null, confidence: 0, fallbackLocal: true };
         }
 
         console.log(`[GEMINI] Succès de l'analyse avec le modèle : ${successModel}`);
@@ -572,7 +590,7 @@ app.get("/health", async (req, res) => {
         status: "ONLINE",
         engine: `ANOR Core ${SERVER_VERSION}`,
         database,
-        gemini: ai ? "CONFIGURED (Cascade 6.7/3.8/3.6)" : "NOT_CONFIGURED",
+        gemini: ai ? "CONFIGURED (Cascade Active Nettoyée)" : "NOT_CONFIGURED",
         uptime: process.uptime(),
         memory: process.memoryUsage().rss,
         node: process.version
@@ -766,7 +784,7 @@ app.get("/api/intelligence/data", async (req, res) => {
 });
 
 // ======================================================
-// ROUTE API : CHAT ASSISTANT STATISTIQUE (GEMINI 6.7 + BDD)
+// ROUTE API : CHAT ASSISTANT STATISTIQUE (GEMINI + BDD)
 // ======================================================
 
 app.post("/api/intelligence/chat", async (req, res) => {
@@ -787,16 +805,16 @@ app.post("/api/intelligence/chat", async (req, res) => {
             let chatResponse;
             try {
                 chatResponse = await ai.models.generateContent({
-                    model: "models/gemini-6.7-flash",
+                    model: "models/gemini-2.5-flash",
                     contents: [
-                        `Tu es l'assistant statistique intelligent de pointe de l'ANOR (Agence des Normes et de la Qualité du Cameroun) propulsé par Gemini 6.7. Réponds de manière professionnelle, analytique et souveraine. Voici un extrait des données actuelles : ${contextSummary}`,
+                        `Tu es l'assistant statistique intelligent de pointe de l'ANOR (Agence des Normes et de la Qualité du Cameroun) propulsé par Gemini. Réponds de manière professionnelle, analytique et souveraine. Voici un extrait des données actuelles : ${contextSummary}`,
                         `Question de l'utilisateur : ${prompt}`
                     ]
                 });
             } catch (chatErr) {
-                console.warn("[CHAT WARNING] Échec Gemini 6.7, bascule sur 3.8...", chatErr.message);
+                console.warn("[CHAT WARNING] Échec Gemini principal, bascule sur modèle secondaire...", chatErr.message);
                 chatResponse = await ai.models.generateContent({
-                    model: "models/gemini-3.8-flash",
+                    model: "models/gemini-1.5-flash",
                     contents: [
                         `Tu es l'assistant statistique intelligent de l'ANOR. Voici les données actuelles : ${contextSummary}`,
                         `Question : ${prompt}`
@@ -961,7 +979,7 @@ app.get("/api/surveillance/data", async (req, res) => {
                     entreprise: p.nom_producteur || "Inconnu",
                     ville: p.ville || "Yaoundé",
                     region: p.region || "Centre",
-                    inspecteur: "IA ANOR 6.7",
+                    inspecteur: "IA ANOR",
                     resultat: stat
                 });
             });
@@ -997,7 +1015,7 @@ app.get("/api/surveillance/data", async (req, res) => {
             },
             points,
             alerts: alerts.length > 0 ? alerts : [
-                { titre: "Réseau de surveillance synchronisé : " + totalScansCount + " scans chargés", source: "IA ANOR 6.7", temps: "En direct", niveau: "normal" }
+                { titre: "Réseau de surveillance synchronisé : " + totalScansCount + " scans chargés", source: "IA ANOR", temps: "En direct", niveau: "normal" }
             ],
             history: history.slice(0, 30)
         });
@@ -1267,7 +1285,7 @@ app.post(
 
                             if (data) {
                                 row = data;
-                                verificationMode = "GEMINI_VISION_AI_EXACT_6_7";
+                                verificationMode = "GEMINI_VISION_AI_EXACT";
                                 matchConfidence = geminiResult.confidence || 0.98;
                             }
                         }
@@ -1527,7 +1545,7 @@ app.use((req, res) => { return apiError(res, 404, "ROUTE_NOT_FOUND", "Route inex
 
 const server = app.listen(PORT, "0.0.0.0", () => {
     console.log("======================================================");
-    console.log(`ANOR Backend v${SERVER_VERSION} (Blindage, Séries, GPS & Pylônes Actifs - Gemini 6.7/3.8/3.6)`);
+    console.log(`ANOR Backend v${SERVER_VERSION} (Blindage, Séries, GPS & Pylônes Actifs - Gemini Stable)`);
     console.log(`Port: ${PORT}`);
     console.log(`Environment: ${process.env.NODE_ENV || "development"}`);
     console.log(`CORS origins: ${allowedOrigins.join(", ") || "aucune"}`);
