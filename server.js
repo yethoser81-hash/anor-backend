@@ -5554,19 +5554,8 @@ app.post(
                     {
                         lot:
                             detectedLot,
-
-                        distance:
-                            visualComparison.distance
-                    }
-                );
-
-                return apiError(
-                    res,
-                    422,
-                    "FAUX_SCEAU_DETECTED",
-                    "Alerte sécurité : La signature visuelle " +
-                    "ne correspond pas aux spécifications officielles ANOR.",
-                    {
+                        serial:
+                            detectedSerial,
                         distance:
                             visualComparison.distance
                     }
@@ -5574,7 +5563,7 @@ app.post(
             }
 
             // ==========================================
-            // 15. ANALYSE PRODUCTION & SÉRIE
+            // 15. ANALYSE DE PRODUCTION & TRAÇABILITÉ
             // ==========================================
 
             const productionAnalysis =
@@ -5587,7 +5576,7 @@ app.post(
                 });
 
             // ==========================================
-            // 16. ENREGISTREMENT ET TRAÇABILITÉ
+            // 16. CONSTRUCTION DE LA TRACE
             // ==========================================
 
             const trace =
@@ -5604,38 +5593,49 @@ app.post(
                     visualComparison
                 });
 
+            // ==========================================
+            // 17. ENREGISTREMENTS ASYNCHRONES
+            // ==========================================
+
             await recordUnitScan(trace);
             await updateCertifiedProductScan(certifiedProduct, location);
 
             // ==========================================
-            // 17. RÉPONSE FINALE SUCCÈS
+            // 18. RÉPONSE FINALE
             // ==========================================
 
             const responsePayload = {
                 success: true,
-                authentic: true,
-                message: "Sceau ANOR authentique et vérifié avec succès.",
+                authentic: isAuthentic,
+                status: isAuthentic ? "CERTIFIE_ANOR" : "CONTREFAÇON_OU_ANOMALIE",
+                matchType,
                 product: {
                     id: certifiedProduct.id,
-                    nom: certifiedProduct.nom || certifiedProduct.product_name || "Produit Certifié ANOR",
-                    entreprise: certifiedProduct.entreprise || certifiedProduct.company_name || "Yemga et Fils",
+                    nom: certifiedProduct.nom || certifiedProduct.product_name || certifiedProduct.libelle,
+                    entreprise: certifiedProduct.entreprise || certifiedProduct.company_name,
                     lot: detectedLot || certifiedProduct.lot || certifiedProduct.lot_code,
-                    serie: detectedSerial,
-                    quantite: certifiedProduct.quantite || null,
-                    status: certifiedProduct.status || "CERTIFIED"
+                    quantite: certifiedProduct.quantite
                 },
-                verification: {
-                    matchType,
-                    visualDistance: visualComparison.distance,
-                    productionStatus: productionAnalysis.status,
-                    anomaly: productionAnalysis.anomaly,
-                    duplicateScanCount: productionAnalysis.duplicateScanCount
+                serial: {
+                    number: detectedSerial,
+                    valid: productionAnalysis.serialValid,
+                    registered: productionAnalysis.serialRegistered,
+                    duplicateCount: productionAnalysis.duplicateScanCount
                 },
+                visual: {
+                    matched: isAuthentic,
+                    distance: visualComparison.distance,
+                    reason: visualComparison.reason
+                },
+                production: productionAnalysis,
                 location,
-                requestId
+                extraction: {
+                    ocr: ocrResult,
+                    gemini: geminiResult
+                }
             };
 
-            if (cacheKey && cacheAllowed) {
+            if (cacheAllowed && cacheKey) {
                 scanCache.set(cacheKey, {
                     time: Date.now(),
                     data: responsePayload
@@ -5645,16 +5645,12 @@ app.post(
             return apiSuccess(res, responsePayload);
 
         } catch (error) {
-            console.error(
-                `[ANOR ERROR] ${requestId} :`,
-                error
-            );
-
+            console.error(`[ANOR ERROR] Erreur critique verify pour ${requestId}:`, error);
             return apiError(
                 res,
                 500,
-                "INTERNAL_ERROR",
-                "Erreur interne lors de la vérification du sceau.",
+                "VERIFICATION_CRITICAL_ERROR",
+                "Erreur lors de la vérification sécurisée du sceau.",
                 error.message
             );
         }
@@ -5666,7 +5662,5 @@ app.post(
 // ======================================================
 
 app.listen(PORT, () => {
-    console.log(
-        `[ANOR CORE] Serveur souverain démarré sur le port ${PORT} (v${SERVER_VERSION})`
-    );
+    console.log(`[ANOR CORE] Serveur souverain démarré sur le port ${PORT} (Version ${SERVER_VERSION})`);
 });
