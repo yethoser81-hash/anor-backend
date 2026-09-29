@@ -39,7 +39,7 @@ async function verifySealWithQwen(imageBase64, lotNumber) {
     const response = await axios.post(
       endpoint,
       {
-        model: "qwen/qwen2.5-vl-7b-instruct", 
+        model: "qwen/qwen-2.5-vl-7b-instruct:free", 
         messages: [
           {
             role: "user",
