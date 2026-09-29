@@ -452,9 +452,9 @@ async function analyzeSealWithGemini(imageBuffer, mimeType = "image/jpeg") {
         
         // Cascade de modèles active et stable mise à jour (gemini-3.7-flash et gemini-3.8-flash)
         const modelsToTry = [
-            "models/gemini-3.7-flash",
-            "models/gemini-3.8-flash"
-        ];
+    "models/gemini-2.5-flash", 
+    "models/gemini-3.7-flash"
+];
 
         let successModel = null;
         for (const modelName of modelsToTry) {
