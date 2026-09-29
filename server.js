@@ -450,11 +450,11 @@ async function analyzeSealWithGemini(imageBuffer, mimeType = "image/jpeg") {
 
         let response;
         
-        // Cascade de modèles active et stable mise à jour (gemini-3.7-flash et gemini-3.8-flash)
+        // Cascade de modèles active et stable mise à jour (gemini-3.8-flash et gemini-3.5-flash-lite)
         const modelsToTry = [
-    "models/gemini-2.5-flash", 
-    "models/gemini-3.7-flash"
-];
+            "models/gemini-3.8-flash", 
+            "models/gemini-3.5-flash-lite"
+        ];
 
         let successModel = null;
         for (const modelName of modelsToTry) {
@@ -805,7 +805,7 @@ app.post("/api/intelligence/chat", async (req, res) => {
             let chatResponse;
             try {
                 chatResponse = await ai.models.generateContent({
-                    model: "models/gemini-3.7-flash",
+                    model: "models/gemini-3.8-flash",
                     contents: [
                         `Tu es l'assistant statistique intelligent de pointe de l'ANOR (Agence des Normes et de la Qualité du Cameroun) propulsé par Gemini. Réponds de manière professionnelle, analytique et souveraine. Voici un extrait des données actuelles : ${contextSummary}`,
                         `Question de l'utilisateur : ${prompt}`
