@@ -495,7 +495,7 @@ async function analyzeSealWithGemini(imageBuffer, mimeType = "image/jpeg") {
             },
         };
 
-        const modelName = "models/gemini-2.5-flash";
+        const modelName = "models/gemini-3.8-flash";
         
         const response = await ai.models.generateContent({
             model: modelName, 
