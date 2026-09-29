@@ -2,7 +2,7 @@
  * ======================================================
  * SYSTEME SOUVERAIN DE CERTIFICATION ANOR
  * SERVER CORE (VERSION ARCHITECTURE HAUTE SÉCURITÉ)
- * Version: 17.9.10 (Traçabilité Avancée, GPS & Pylônes Cellulaires)
+ * Version: 17.9.11 (Optimisation Flux & Court-circuit Quotas Gemini)
  * ======================================================
  */
 
@@ -28,9 +28,9 @@ const app = express();
 let ai = null;
 if (process.env.GEMINI_API_KEY) {
     ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
-    console.log("[ANOR CORE] Module Vision IA initialisé avec succès.");
+    console.log("[ANOR CORE] Module Vision IA initialisé avec succès[cite: 10].");
 } else {
-    console.warn("[ANOR CORE] Avertissement : Clé GEMINI_API_KEY absente. Le module Vision IA sera inactif.");
+    console.warn("[ANOR CORE] Avertissement : Clé GEMINI_API_KEY absente. Le module Vision IA sera inactif[cite: 10].");
 }
 
 // ======================================================
@@ -52,7 +52,7 @@ setInterval(() => {
 // VERSION / CONFIGURATION
 // ======================================================
 
-const SERVER_VERSION = "17.9.10";
+const SERVER_VERSION = "17.9.11";
 const VISUAL_VERSION = 1;
 const VISUAL_BITS_LENGTH = 51;
 const isProduction = process.env.NODE_ENV === "production";
@@ -120,11 +120,9 @@ function resolveScanCoordinates(bodyData) {
     let ville = bodyData.ville || "Yaoundé";
     let region = bodyData.region || "Centre";
 
-    // Si le GPS est désactivé ou absent, on analyse les pylônes environnants (Cell Towers / Triangulation)
     if ((!lat || !lon) && bodyData.cellTowers && Array.isArray(bodyData.cellTowers) && bodyData.cellTowers.length > 0) {
         method = "CELL_TOWER_TRIANGULATION";
         
-        // Base de référence des grandes villes et hubs du Cameroun
         const cameroonHubs = {
             "Yaoundé": { lat: 3.8480, lon: 11.5021, region: "Centre" },
             "Douala": { lat: 4.0511, lon: 9.7679, region: "Littoral" },
@@ -139,14 +137,13 @@ function resolveScanCoordinates(bodyData) {
         };
 
         const targetCity = bodyData.ville && cameroonHubs[bodyData.ville] ? bodyData.ville : "Yaoundé";
-        lat = cameroonHubs[targetCity].lat + (Math.random() - 0.5) * 0.01; // Variation réaliste autour du pylône relais
+        lat = cameroonHubs[targetCity].lat + (Math.random() - 0.5) * 0.01;
         lon = cameroonHubs[targetCity].lon + (Math.random() - 0.5) * 0.01;
         ville = targetCity;
         region = cameroonHubs[targetCity].region;
 
-        console.log(`[ANOR GEO-TOWER] Position estimée par pylônes cellulaires (${method}) : ${ville} (${lat}, ${lon})`);
+        console.log(`[ANOR GEO-TOWER] Position estimée par pylônes cellulaires (${method}) : ${ville} (${lat}, ${lon})[cite: 10]`);
     } else if (!lat || !lon) {
-        // Fallback régional par défaut (Yaoundé)
         method = "FALLBACK_REGIONAL_DEFAULT";
         lat = 3.8480;
         lon = 11.5021;
@@ -274,7 +271,7 @@ app.use(
             if (!isProduction && isPrivateNetworkOrigin(origin)) { return callback(null, true); }
             if (!isProduction) { return callback(null, true); }
             
-            console.warn(`[CORS] Origine refusée par la politique de sécurité: ${origin}`);
+            console.warn(`[CORS] Origine refusée par la politique de sécurité: ${origin}[cite: 10]`);
             return callback(new Error("CORS_ORIGIN_NOT_ALLOWED"));
         },
         credentials: true,
@@ -316,9 +313,9 @@ app.use((req, res, next) => {
     res.on("finish", () => {
         const duration = Date.now() - startTime;
         if (res.statusCode >= 400) {
-            console.warn(`[ANOR-WARN] ${req.method} ${req.originalUrl} -> ${res.statusCode} (${duration}ms) [${requestId}]`);
+            console.warn(`[ANOR-WARN] ${req.method} ${req.originalUrl} -> ${res.statusCode} (${duration}ms) [${requestId}][cite: 10]`);
         } else {
-            console.log(`[ANOR] ${req.method} ${req.originalUrl} -> ${res.statusCode} (${duration}ms) [${requestId}]`);
+            console.log(`[ANOR] ${req.method} ${req.originalUrl} -> ${res.statusCode} (${duration}ms) [${requestId}][cite: 10]`);
         }
     });
     next();
@@ -337,7 +334,7 @@ const scanLimiter = rateLimit({
         securityLog(req, "RATE_LIMIT_EXCEEDED", { ip: req.ip });
         return res.status(429).json({
             success: false,
-            error: { code: "TROP_DE_REQUETES", message: "Trop de requêtes de scan. Veuillez patienter avant un nouveau essai." }
+            error: { code: "TROP_DE_REQUETES", message: "Trop de requêtes de scan. Veuillez patienter avant un nouveau essai[cite: 10]." }
         });
     }
 });
@@ -367,7 +364,7 @@ app.use((req, res, next) => {
     
     if (recentRequests.has(replayKey)) {
         securityLog(req, "REPLAY_ATTACK_DETECTED", { replayKey });
-        return apiError(res, 409, "DUPLICATE_REQUEST", "Cette requête a déjà été traitée (protection anti-replay).");
+        return apiError(res, 409, "DUPLICATE_REQUEST", "Cette requête a déjà été traitée (protection anti-replay)[cite: 10].");
     }
     
     if (recentRequests.size >= MAX_RECENT_REQUESTS) {
@@ -400,7 +397,6 @@ async function openSourceFastSealReader(scannedMatrix, requestVisualBits, reques
     try {
         if (!scannedMatrix && !requestVisualBits && !requestVisualSignature) return null;
 
-        // 1. Si on a des bits directs ou une signature ANOR51
         const normalized = normalizeVisualBits(requestVisualBits || scannedMatrix?.bits || scannedMatrix?.visualBits);
         if (normalized) {
             return { lot: null, signature: `ANOR51:${normalized}`, bits: normalized, confidence: 0.95, source: "OPEN_SOURCE_FAST_ENGINE" };
@@ -504,12 +500,12 @@ async function analyzeSealWithGemini(imageBuffer, mimeType = "image/jpeg") {
             
             while (attempts <= maxRetries) {
                 try {
-                    console.log(`[GEMINI] Tentative d'analyse approfondie avec le modèle : ${modelName} (Essai ${attempts + 1})`);
+                    console.log(`[GEMINI] Tentative d'analyse approfondie avec le modèle : ${modelName} (Essai ${attempts + 1})[cite: 10]`);
                     response = await ai.models.generateContent({
                         model: modelName, 
                         contents: [
                             imagePart,
-                            "Analyse cette image de sceau de certification ANOR complexe. Extrais textuellement et fidèlement le numéro de lot visible (ex: LOT 54P-2026, LOT 01, etc.). Réponds STRICTEMENT au format JSON brut, sans balises markdown (pas de ```json), avec exactement ces clés : 'lot' (string ou null), 'reference' (string ou null), 'confidence' (nombre entre 0 et 1)."
+                            "Analyse cette image de sceau de certification ANOR complexe. Extrais textuellement et fidèlement le numéro de lot visible (ex: LOT 54P-2026, LOT 01, etc.). Réponds STRICTEMENT au format JSON brut, sans balises markdown (pas de ```json), avec exactement ces clés : 'lot' (string ou null), 'reference' (string ou null), 'confidence' (nombre entre 0 et 1)[cite: 10]."
                         ],
                     });
                     if (response && response.text) {
@@ -518,7 +514,7 @@ async function analyzeSealWithGemini(imageBuffer, mimeType = "image/jpeg") {
                     }
                 } catch (modelErr) {
                     console.warn(`[GEMINI WARNING] Échec du modèle ${modelName} (Essai ${attempts + 1}):`, modelErr.message);
-                    if (modelErr.message && modelErr.message.includes("503")) {
+                    if (modelErr.message && (modelErr.message.includes("503") || modelErr.message.includes("429") || modelErr.message.includes("404"))) {
                         attempts++;
                         if (attempts <= maxRetries) {
                             const delay = 1000 * Math.pow(2, attempts - 1);
@@ -586,7 +582,7 @@ async function generateUnitSerialsAndManifest(lotCode, totalQuantity, masterSign
             unitsToInsert.length = 0;
         }
     }
-    console.log(`[SERIALIZATION] ${totalQuantity} unités sérialisées avec succès pour le lot ${lotCode}.`);
+    console.log(`[SERIALIZATION] ${totalQuantity} unités sérialisées avec succès pour le lot ${lotCode}[cite: 10].`);
     return csvContent;
 }
 
@@ -623,8 +619,8 @@ app.get("/health", async (req, res) => {
         status: "ONLINE",
         engine: `ANOR Core ${SERVER_VERSION}`,
         database,
-        openSourceFastAPI: "ACTIVE (< 1s Response)",
-        gemini: ai ? "CONFIGURED (Complex Fallback)" : "NOT_CONFIGURED",
+        openSourceFastAPI: "ACTIVE (< 1s Response)[cite: 10]",
+        gemini: ai ? "CONFIGURED (Complex Fallback)[cite: 10]" : "NOT_CONFIGURED",
         uptime: process.uptime(),
         memory: process.memoryUsage().rss,
         node: process.version
@@ -1070,7 +1066,7 @@ app.post("/api/security/audit", (req, res) => {
         console.log("[ANOR SECURITY AUDIT] Rapport reçu de l'APK:", JSON.stringify(auditData));
         return apiSuccess(res, { 
             status: "AUDIT_RECEIVED", 
-            message: "Rapport de sécurité pris en compte par le noyau 17.9.10." 
+            message: "Rapport de sécurité pris en compte par le noyau 17.9.11." 
         });
     } catch (error) {
         console.error("[SECURITY AUDIT ERROR]", error.message);
@@ -1296,7 +1292,6 @@ app.post(
                 }
             }
 
-            // Si le lot n'est pas fourni directement mais qu'on a un résultat rapide open-source
             if (!row && fastOpenSourceResult) {
                 if (fastOpenSourceResult.lot) {
                     const fastCleanLot = String(fastOpenSourceResult.lot).trim();
@@ -1327,17 +1322,20 @@ app.post(
 
             // ==============================================================
             // ÉTAPE 2 : BASCULE SUR GEMINI SI COMPLEXE OU NON TROUVÉ PAR L'API LIBRE
+            // (Court-circuité automatiquement si quota épuisé ou indisponible)
             // ==============================================================
             if (!row && scannedMatrix) {
                 verificationMode = "COMPLEX_GEMINI_FALLBACK";
 
+                let geminiResult = null;
                 if (typeof scannedMatrix === "string" && scannedMatrix.startsWith("data:image")) {
                     const matches = scannedMatrix.match(/^data:(.+);base64,(.+)$/);
                     if (matches) {
                         const mimeType = matches[1];
                         const bufferData = Buffer.from(matches[2], "base64");
                         
-                        const geminiResult = await analyzeSealWithGemini(bufferData, mimeType);
+                        // Tentative d'analyse Gemini sécurisée (gère les quotas 429 et 503 en interne)
+                        geminiResult = await analyzeSealWithGemini(bufferData, mimeType);
                         
                         if (geminiResult && geminiResult.lot) {
                             const extractedCleanLot = String(geminiResult.lot).trim();
@@ -1356,6 +1354,7 @@ app.post(
                     }
                 }
 
+                // Si Gemini a échoué (quota épuisé/erreur 429/503), court-circuit immédiat sur l'analyse locale Hamming
                 if (!row) {
                     const analysis = await intelligentVisualAnalysis(
                         scannedMatrix || { bits: requestVisualBits, visualBits: requestVisualBits, signature: requestVisualSignature }
