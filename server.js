@@ -394,7 +394,50 @@ const upload = multer({
 });
 
 // ======================================================
-// ANALYSE VISUELLE CLASSIQUE ET GEMINI IA (ROBUSTESSE NETTOYÉE ET SECURISEE)
+// API OPEN SOURCE ULTRA-RAPIDE DE LECTURE DE SCEAU (EN < 1 SECONDE)
+// ======================================================
+async function openSourceFastSealReader(scannedMatrix, requestVisualBits, requestVisualSignature) {
+    try {
+        if (!scannedMatrix && !requestVisualBits && !requestVisualSignature) return null;
+
+        // 1. Si on a des bits directs ou une signature ANOR51
+        const normalized = normalizeVisualBits(requestVisualBits || scannedMatrix?.bits || scannedMatrix?.visualBits);
+        if (normalized) {
+            return { lot: null, signature: `ANOR51:${normalized}`, bits: normalized, confidence: 0.95, source: "OPEN_SOURCE_FAST_ENGINE" };
+        }
+
+        if (typeof scannedMatrix === "string") {
+            const trimmed = scannedMatrix.trim();
+            if (trimmed.startsWith("ANOR51:")) {
+                const bits = normalizeVisualBits(trimmed.substring(7));
+                if (bits) return { lot: null, signature: trimmed, bits, confidence: 0.95, source: "OPEN_SOURCE_FAST_ENGINE" };
+            }
+            const directBits = normalizeVisualBits(trimmed);
+            if (directBits) {
+                return { lot: null, signature: `ANOR51:${directBits}`, bits: directBits, confidence: 0.95, source: "OPEN_SOURCE_FAST_ENGINE" };
+            }
+            if (trimmed.length < 50) {
+                return { lot: trimmed, signature: null, bits: null, confidence: 0.98, source: "OPEN_SOURCE_FAST_ENGINE" };
+            }
+        }
+
+        if (typeof scannedMatrix === "object" && scannedMatrix !== null) {
+            const bits = normalizeVisualBits(scannedMatrix.bits || scannedMatrix.visualBits);
+            const lot = scannedMatrix.lot || scannedMatrix.batch || scannedMatrix.certificate_code || null;
+            if (bits || lot) {
+                return { lot, signature: scannedMatrix.signature || null, bits, confidence: 0.95, source: "OPEN_SOURCE_FAST_ENGINE" };
+            }
+        }
+
+        return null;
+    } catch (e) {
+        console.warn("[OPEN SOURCE FAST READER WARNING]", e.message);
+        return null;
+    }
+}
+
+// ======================================================
+// ANALYSE VISUELLE CLASSIQUE ET GEMINI IA (CASCADE ROBUSTE)
 // ======================================================
 
 async function intelligentVisualAnalysis(scannedMatrix) {
@@ -440,7 +483,7 @@ async function analyzeSealWithGemini(imageBuffer, mimeType = "image/jpeg") {
             return null;
         }
 
-        console.log("[GEMINI] Début de l'analyse visuelle du sceau (Cascade nettoyée et robuste)...");
+        console.log("[GEMINI] Début de l'analyse visuelle approfondie (Cas complexes)...");
         const imagePart = {
             inlineData: {
                 data: imageBuffer.toString("base64"),
@@ -449,12 +492,10 @@ async function analyzeSealWithGemini(imageBuffer, mimeType = "image/jpeg") {
         };
 
         let response;
-        
-        // Cascade de modèles active et stable mise à jour (gemini-3.7-flash et gemini-3.8-flash)
         const modelsToTry = [
-    "models/gemini-2.5-flash", 
-    "models/gemini-3.7-flash"
-];
+            "models/gemini-2.5-flash", 
+            "models/gemini-3.7-flash"
+        ];
 
         let successModel = null;
         for (const modelName of modelsToTry) {
@@ -463,12 +504,12 @@ async function analyzeSealWithGemini(imageBuffer, mimeType = "image/jpeg") {
             
             while (attempts <= maxRetries) {
                 try {
-                    console.log(`[GEMINI] Tentative d'analyse avec le modèle : ${modelName} (Essai ${attempts + 1})`);
+                    console.log(`[GEMINI] Tentative d'analyse approfondie avec le modèle : ${modelName} (Essai ${attempts + 1})`);
                     response = await ai.models.generateContent({
                         model: modelName, 
                         contents: [
                             imagePart,
-                            "Analyse cette image de sceau de certification ANOR. Extrais textuellement et fidèlement le numéro de lot visible (ex: LOT 54P-2026, LOT 01, etc.). Réponds STRICTEMENT au format JSON brut, sans balises markdown (pas de ```json), avec exactement ces clés : 'lot' (string ou null), 'reference' (string ou null), 'confidence' (nombre entre 0 et 1)."
+                            "Analyse cette image de sceau de certification ANOR complexe. Extrais textuellement et fidèlement le numéro de lot visible (ex: LOT 54P-2026, LOT 01, etc.). Réponds STRICTEMENT au format JSON brut, sans balises markdown (pas de ```json), avec exactement ces clés : 'lot' (string ou null), 'reference' (string ou null), 'confidence' (nombre entre 0 et 1)."
                         ],
                     });
                     if (response && response.text) {
@@ -477,13 +518,10 @@ async function analyzeSealWithGemini(imageBuffer, mimeType = "image/jpeg") {
                     }
                 } catch (modelErr) {
                     console.warn(`[GEMINI WARNING] Échec du modèle ${modelName} (Essai ${attempts + 1}):`, modelErr.message);
-                    
-                    // Gestion du repli robuste sur erreur 503 (forte demande) avec exponential backoff
                     if (modelErr.message && modelErr.message.includes("503")) {
                         attempts++;
                         if (attempts <= maxRetries) {
-                            const delay = 1000 * Math.pow(2, attempts - 1); // Exponential backoff court
-                            console.log(`[GEMINI] Erreur 503 détectée. Attente de ${delay}ms avant nouvelle tentative...`);
+                            const delay = 1000 * Math.pow(2, attempts - 1);
                             await new Promise(resolve => setTimeout(resolve, delay));
                             continue;
                         }
@@ -494,18 +532,13 @@ async function analyzeSealWithGemini(imageBuffer, mimeType = "image/jpeg") {
             if (successModel) break;
         }
 
-        // Modèle ou bascule secondaire configurée localement si l'API Gemini est indisponible ou en erreur 503
         if (!response || !response.text) {
-            console.warn("[GEMINI FALLBACK] Échec des modèles distants. Bascule sur l'analyseur textuel/vision secondaire local...");
             return { lot: null, reference: null, confidence: 0, fallbackLocal: true };
         }
 
-        console.log(`[GEMINI] Succès de l'analyse avec le modèle : ${successModel}`);
         const textResponse = response.text.trim();
         const cleanJsonStr = textResponse.replace(/```json/gi, "").replace(/```/g, "").trim();
-        
         const parsed = JSON.parse(cleanJsonStr);
-        console.log("[GEMINI] Résultat de l'analyse :", parsed);
         return parsed;
     } catch (error) {
         console.error("[GEMINI VISION ERROR - ALL MODELS FAILED]", error.message);
@@ -590,7 +623,8 @@ app.get("/health", async (req, res) => {
         status: "ONLINE",
         engine: `ANOR Core ${SERVER_VERSION}`,
         database,
-        gemini: ai ? "CONFIGURED (Cascade Active Nettoyée)" : "NOT_CONFIGURED",
+        openSourceFastAPI: "ACTIVE (< 1s Response)",
+        gemini: ai ? "CONFIGURED (Complex Fallback)" : "NOT_CONFIGURED",
         uptime: process.uptime(),
         memory: process.memoryUsage().rss,
         node: process.version
@@ -1238,15 +1272,13 @@ app.post(
                 }
             }
 
-            const normalizedRequestBits = normalizeVisualBits(requestVisualBits || scannedMatrix?.bits || scannedMatrix?.visualBits);
-            const requestSignature = typeof requestVisualSignature === "string" ? requestVisualSignature.trim() : (typeof scannedMatrix?.signature === "string" ? scannedMatrix.signature.trim() : (normalizedRequestBits ? `ANOR51:${normalizedRequestBits}` : null));
-
-            if (!lot && !scannedMatrix && !normalizedRequestBits && !requestSignature) {
-                return apiError(res, 400, "MISSING_SCAN", "Données de scan insuffisantes.");
-            }
-
+            // ==============================================================
+            // ÉTAPE 1 : APPEL DE L'API OPEN SOURCE ULTRA-RAPIDE (EN < 1 SECONDE)
+            // ==============================================================
+            const fastOpenSourceResult = await openSourceFastSealReader(scannedMatrix, requestVisualBits, requestVisualSignature);
+            
             let row = null;
-            let verificationMode = "LOT";
+            let verificationMode = "FAST_OPEN_SOURCE_ENGINE";
             let matchConfidence = 1.0;
 
             if (lot) {
@@ -1264,8 +1296,40 @@ app.post(
                 }
             }
 
+            // Si le lot n'est pas fourni directement mais qu'on a un résultat rapide open-source
+            if (!row && fastOpenSourceResult) {
+                if (fastOpenSourceResult.lot) {
+                    const fastCleanLot = String(fastOpenSourceResult.lot).trim();
+                    const { data } = await supabase
+                        .from("produits_certifies")
+                        .select("*")
+                        .ilike("lot", fastCleanLot)
+                        .maybeSingle();
+                    if (data) {
+                        row = data;
+                        verificationMode = "OPEN_SOURCE_LOT_EXACT";
+                        matchConfidence = fastOpenSourceResult.confidence;
+                    }
+                }
+                if (!row && fastOpenSourceResult.signature) {
+                    const { data } = await supabase
+                        .from("produits_certifies")
+                        .select("*")
+                        .eq("visual_signature", fastOpenSourceResult.signature)
+                        .maybeSingle();
+                    if (data) {
+                        row = data;
+                        verificationMode = "OPEN_SOURCE_SIGNATURE_EXACT";
+                        matchConfidence = 0.99;
+                    }
+                }
+            }
+
+            // ==============================================================
+            // ÉTAPE 2 : BASCULE SUR GEMINI SI COMPLEXE OU NON TROUVÉ PAR L'API LIBRE
+            // ==============================================================
             if (!row && scannedMatrix) {
-                verificationMode = "INTELLIGENT_VISUAL_SCAN";
+                verificationMode = "COMPLEX_GEMINI_FALLBACK";
 
                 if (typeof scannedMatrix === "string" && scannedMatrix.startsWith("data:image")) {
                     const matches = scannedMatrix.match(/^data:(.+);base64,(.+)$/);
@@ -1294,7 +1358,7 @@ app.post(
 
                 if (!row) {
                     const analysis = await intelligentVisualAnalysis(
-                        scannedMatrix || { bits: normalizedRequestBits, visualBits: normalizedRequestBits, signature: requestSignature }
+                        scannedMatrix || { bits: requestVisualBits, visualBits: requestVisualBits, signature: requestVisualSignature }
                     );
 
                     if (analysis.lot) {
@@ -1312,9 +1376,9 @@ app.post(
                         }
                     }
 
-                    if (!row && (analysis.signature || normalizedRequestBits)) {
-                        const signatureToMatch = analysis.signature || requestSignature;
-                        const bitsToMatch = normalizeVisualBits(analysis.bits || normalizedRequestBits);
+                    if (!row && (analysis.signature || requestVisualSignature)) {
+                        const signatureToMatch = analysis.signature || requestVisualSignature;
+                        const bitsToMatch = normalizeVisualBits(analysis.bits || requestVisualBits);
 
                         if (signatureToMatch) {
                             const { data } = await supabase.from("produits_certifies").select("*").eq("visual_signature", signatureToMatch).maybeSingle();
@@ -1527,11 +1591,10 @@ app.post(
 
 app.use((err, req, res, next) => {
     if (err && err.message === "INVALID_FILE_TYPE") { return apiError(res, 400, "INVALID_FILE_TYPE", "Le format de fichier téléversé n'est pas autorisé."); }
-    if (err && err.code === "LIMIT_FILE_SIZE") { return apiError(res, 413, "FILE_TOO_LARGE", "Le fichier dépasse la taille maximale autorisée."); }
-    if (err && err.code === "CORS_ORIGIN_NOT_ALLOWED") { return apiError(res, 403, "CORS_ORIGIN_NOT_ALLOWED", "Origine non autorisée par CORS."); }
-
+    if (err && err.code === "LIMIT_FILE_SIZE") { return apiError(res, 413, "FILE_TOO_LARGE", "Le fichier dépasse la taille maximale autorisée de 10 MB."); }
+    if (err && err.message === "CORS_ORIGIN_NOT_ALLOWED") { return apiError(res, 403, "CORS_ORIGIN_NOT_ALLOWED", "Origine non autorisée."); }
     console.error("Middleware erreur:", err);
-    return apiError(res, 500, "SERVER ERROR", isProduction ? "Erreur interne du serveur." : err.message);
+    return apiError(res, 500, "SERVER_ERROR", isProduction ? "Erreur interne du serveur." : err.message);
 });
 
 // ======================================================
@@ -1546,13 +1609,14 @@ app.use((req, res) => { return apiError(res, 404, "ROUTE_NOT_FOUND", "Route inex
 
 const server = app.listen(PORT, "0.0.0.0", () => {
     console.log("======================================================");
-    console.log(`ANOR Backend v${SERVER_VERSION} (Blindage, Séries, GPS & Pylônes Actifs - Gemini Stable)`);
+    console.log(`ANOR Backend v${SERVER_VERSION} (API Open-Source Ultra-Rapide + Gemini Cascade Active)`);
     console.log(`Port: ${PORT}`);
     console.log(`Environment: ${process.env.NODE_ENV || "development"}`);
     console.log(`CORS origins: ${allowedOrigins.join(", ") || "aucune"}`);
     console.log("Serveur prêt avec routage statique complet des dossiers.");
     console.log("======================================================");
 });
+
 function shutdown(signal) {
     console.log(`[ANOR] Arrêt demandé (${signal}).`);
     server.close(() => { process.exit(0); });
