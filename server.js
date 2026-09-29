@@ -49,6 +49,40 @@ setInterval(() => {
 }, 60000);
 
 // ======================================================
+// PRÉ-PROCESSEUR ULTRA-RAPIDE POUR LECTURE INSTANTANÉE DU SCEAU
+// ======================================================
+function anorSealPreProcessor(req, res, next) {
+    try {
+        if (req.body && (req.body.scannedMatrix || req.body.visualBits || req.body.visualSignature)) {
+            const rawMatrix = req.body.scannedMatrix;
+            
+            // Si la trame brute est envoyée sous forme de chaîne pré-formatée ou d'image base64 légère
+            if (typeof rawMatrix === "string") {
+                const trimmed = rawMatrix.trim();
+                if (trimmed.startsWith("ANOR51:")) {
+                    req.body.visualSignature = trimmed;
+                    req.body.visualBits = trimmed.substring(7);
+                } else if (/^[01]{51}$/.test(trimmed)) {
+                    req.body.visualBits = trimmed;
+                    req.body.visualSignature = `ANOR51:${trimmed}`;
+                }
+            } else if (typeof rawMatrix === "object" && rawMatrix !== null) {
+                if (rawMatrix.bits && !req.body.visualBits) req.body.visualBits = rawMatrix.bits;
+                if (rawMatrix.signature && !req.body.visualSignature) req.body.visualSignature = rawMatrix.signature;
+            }
+            
+            // Normalisation immédiate pour éliminer les latences de parsing dans les routes de vérification
+            if (req.body.visualBits && !req.body.visualSignature) {
+                req.body.visualSignature = `ANOR51:${req.body.visualBits}`;
+            }
+        }
+    } catch (preprocessErr) {
+        console.warn("[ANOR PRE-PROCESSOR WARNING] Erreur mineure lors du pré-traitement du sceau :", preprocessErr.message);
+    }
+    next();
+}
+
+// ======================================================
 // VERSION / CONFIGURATION
 // ======================================================
 
@@ -1204,11 +1238,13 @@ Système Souverain de Certification - ANOR Engine ${SERVER_VERSION}
 
 // ======================================================
 // VERIFICATION DU SCEAU, GESTION DE LA SÉRIE ET TRAÇABILITÉ TEMPO-GÉOGRAPHIQUE
+// (Intégration du pré-processeur anorSealPreProcessor sur la route de scan)
 // ======================================================
 
 app.post(
     "/api/seals/verify",
     scanLimiter,
+    anorSealPreProcessor, // <--- AJOUT DU PRÉ-PROCESSEUR POUR LECTURE RAPIDE DU SCEAU
     async (req, res) => {
         const startTime = Date.now();
         try {
