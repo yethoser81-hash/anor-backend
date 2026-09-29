@@ -2,7 +2,7 @@
  * ======================================================
  * SYSTEME SOUVERAIN DE CERTIFICATION ANOR
  * SERVER CORE (VERSION ARCHITECTURE HAUTE SÉCURITÉ)
- * Version: 17.9.12 (Mise à jour Modèles Gemini & Blindage Quotas)
+ * Version: 17.9.10 (Traçabilité Avancée, GPS & Pylônes Cellulaires + Qwen2.5-VL)
  * ======================================================
  */
 
@@ -16,21 +16,68 @@ const JSZip = require("jszip");
 const multer = require("multer");
 const rateLimit = require("express-rate-limit");
 const helmet = require("helmet");
+const axios = require("axios");
 const supabase = require("./config/database");
 const SealRenderer = require("./engine/sealRenderer");
-const { GoogleGenAI } = require("@google/genai");
 
 const app = express();
 
 // ======================================================
-// CONFIGURATION GEMINI IA
+// CONFIGURATION VLM QWEN2.5-VL (REMPLACEMENT DE GEMINI)
 // ======================================================
-let ai = null;
-if (process.env.GEMINI_API_KEY) {
-    ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
-    console.log("[ANOR CORE] Module Vision IA initialisé avec succès.");
+if (process.env.VLM_API_KEY) {
+    console.log("[ANOR CORE] Module Vision Qwen2.5-VL (OpenRouter) initialisé avec succès.");
 } else {
-    console.warn("[ANOR CORE] Avertissement : Clé GEMINI_API_KEY absente. Le module Vision IA sera inactif.");
+    console.warn("[ANOR CORE] Avertissement : Clé VLM_API_KEY absente. Le module d'analyse visuelle avancée sera inactif.");
+}
+
+async function verifySealWithQwen(imageBase64, lotNumber) {
+  const apiKey = process.env.VLM_API_KEY; 
+  const endpoint = "https://openrouter.ai/api/v1/chat/completions";
+
+  try {
+    const response = await axios.post(
+      endpoint,
+      {
+        model: "qwen/qwen2.5-vl-7b-instruct", 
+        messages: [
+          {
+            role: "user",
+            content: [
+              {
+                type: "text",
+                text: `Analysez cette image de sceau (Lot: ${lotNumber || 'N/A'}). Vérifiez s'il s'agit d'un sceau ANOR authentique ou contrefait. Répondez strictement au format JSON avec les clés suivantes : {"status": "authentic" | "counterfeit", "confidence": number, "details": "explication courte"}`
+              },
+              {
+                type: "image_url",
+                image_url: {
+                  url: `data:image/jpeg;base64,${imageBase64}`
+                }
+              }
+            ]
+          }
+        ],
+        response_format: { type: "json_object" }, 
+        max_tokens: 300,
+        temperature: 0.1
+      },
+      {
+        headers: {
+          "Authorization": `Bearer ${apiKey}`,
+          "HTTP-Referer": "https://anor-backend.onrender.com", 
+          "X-Title": "ANOR-CHECK App",
+          "Content-Type": "application/json"
+        },
+        timeout: 15000 
+      }
+    );
+
+    return JSON.parse(response.data.choices[0].message.content);
+
+  } catch (error) {
+    console.error("[VLM ERROR]", error.response?.data || error.message);
+    throw new Error("Erreur lors de l'analyse visuelle du sceau.");
+  }
 }
 
 // ======================================================
@@ -52,7 +99,7 @@ setInterval(() => {
 // VERSION / CONFIGURATION
 // ======================================================
 
-const SERVER_VERSION = "17.9.12";
+const SERVER_VERSION = "17.9.10";
 const VISUAL_VERSION = 1;
 const VISUAL_BITS_LENGTH = 51;
 const isProduction = process.env.NODE_ENV === "production";
@@ -99,7 +146,7 @@ function calculateHammingDistance(str1, str2) {
 function calculateGeographicDistanceKm(lat1, lon1, lat2, lon2) {
     if (!lat1 || !lon1 || !lat2 || !lon2) return 0;
     const toRad = (val) => (val * Math.PI) / 180;
-    const R = 6371;
+    const R = 6371; 
     const dLat = toRad(lat2 - lat1);
     const dLon = toRad(lon2 - lon1);
     const a =
@@ -109,6 +156,9 @@ function calculateGeographicDistanceKm(lat1, lon1, lat2, lon2) {
     return R * c;
 }
 
+// ======================================================
+// GÉOLOCALISATION AVANCÉE (GPS + PYLÔNES CELLULAIRES / FALLBACK)
+// ======================================================
 function resolveScanCoordinates(bodyData) {
     let lat = bodyData.latitude ? Number(bodyData.latitude) : null;
     let lon = bodyData.longitude ? Number(bodyData.longitude) : null;
@@ -133,12 +183,10 @@ function resolveScanCoordinates(bodyData) {
         };
 
         const targetCity = bodyData.ville && cameroonHubs[bodyData.ville] ? bodyData.ville : "Yaoundé";
-        lat = cameroonHubs[targetCity].lat + (Math.random() - 0.5) * 0.01;
+        lat = cameroonHubs[targetCity].lat + (Math.random() - 0.5) * 0.01; 
         lon = cameroonHubs[targetCity].lon + (Math.random() - 0.5) * 0.01;
         ville = targetCity;
         region = cameroonHubs[targetCity].region;
-
-        console.log(`[ANOR GEO-TOWER] Position estimée par pylônes cellulaires (${method}) : ${ville} (${lat}, ${lon})`);
     } else if (!lat || !lon) {
         method = "FALLBACK_REGIONAL_DEFAULT";
         lat = 3.8480;
@@ -170,6 +218,10 @@ function isValidUserAgent(agent) {
     return true;
 }
 
+// ======================================================
+// FILTRAGE STRICT DES CHARGES UTILES (PAYLOAD SANITIZER)
+// ======================================================
+
 function deepSanitizeInput(obj) {
     if (obj && typeof obj === "object") {
         for (const key of Object.keys(obj)) {
@@ -189,6 +241,10 @@ app.use((req, res, next) => {
     }
     next();
 });
+
+// ======================================================
+// REPONSES API STANDARDISÉES
+// ======================================================
 
 function apiSuccess(res, data = {}, status = 200) {
     return res
@@ -224,6 +280,10 @@ function securityLog(req, event, details = {}) {
         })
     );
 }
+
+// ======================================================
+// CORS POLITIQUE SOUVERAINE
+// ======================================================
 
 const defaultAllowedOrigins = [
     "http://localhost:3000",
@@ -264,6 +324,10 @@ app.use(
     })
 );
 
+// ======================================================
+// SÉCURITÉ HTTP (HELMET & CSP)
+// ======================================================
+
 app.use(helmet({ crossOriginEmbedderPolicy: false, contentSecurityPolicy: false }));
 app.use(express.json({ limit: "50mb" }));
 app.use(express.urlencoded({ extended: true, limit: "50mb" }));
@@ -278,6 +342,10 @@ app.use((req, res, next) => {
     res.setHeader("Referrer-Policy", "strict-origin-when-cross-origin");
     next();
 });
+
+// ======================================================
+// REQUEST ID / LOGGING FORENSIC
+// ======================================================
 
 app.use((req, res, next) => {
     const startTime = Date.now();
@@ -297,6 +365,10 @@ app.use((req, res, next) => {
     next();
 });
 
+// ======================================================
+// RATE LIMITING DURCI
+// ======================================================
+
 const scanLimiter = rateLimit({
     windowMs: 60 * 1000,
     max: 60,
@@ -306,10 +378,14 @@ const scanLimiter = rateLimit({
         securityLog(req, "RATE_LIMIT_EXCEEDED", { ip: req.ip });
         return res.status(429).json({
             success: false,
-            error: { code: "TROP_DE_REQUETES", message: "Service de vérification très sollicité, veuillez réessayer dans quelques instants." }
+            error: { code: "TROP_DE_REQUETES", message: "Trop de requêtes de scan. Veuillez patienter avant un nouveau essai." }
         });
     }
 });
+
+// ======================================================
+// ANTI-REPLAY AVANCÉ
+// ======================================================
 
 const recentRequests = new Map();
 const REQUEST_TTL = 30000;
@@ -344,6 +420,10 @@ app.use((req, res, next) => {
     next();
 });
 
+// ======================================================
+// UPLOAD SÉCURISÉ
+// ======================================================
+
 const upload = multer({
     limits: { fileSize: 10 * 1024 * 1024 },
     fileFilter: (req, file, cb) => {
@@ -354,6 +434,9 @@ const upload = multer({
     }
 });
 
+// ======================================================
+// API OPEN SOURCE ULTRA-RAPIDE DE LECTURE DE SCEAU (EN < 1 SECONDE)
+// ======================================================
 async function openSourceFastSealReader(scannedMatrix, requestVisualBits, requestVisualSignature) {
     try {
         if (!scannedMatrix && !requestVisualBits && !requestVisualSignature) return null;
@@ -393,6 +476,10 @@ async function openSourceFastSealReader(scannedMatrix, requestVisualBits, reques
     }
 }
 
+// ======================================================
+// ANALYSE VISUELLE CLASSIQUE ET CASCADE ROBUSTE
+// ======================================================
+
 async function intelligentVisualAnalysis(scannedMatrix) {
     if (!scannedMatrix) {
         return { lot: null, signature: null, bits: null, confidence: 0 };
@@ -429,76 +516,9 @@ async function intelligentVisualAnalysis(scannedMatrix) {
     return { lot: null, signature: null, bits: null, confidence: 0 };
 }
 
-// ANALYSE GEMINI MISE À JOUR : Utilisation prioritaire de gemini-3.8-flash et gemini-3.7-flash (suppression des versions obsolètes 2.5)
-async function analyzeSealWithGemini(imageBuffer, mimeType = "image/jpeg") {
-    try {
-        if (!ai) {
-            console.warn("[GEMINI] Analyse annulée, IA non initialisée.");
-            return null;
-        }
-
-        console.log("[GEMINI] Début de l'analyse visuelle approfondie (Cas complexes)...");
-        const imagePart = {
-            inlineData: {
-                data: imageBuffer.toString("base64"),
-                mimeType: mimeType
-            },
-        };
-
-        let response;
-        const modelsToTry = [
-            "models/gemini-3.8-flash", 
-            "models/gemini-3.7-flash"
-        ];
-
-        let successModel = null;
-        for (const modelName of modelsToTry) {
-            let attempts = 0;
-            const maxRetries = 1;
-            
-            while (attempts <= maxRetries) {
-                try {
-                    console.log(`[GEMINI] Tentative d'analyse approfondie avec le modèle : ${modelName} (Essai ${attempts + 1})`);
-                    response = await ai.models.generateContent({
-                        model: modelName, 
-                        contents: [
-                            imagePart,
-                            "Analyse cette image de sceau de certification ANOR complexe. Extrais textuellement et fidèlement le numéro de lot visible (ex: LOT 54P-2026, LOT 01, etc.). Réponds STRICTEMENT au format JSON brut, sans balises markdown (pas de ```json), avec exactement ces clés : 'lot' (string ou null), 'reference' (string ou null), 'confidence' (nombre entre 0 et 1)."
-                        ],
-                    });
-                    if (response && response.text) {
-                        successModel = modelName;
-                        break;
-                    }
-                } catch (modelErr) {
-                    console.warn(`[GEMINI WARNING] Échec du modèle ${modelName} (Essai ${attempts + 1}):`, modelErr.message);
-                    if (modelErr.message && (modelErr.message.includes("503") || modelErr.message.includes("429") || modelErr.message.includes("404"))) {
-                        attempts++;
-                        if (attempts <= maxRetries) {
-                            const delay = 1000 * Math.pow(2, attempts - 1);
-                            await new Promise(resolve => setTimeout(resolve, delay));
-                            continue;
-                        }
-                    }
-                    break;
-                }
-            }
-            if (successModel) break;
-        }
-
-        if (!response || !response.text) {
-            return { lot: null, reference: null, confidence: 0, fallbackLocal: true };
-        }
-
-        const textResponse = response.text.trim();
-        const cleanJsonStr = textResponse.replace(/```json/gi, "").replace(/```/g, "").trim();
-        const parsed = JSON.parse(cleanJsonStr);
-        return parsed;
-    } catch (error) {
-        console.error("[GEMINI VISION ERROR - ALL MODELS FAILED]", error.message);
-        return null;
-    }
-}
+// ======================================================
+// MOTEUR DE SÉRIALISATION UNITAIRE & MANIFESTE INDUSTRIEL
+// ======================================================
 
 async function generateUnitSerialsAndManifest(lotCode, totalQuantity, masterSignature) {
     const batchSize = 5000;
@@ -540,6 +560,10 @@ async function generateUnitSerialsAndManifest(lotCode, totalQuantity, masterSign
     return csvContent;
 }
 
+// ======================================================
+// FICHIERS STATIQUES & ROUTES DE BASE
+// ======================================================
+
 app.use(express.static(path.join(__dirname)));
 app.use("/dashboard", express.static(path.join(__dirname, "dashboard")));
 app.use("/product_audit", express.static(path.join(__dirname, "product_audit")));
@@ -550,6 +574,10 @@ app.use("/forge", express.static(path.join(__dirname, "forge")));
 app.get(["/", "/index.html"], (req, res) => {
     res.redirect("/dashboard/index.html");
 });
+
+// ======================================================
+// HEALTH CHECK & DASHBOARD STATS API
+// ======================================================
 
 app.get("/health", async (req, res) => {
     let database = "DOWN";
@@ -566,7 +594,7 @@ app.get("/health", async (req, res) => {
         engine: `ANOR Core ${SERVER_VERSION}`,
         database,
         openSourceFastAPI: "ACTIVE (< 1s Response)",
-        gemini: ai ? "CONFIGURED (Complex Fallback - Gemini 3.8/3.7)" : "NOT_CONFIGURED",
+        vlmEngine: process.env.VLM_API_KEY ? "QWEN2.5-VL ACTIVE" : "NOT_CONFIGURED",
         uptime: process.uptime(),
         memory: process.memoryUsage().rss,
         node: process.version
@@ -630,6 +658,10 @@ app.get("/api/dashboard/stats", async (req, res) => {
         return apiError(res, 500, "DASHBOARD_ERROR", "Impossible de charger les statistiques.");
     }
 });
+
+// ======================================================
+// ROUTE API : INTELLIGENCE STATISTIQUE & COMPORTEMENTALE
+// ======================================================
 
 app.get("/api/intelligence/data", async (req, res) => {
     try {
@@ -755,7 +787,10 @@ app.get("/api/intelligence/data", async (req, res) => {
     }
 });
 
-// CHAT ASSISTANT MISE À JOUR : Utilisation prioritaire des modèles gemini-3.8-flash et gemini-3.7-flash
+// ======================================================
+// ROUTE API : CHAT ASSISTANT STATISTIQUE
+// ======================================================
+
 app.post("/api/intelligence/chat", async (req, res) => {
     try {
         const { prompt } = req.body;
@@ -770,35 +805,10 @@ app.post("/api/intelligence/chat", async (req, res) => {
             contextSummary = JSON.stringify(products);
         }
 
-        if (ai) {
-            let chatResponse;
-            try {
-                chatResponse = await ai.models.generateContent({
-                    model: "models/gemini-3.8-flash",
-                    contents: [
-                        `Tu es l'assistant statistique intelligent de pointe de l'ANOR (Agence des Normes et de la Qualité du Cameroun) propulsé par Gemini. Réponds de manière professionnelle, analytique et souveraine. Voici un extrait des données actuelles : ${contextSummary}`,
-                        `Question de l'utilisateur : ${prompt}`
-                    ]
-                });
-            } catch (chatErr) {
-                console.warn("[CHAT WARNING] Échec Gemini principal, bascule sur modèle secondaire...", chatErr.message);
-                chatResponse = await ai.models.generateContent({
-                    model: "models/gemini-3.7-flash",
-                    contents: [
-                        `Tu es l'assistant statistique intelligent de l'ANOR. Voici les données actuelles : ${contextSummary}`,
-                        `Question : ${prompt}`
-                    ]
-                });
-            }
-
-            const replyText = chatResponse.text ? chatResponse.text.trim() : "Analyse validée par le moteur ANOR Core.";
-            return apiSuccess(res, { success: true, reply: replyText });
-        } else {
-            return apiSuccess(res, {
-                success: true,
-                reply: `Synthèse analytique (Mode Local) : L'examen des flux pour "${prompt}" est stable.`
-            });
-        }
+        return apiSuccess(res, {
+            success: true,
+            reply: `Synthèse analytique ANOR Core : Examen des flux et des données en cours pour "${prompt}".`
+        });
     } catch (err) {
         console.error("[INTELLIGENCE CHAT ERROR]", err.message);
         return apiError(res, 500, "CHAT_ERROR", "Erreur lors du traitement de la requête.");
@@ -808,6 +818,10 @@ app.post("/api/intelligence/chat", async (req, res) => {
 app.get("/api/intelligence/stats", async (req, res) => {
     return app._router.handle({ ...req, url: "/api/dashboard/stats", method: "GET" }, res);
 });
+
+// ======================================================
+// ROUTE API : REGISTRE NATIONAL DES LOTS & ENTREPRISES
+// ======================================================
 
 app.get("/api/registry/data", async (req, res) => {
     try {
@@ -834,6 +848,10 @@ app.get("/api/registry/data", async (req, res) => {
         return apiError(res, 500, "REGISTRY_ERROR", "Impossible de charger les données du registre.");
     }
 });
+
+// ======================================================
+// ROUTE API : SURVEILLANCE NATIONALE
+// ======================================================
 
 const VILLES_CAMEROUN_GPS = {
     "yaounde": [3.8480, 11.5021],
@@ -873,7 +891,7 @@ app.get("/api/surveillance/data", async (req, res) => {
     try {
         const { region } = req.query;
 
-        const { data: tousLesScans, error: scanErr } = await supabase
+        const { data: tousLesScans } = await supabase
             .from("produits_unitaires_scans")
             .select("*")
             .order("created_at", { ascending: false })
@@ -987,19 +1005,27 @@ app.get("/api/surveillance/data", async (req, res) => {
     }
 });
 
+// ======================================================
+// ROUTE API : AUDIT DE SÉCURITÉ (MOBILE APK)
+// ======================================================
+
 app.post("/api/security/audit", (req, res) => {
     try {
         const auditData = req.body || {};
         console.log("[ANOR SECURITY AUDIT] Rapport reçu de l'APK:", JSON.stringify(auditData));
         return apiSuccess(res, { 
             status: "AUDIT_RECEIVED", 
-            message: "Rapport de sécurité pris en compte par le noyau 17.9.12." 
+            message: "Rapport de sécurité pris en compte par le noyau 17.9.10." 
         });
     } catch (error) {
         console.error("[SECURITY AUDIT ERROR]", error.message);
         return apiError(res, 500, "AUDIT_ERROR", "Échec du traitement de l'audit.");
     }
 });
+
+// ======================================================
+// GENERATION DU SCEAU & KIT DE SÉRIALISATION
+// ======================================================
 
 app.post(
     "/api/seals/generate-batch-seal",
@@ -1155,6 +1181,10 @@ Système Souverain de Certification - ANOR Engine ${SERVER_VERSION}
     }
 );
 
+// ======================================================
+// VERIFICATION DU SCEAU, GESTION DE LA SÉRIE ET TRAÇABILITÉ TEMPO-GÉOGRAPHIQUE
+// ======================================================
+
 app.post(
     "/api/seals/verify",
     scanLimiter,
@@ -1187,6 +1217,9 @@ app.post(
                 }
             }
 
+            // ==============================================================
+            // ÉTAPE 1 : API OPEN SOURCE ULTRA-RAPIDE DE LECTURE DE SCEAU
+            // ==============================================================
             const fastOpenSourceResult = await openSourceFastSealReader(scannedMatrix, requestVisualBits, requestVisualSignature);
             
             let row = null;
@@ -1236,31 +1269,35 @@ app.post(
                 }
             }
 
+            // ==============================================================
+            // ÉTAPE 2 : BASCULE SUR QWEN2.5-VL SI COMPLEXE OU NON TROUVÉ
+            // ==============================================================
             if (!row && scannedMatrix) {
-                verificationMode = "COMPLEX_GEMINI_FALLBACK";
+                verificationMode = "QWEN_VLM_FALLBACK";
 
-                let geminiResult = null;
                 if (typeof scannedMatrix === "string" && scannedMatrix.startsWith("data:image")) {
                     const matches = scannedMatrix.match(/^data:(.+);base64,(.+)$/);
                     if (matches) {
-                        const mimeType = matches[1];
-                        const bufferData = Buffer.from(matches[2], "base64");
-                        
-                        geminiResult = await analyzeSealWithGemini(bufferData, mimeType);
-                        
-                        if (geminiResult && geminiResult.lot) {
-                            const extractedCleanLot = String(geminiResult.lot).trim();
-                            const { data } = await supabase
-                                .from("produits_certifies")
-                                .select("*")
-                                .ilike("lot", extractedCleanLot)
-                                .maybeSingle();
-
-                            if (data) {
-                                row = data;
-                                verificationMode = "GEMINI_VISION_AI_EXACT";
-                                matchConfidence = geminiResult.confidence || 0.98;
+                        const base64Data = matches[2];
+                        try {
+                            const qwenResult = await verifySealWithQwen(base64Data, lot);
+                            if (qwenResult && qwenResult.status === "authentic") {
+                                const cleanLot = lot ? String(lot).trim() : null;
+                                if (cleanLot) {
+                                    const { data } = await supabase
+                                        .from("produits_certifies")
+                                        .select("*")
+                                        .ilike("lot", cleanLot)
+                                        .maybeSingle();
+                                    if (data) {
+                                        row = data;
+                                        verificationMode = "QWEN_VISION_EXACT";
+                                        matchConfidence = qwenResult.confidence || 0.98;
+                                    }
+                                }
                             }
+                        } catch (qwenErr) {
+                            console.warn("[QWEN VISION ERROR]", qwenErr.message);
                         }
                     }
                 }
@@ -1463,6 +1500,10 @@ app.post(
     }
 );
 
+// ======================================================
+// FEEDBACK / TELEMETRIE
+// ======================================================
+
 app.post(
     "/api/seals/feedback",
     scanLimiter,
@@ -1490,6 +1531,10 @@ app.post(
     }
 );
 
+// ======================================================
+// ERREURS MULTER / CORS / SERVEUR
+// ======================================================
+
 app.use((err, req, res, next) => {
     if (err && err.message === "INVALID_FILE_TYPE") { return apiError(res, 400, "INVALID_FILE_TYPE", "Le format de fichier téléversé n'est pas autorisé."); }
     if (err && err.code === "LIMIT_FILE_SIZE") { return apiError(res, 413, "FILE_TOO_LARGE", "Le fichier dépasse la taille maximale autorisée de 10 MB."); }
@@ -1498,11 +1543,19 @@ app.use((err, req, res, next) => {
     return apiError(res, 500, "SERVER_ERROR", isProduction ? "Erreur interne du serveur." : err.message);
 });
 
+// ======================================================
+// ROUTE 404
+// ======================================================
+
 app.use((req, res) => { return apiError(res, 404, "ROUTE_NOT_FOUND", "Route inexistante."); });
+
+// ======================================================
+// DEMARRAGE
+// ======================================================
 
 const server = app.listen(PORT, "0.0.0.0", () => {
     console.log("======================================================");
-    console.log(`ANOR Backend v${SERVER_VERSION} (API Open-Source Ultra-Rapide + Gemini Cascade Active)`);
+    console.log(`ANOR Backend v${SERVER_VERSION} (API Open-Source Ultra-Rapide + Qwen2.5-VL Active)`);
     console.log(`Port: ${PORT}`);
     console.log(`Environment: ${process.env.NODE_ENV || "development"}`);
     console.log(`CORS origins: ${allowedOrigins.join(", ") || "aucune"}`);
