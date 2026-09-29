@@ -483,27 +483,54 @@ async function analyzeSealWithGemini(imageBuffer, mimeType = "image/jpeg") {
             return null;
         }
 
-        console.log("[GEMINI] Début de l'analyse visuelle optimisée (< 3s)...");
-        
-        // Optimisation du buffer : redimensionnement / compression basique si nécessaire ou transmission directe ultra-rapide
-        const optimizedBuffer = imageBuffer; // Le buffer est déjà prétraité au niveau de l'appelant
-
+        console.log("[GEMINI] Début de l'analyse visuelle approfondie (Cas complexes)...");
         const imagePart = {
             inlineData: {
-                data: optimizedBuffer.toString("base64"),
+                data: imageBuffer.toString("base64"),
                 mimeType: mimeType
             },
         };
 
-        const modelName = "models/gemini-3.8-flash";
-        
-        const response = await ai.models.generateContent({
-            model: modelName, 
-            contents: [
-                imagePart,
-                "Analyse cette image de sceau de certification ANOR. Extrais textuellement le numéro de lot visible (ex: LOT 54P-2026, LOT 01, etc.). Réponds STRICTEMENT au format JSON brut, sans balises markdown (pas de ```json), avec exactement ces clés : 'lot' (string ou null), 'reference' (string ou null), 'confidence' (nombre entre 0 et 1)."
-            ],
-        });
+        let response;
+        const modelsToTry = [
+            "models/gemini-2.5-flash", 
+            "models/gemini-3.7-flash"
+        ];
+
+        let successModel = null;
+        for (const modelName of modelsToTry) {
+            let attempts = 0;
+            const maxRetries = 1;
+            
+            while (attempts <= maxRetries) {
+                try {
+                    console.log(`[GEMINI] Tentative d'analyse approfondie avec le modèle : ${modelName} (Essai ${attempts + 1})`);
+                    response = await ai.models.generateContent({
+                        model: modelName, 
+                        contents: [
+                            imagePart,
+                            "Analyse cette image de sceau de certification ANOR complexe. Extrais textuellement et fidèlement le numéro de lot visible (ex: LOT 54P-2026, LOT 01, etc.). Réponds STRICTEMENT au format JSON brut, sans balises markdown (pas de ```json), avec exactement ces clés : 'lot' (string ou null), 'reference' (string ou null), 'confidence' (nombre entre 0 et 1)."
+                        ],
+                    });
+                    if (response && response.text) {
+                        successModel = modelName;
+                        break;
+                    }
+                } catch (modelErr) {
+                    console.warn(`[GEMINI WARNING] Échec du modèle ${modelName} (Essai ${attempts + 1}):`, modelErr.message);
+                    if (modelErr.message && modelErr.message.includes("503")) {
+                        attempts++;
+                        if (attempts <= maxRetries) {
+                            const delay = 1000 * Math.pow(2, attempts - 1);
+                            await new Promise(resolve => setTimeout(resolve, delay));
+                            continue;
+                        }
+                    }
+                    break;
+                }
+            }
+            if (successModel) break;
+        }
 
         if (!response || !response.text) {
             return { lot: null, reference: null, confidence: 0, fallbackLocal: true };
@@ -514,7 +541,7 @@ async function analyzeSealWithGemini(imageBuffer, mimeType = "image/jpeg") {
         const parsed = JSON.parse(cleanJsonStr);
         return parsed;
     } catch (error) {
-        console.error("[GEMINI VISION ERROR - OPTIMIZED]", error.message);
+        console.error("[GEMINI VISION ERROR - ALL MODELS FAILED]", error.message);
         return null;
     }
 }
@@ -597,7 +624,7 @@ app.get("/health", async (req, res) => {
         engine: `ANOR Core ${SERVER_VERSION}`,
         database,
         openSourceFastAPI: "ACTIVE (< 1s Response)",
-        gemini: ai ? "CONFIGURED (Optimized Flash)" : "NOT_CONFIGURED",
+        gemini: ai ? "CONFIGURED (Complex Fallback)" : "NOT_CONFIGURED",
         uptime: process.uptime(),
         memory: process.memoryUsage().rss,
         node: process.version
@@ -812,16 +839,16 @@ app.post("/api/intelligence/chat", async (req, res) => {
             let chatResponse;
             try {
                 chatResponse = await ai.models.generateContent({
-                    model: "models/gemini-2.5-flash",
+                    model: "models/gemini-3.7-flash",
                     contents: [
                         `Tu es l'assistant statistique intelligent de pointe de l'ANOR (Agence des Normes et de la Qualité du Cameroun) propulsé par Gemini. Réponds de manière professionnelle, analytique et souveraine. Voici un extrait des données actuelles : ${contextSummary}`,
                         `Question de l'utilisateur : ${prompt}`
                     ]
                 });
             } catch (chatErr) {
-                console.warn("[CHAT WARNING] Échec Gemini principal:", chatErr.message);
+                console.warn("[CHAT WARNING] Échec Gemini principal, bascule sur modèle secondaire...", chatErr.message);
                 chatResponse = await ai.models.generateContent({
-                    model: "models/gemini-2.5-flash",
+                    model: "models/gemini-3.8-flash",
                     contents: [
                         `Tu es l'assistant statistique intelligent de l'ANOR. Voici les données actuelles : ${contextSummary}`,
                         `Question : ${prompt}`
@@ -1224,21 +1251,10 @@ app.post(
                 return apiError(res, 400, "INVALID_CLIENT", "Client non valide ou rejeté par la politique de sécurité.");
             }
 
-            let {
+            const {
                 scannedMatrix, lot, serie: requestSerie, visualBits: requestVisualBits, visualSignature: requestVisualSignature,
                 deviceMetadata
             } = req.body;
-
-            // PRÉTRAITMEENT ET COMPRESSION OPTIMISÉE DE L'IMAGE CÔTÉ SERVEUR (POUR DESCENDRE SOUS LES 2 SECONDES)
-            if (typeof scannedMatrix === "string" && scannedMatrix.startsWith("data:image")) {
-                const parts = scannedMatrix.split(",");
-                if (parts.length === 2) {
-                    // Nettoyage et sécurisation du payload image pour alléger la charge transmise à l'API de vision
-                    const rawBase64Data = parts[1];
-                    // On s'assure que si l'image est trop lourde, on l'encapsule proprement
-                    scannedMatrix = `data:image/jpeg;base64,${rawBase64Data}`;
-                }
-            }
 
             const geoResolved = resolveScanCoordinates(req.body);
             const currentLat = geoResolved.latitude;
@@ -1593,7 +1609,7 @@ app.use((req, res) => { return apiError(res, 404, "ROUTE_NOT_FOUND", "Route inex
 
 const server = app.listen(PORT, "0.0.0.0", () => {
     console.log("======================================================");
-    console.log(`ANOR Backend v${SERVER_VERSION} (API Open-Source Ultra-Rapide + Gemini Flash Optimisé)`);
+    console.log(`ANOR Backend v${SERVER_VERSION} (API Open-Source Ultra-Rapide + Gemini Cascade Active)`);
     console.log(`Port: ${PORT}`);
     console.log(`Environment: ${process.env.NODE_ENV || "development"}`);
     console.log(`CORS origins: ${allowedOrigins.join(", ") || "aucune"}`);
