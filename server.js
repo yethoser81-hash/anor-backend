@@ -814,7 +814,7 @@ app.post("/api/intelligence/chat", async (req, res) => {
             } catch (chatErr) {
                 console.warn("[CHAT WARNING] Échec Gemini principal, bascule sur modèle secondaire...", chatErr.message);
                 chatResponse = await ai.models.generateContent({
-                    model: "models/gemini-3.8-flash",
+                    model: "models/gemini-3.5-flash-lite",
                     contents: [
                         `Tu es l'assistant statistique intelligent de l'ANOR. Voici les données actuelles : ${contextSummary}`,
                         `Question : ${prompt}`
