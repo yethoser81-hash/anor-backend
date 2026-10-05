@@ -251,7 +251,8 @@ const defaultAllowedOrigins = [
     "http://localhost",
     "https://localhost",
     "capacitor://localhost",
-    "https://anor-backend.onrender.com"
+    "https://anor-backend.onrender.com",
+    "null" // <--- Indispensable pour les WebViews mobiles locales et le protocole file://
 ];
 
 const configuredOrigins = String(
