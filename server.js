@@ -69,6 +69,15 @@ app.disable("x-powered-by");
 // UTILITAIRES DE SÉCURITÉ & NORMALISATION AVANCÉS
 // ======================================================
 
+function formatDateOnly(dateValue) {
+    if (!dateValue) return "N/A";
+    const str = String(dateValue).trim();
+    if (str.includes("T")) {
+        return str.split("T")[0];
+    }
+    return str;
+}
+
 function normalizeVisualBits(bits) {
     if (typeof bits === "string" && /^[01]{51}$/.test(bits)) {
         return bits;
@@ -626,6 +635,7 @@ app.get("/api/dashboard/stats", async (req, res) => {
 
                 fluxRecents.push({
                     lot: p.lot || p.certificate_code || "N/A",
+                    numero_lot: p.lot || p.certificate_code || "N/A",
                     serie: p.serie || "N/A",
                     localisation: p.ville || p.region || "Yaoundé",
                     horodatage: p.created_at ? new Date(p.created_at).toLocaleString("fr-FR") : "Récemment",
@@ -857,10 +867,11 @@ app.get("/api/registry/data", async (req, res) => {
 
         const items = (products || []).map(p => ({
             lot: p.lot || p.certificate_code || "N/A",
+            numero_lot: p.lot || p.certificate_code || "N/A",
             entreprise: p.nom_producteur || "Producteur Agréé",
             produit: p.nom_produit || "Produit Certifié",
             quantite: p.quantite ? Number(p.quantite).toLocaleString("fr-FR") : "0",
-            dateEmission: p.created_at ? new Date(p.created_at).toLocaleDateString("fr-FR") : "Récemment",
+            dateEmission: formatDateOnly(p.created_at),
             statut: p.statut || "CERTIFIÉ"
         }));
 
@@ -974,9 +985,10 @@ app.get("/api/surveillance/data", async (req, res) => {
                 });
 
                 history.push({
-                    date: p.created_at ? new Date(p.created_at).toLocaleDateString("fr-FR") : "Récemment",
+                    date: formatDateOnly(p.created_at),
                     produit: p.nom_produit || "Produit Certifié",
                     lot: p.lot || p.certificate_code || "N/A",
+                    numero_lot: p.lot || p.certificate_code || "N/A",
                     entreprise: p.nom_producteur || "Inconnu",
                     ville: p.ville || "Yaoundé",
                     region: p.region || "Centre",
@@ -1002,7 +1014,7 @@ app.get("/api/surveillance/data", async (req, res) => {
                     coords: coordsScan,
                     type: s.statut || "CONFORME",
                     color: sColor,
-                    details: `Ville: ${s.ville || 'Yaoundé'} - ${s.created_at ? new Date(s.created_at).toLocaleDateString("fr-FR") : 'Récemment'}`
+                    details: `Ville: ${s.ville || 'Yaoundé'} - ${formatDateOnly(s.created_at)}`
                 });
             });
         }
@@ -1136,12 +1148,17 @@ app.post(
                 if (!visuelUrl) { visuelUrl = `data:${visuelBufferData.mimetype};base64,${visuelBufferData.buffer.toString("base64")}`; }
             }
 
+            const cleanCertDate = formatDateOnly(date_certificat_conformite);
+            const cleanFabDate = formatDateOnly(date_fabrication);
+            const cleanExpDate = formatDateOnly(date_peremption);
+
             const payloadDB = {
                 certificate_code: certificateCode, lot: certificateCode, serie: productSerie, quantite: parsedQuantite, type_emballage,
                 nom_produit: nom_produit || null, nom_producteur: nom_producteur || null,
                 composition: composition || null, pays_origine: pays_origine || null,
-                date_certificat_conformite: date_certificat_conformite || null,
-                date_fabrication: date_fabrication || null, date_peremption: date_peremption || null,
+                date_certificat_conformite: cleanCertDate !== "N/A" ? cleanCertDate : null,
+                date_fabrication: cleanFabDate !== "N/A" ? cleanFabDate : null, 
+                date_peremption: cleanExpDate !== "N/A" ? cleanExpDate : null,
                 certificat_pdf_url: pdfUrl, visuel_produit_url: visuelUrl,
                 glyph_payload: { visualVersion: VISUAL_VERSION, secureSignature, lot: certificateCode, serie: productSerie, visualBits, visualSignature },
                 visual_bits: visualBits, visual_signature: visualSignature,
@@ -1178,19 +1195,26 @@ SYSTEME SOUVERAIN DE CERTIFICATION - NOTICE OFFICIELLE DE LOT
 3. AVIS JURIDIQUE ET RÉPRESSION DES FRAUDES :
    - Le sceau numérique ANOR est protégé par les lois de la République du Cameroun. Toute contrefaçon est passible de poursuites.
 
-Fait à Yaoundé, le ${new Date().toLocaleDateString("fr-FR")}
+Fait à Yaoundé, le ${formatDateOnly(new Date())}
 Système Souverain de Certification - ANOR Engine ${SERVER_VERSION}
 `;
 
             const zip = new JSZip();
             zip.file("NOTICE_DIMPRESSION_ET_INSTRUCTIONS.txt", printNoticeContent);
             zip.file("manifeste_serialisation_unitaire.csv", csvManifestContent);
-            zip.file("certification.json", JSON.stringify({ lot: certificateCode, serie: productSerie, nom_produit, nom_producteur, quantite: parsedQuantite, visualVersion: VISUAL_VERSION, visualBits, visualSignature, signature_ia: secureSignature, created_at: new Date().toISOString() }, null, 4));
+            zip.file("certification.json", JSON.stringify({ lot: certificateCode, numero_lot: certificateCode, serie: productSerie, nom_produit, nom_producteur, quantite: parsedQuantite, visualVersion: VISUAL_VERSION, visualBits, visualSignature, signature_ia: secureSignature, created_at: new Date().toISOString() }, null, 4));
             zip.file("sceau_ANOR_MASTER.png", imageBuffer);
             const zipBuffer = await zip.generateAsync({ type: "nodebuffer", compression: "DEFLATE", compressionOptions: { level: 9 } });
 
             return apiSuccess(res, {
-                message: "Sceau et sérialisation unitaire générés avec succès.", lot: certificateCode, serie: productSerie, sha256_hash: secureSignature, visualVersion: VISUAL_VERSION, visualBits, visualSignature,
+                message: "Sceau et sérialisation unitaire générés avec succès.", 
+                lot: certificateCode, 
+                numero_lot: certificateCode, 
+                serie: productSerie, 
+                sha256_hash: secureSignature, 
+                visualVersion: VISUAL_VERSION, 
+                visualBits, 
+                visualSignature,
                 imageUrl: `data:image/png;base64,${rawBase64}`,
                 zipUrl: `data:application/zip;base64,${zipBuffer.toString("base64")}`,
                 data: data?.[0] || null,
@@ -1219,9 +1243,11 @@ app.post(
             }
 
             const {
-                scannedMatrix, lot, serie: requestSerie, visualBits: requestVisualBits, visualSignature: requestVisualSignature,
+                scannedMatrix, lot, numero_lot, serie: requestSerie, visualBits: requestVisualBits, visualSignature: requestVisualSignature,
                 deviceMetadata
             } = req.body;
+
+            const targetLot = lot || numero_lot;
 
             const geoResolved = resolveScanCoordinates(req.body);
             const currentLat = geoResolved.latitude;
@@ -1242,7 +1268,7 @@ app.post(
             const normalizedRequestBits = normalizeVisualBits(requestVisualBits || scannedMatrix?.bits || scannedMatrix?.visualBits);
             const requestSignature = typeof requestVisualSignature === "string" ? requestVisualSignature.trim() : (typeof scannedMatrix?.signature === "string" ? scannedMatrix.signature.trim() : (normalizedRequestBits ? `ANOR51:${normalizedRequestBits}` : null));
 
-            if (!lot && !scannedMatrix && !normalizedRequestBits && !requestSignature) {
+            if (!targetLot && !scannedMatrix && !normalizedRequestBits && !requestSignature) {
                 return apiError(res, 400, "MISSING_SCAN", "Données de scan insuffisantes.");
             }
 
@@ -1250,8 +1276,8 @@ app.post(
             let verificationMode = "LOT";
             let matchConfidence = 1.0;
 
-            if (lot) {
-                const cleanLot = String(lot).trim();
+            if (targetLot) {
+                const cleanLot = String(targetLot).trim();
                 const { data, error } = await supabase
                     .from("produits_certifies")
                     .select("*")
@@ -1355,7 +1381,7 @@ app.post(
             }
 
             if (!row) {
-                securityLog(req, "UNKNOWN_SEAL_ATTEMPT", { lot: lot || "N/A", verificationMode });
+                securityLog(req, "UNKNOWN_SEAL_ATTEMPT", { lot: targetLot || "N/A", verificationMode });
                 return apiError(res, 404, "UNKNOWN_SEAL", "Sceau inconnu ou non authentifié.", { status: "CONTREFAÇON_REJETEE", processingTime: Date.now() - startTime, engineVersion: SERVER_VERSION });
             }
 
@@ -1446,6 +1472,7 @@ app.post(
                 securityAlert: warningFlag || row.security_alert,
                 motif_alerte: motifAlerte,
                 lot: row.lot, 
+                numero_lot: row.lot,
                 batch: row.lot,
                 serie: currentSerie,
                 nom_produit: row.nom_produit || "Produit Certifié Conforme", 
@@ -1466,10 +1493,10 @@ app.post(
                 certificatPdfUrl: row.certificat_pdf_url || null,
                 scan_count: currentScanCount, 
                 scanCount: currentScanCount,
-                certified_at: row.created_at || row.date_certificat_conformite, 
-                certDate: row.date_certificat_conformite || row.created_at,
-                prodDate: row.date_fabrication || "N/A", 
-                expDate: row.date_peremption || "N/A",
+                certified_at: formatDateOnly(row.created_at || row.date_certificat_conformite), 
+                certDate: formatDateOnly(row.date_certificat_conformite || row.created_at),
+                prodDate: formatDateOnly(row.date_fabrication), 
+                expDate: formatDateOnly(row.date_peremption),
                 norme: "ANOR NC-ISO", 
                 processingTime: Date.now() - startTime, 
                 processingTimeMs: Date.now() - startTime,
@@ -1500,11 +1527,12 @@ app.post(
     scanLimiter,
     async (req, res) => {
         try {
-            const { lot, luminance, isLowLight, contrastScore, rawFrameSnippet } = req.body;
+            const { lot, numero_lot, luminance, isLowLight, contrastScore, rawFrameSnippet } = req.body;
+            const targetLot = lot || numero_lot;
             const safeSnippet = typeof rawFrameSnippet === "string" ? rawFrameSnippet.substring(0, 500) : null;
 
             const { error } = await supabase.from("telemetrie_scans").insert([{
-                lot: lot ? String(lot).trim() : "INCONNU",
+                lot: targetLot ? String(targetLot).trim() : "INCONNU",
                 luminance: typeof luminance === "number" ? luminance : null,
                 is_low_light: !!isLowLight,
                 contrast_score: typeof contrastScore === "number" ? contrastScore : null,
