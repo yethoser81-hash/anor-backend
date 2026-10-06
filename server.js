@@ -1519,6 +1519,28 @@ app.post(
 );
 
 // ======================================================
+// ROUTE API : SYNCHRONISATION OFF-LINE (DESCENTE DES SCEAUX)
+// ======================================================
+
+app.get("/api/seals/sync", async (req, res) => {
+    try {
+        // Récupère les sceaux enregistrés pour alimenter la base SQLite locale des mobiles
+        const { data: seals, error } = await supabase
+            .from("produits_certifies")
+            .select("lot, visual_bits, visual_signature, nom_produit, nom_producteur, statut, date_certificat_conformite")
+            .limit(2000);
+
+        if (error) throw error;
+
+        // Retourne le tableau JSON directement attendu par syncLocalDatabase() dans app.js
+        return res.status(200).json(seals || []);
+    } catch (err) {
+        console.error("[SYNC ERROR]", err.message);
+        return apiError(res, 500, "SYNC_ERROR", "Impossible de synchroniser les sceaux locaux.");
+    }
+});
+
+// ======================================================
 // FEEDBACK / TELEMETRIE
 // ======================================================
 
