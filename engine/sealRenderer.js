@@ -1,7 +1,7 @@
 /**
  * ====================================================================
  * ANOR CHECK
- * SEAL RENDERER V7.1 - BLOC TEXTE ÉLARGI & HAUTE LISIBILITÉ (2.5CM)
+ * SEAL RENDERER V7.2 - MONOCHROME NOIR & BLANC / EFFET 2D & RELIEF
  * ====================================================================
  */
 
@@ -151,8 +151,12 @@ const sealRenderer = {
         const canvas = createCanvas(width, height);
         const ctx = canvas.getContext('2d');
 
-        const GEOMETRY_COLOR = options.geometryColor || '#3B9CFF';
-        const backgroundColor = options.backgroundColor;
+        // Configuration strict Noir & Blanc par défaut ou couleur sur demande
+        const GEOMETRY_COLOR = options.geometryColor || '#000000';
+        const TEXT_PRIMARY_COLOR = options.textColor || '#000000';
+        const TEXT_SECONDARY_COLOR = options.subTextColor || '#000000';
+        const backgroundColor = options.backgroundColor || '#FFFFFF';
+        const enable2DEffect = options.enable2DEffect !== false; // Effet relief 2D activé par défaut
 
         const geometry = this.getGeometry(width, height);
         const {
@@ -168,12 +172,11 @@ const sealRenderer = {
 
         const scale = outerRadius / CANONICAL_OUTER_RADIUS;
 
-        if (backgroundColor) {
-            ctx.save();
-            ctx.fillStyle = backgroundColor;
-            ctx.fillRect(0, 0, width, height);
-            ctx.restore();
-        }
+        // Arrière-plan blanc pur
+        ctx.save();
+        ctx.fillStyle = backgroundColor;
+        ctx.fillRect(0, 0, width, height);
+        ctx.restore();
 
         const rawBatchName =
             payload.lot ||
@@ -232,18 +235,28 @@ const sealRenderer = {
         }
 
         // ------------------------------------------------------------
-        // 3. CERCLE EXTERIEUR
+        // EFFET RELIEF 2D / OMBRAGE (SI ACTIVÉ)
+        // ------------------------------------------------------------
+        if (enable2DEffect) {
+            ctx.shadowColor = 'rgba(0, 0, 0, 0.25)';
+            ctx.shadowBlur = 10 * scale;
+            ctx.shadowOffsetX = 3 * scale;
+            ctx.shadowOffsetY = 4 * scale;
+        }
+
+        // ------------------------------------------------------------
+        // 3. CERCLE EXTÉRIEUR (NOIR)
         // ------------------------------------------------------------
         ctx.save();
         ctx.strokeStyle = GEOMETRY_COLOR;
-        ctx.lineWidth = 6;
+        ctx.lineWidth = 6 * scale;
         ctx.beginPath();
         ctx.arc(centerX, centerY, outerRadius, 0, Math.PI * 2);
         ctx.stroke();
         ctx.restore();
 
         // ------------------------------------------------------------
-        // 4. RENDU DU LOGO (STRICTEMENT AU CENTRE)
+        // 4. RENDU DU LOGO (CENTRE)
         // ------------------------------------------------------------
         const logoPath =
             options.logoPath ||
@@ -264,12 +277,10 @@ const sealRenderer = {
             } catch (error) {
                 console.error('[sealRenderer] Erreur lors du chargement du logo :', error);
             }
-        } else {
-            console.warn('[sealRenderer] Avertissement : Le fichier logo est introuvable au chemin :', logoPath);
         }
 
         // ------------------------------------------------------------
-        // 5. GLYPHES
+        // 5. GLYPHES (NOIR MONOCHROME)
         // ------------------------------------------------------------
         const positions = this.getVisiblePositions();
         const glyphScale = Number.isFinite(options.glyphScale)
@@ -331,6 +342,9 @@ const sealRenderer = {
 
         ctx.restore();
 
+        // Réinitialisation de l'ombre pour éviter d'alourdir le texte
+        ctx.shadowColor = 'transparent';
+
         // ------------------------------------------------------------
         // 6. MIRES CARDINALES
         // ------------------------------------------------------------
@@ -374,7 +388,7 @@ const sealRenderer = {
         ctx.restore();
 
         // ------------------------------------------------------------
-        // 7. BLOC TEXTE (LOT & SÉRIE) - PLUS LARGE & ÉPAIS (OPTIMISÉ 2.5CM)
+        // 7. BLOC TEXTE (LOT & SÉRIE) - BORDURE NOIRE & LISIBILITÉ AMÉLIORÉE
         // ------------------------------------------------------------
         ctx.save();
         ctx.textAlign = 'center';
@@ -384,13 +398,22 @@ const sealRenderer = {
         const boxWidth = 295 * scale;
         const boxHeight = 58 * scale;
 
-        ctx.fillStyle = 'rgba(255, 255, 255, 0.98)';
+        // Ombre portée sous le bloc texte pour effet 2D
+        if (enable2DEffect) {
+            ctx.shadowColor = 'rgba(0, 0, 0, 0.15)';
+            ctx.shadowBlur = 6 * scale;
+            ctx.shadowOffsetX = 2 * scale;
+            ctx.shadowOffsetY = 3 * scale;
+        }
+
+        ctx.fillStyle = '#FFFFFF';
         ctx.beginPath();
         ctx.roundRect(centerX - boxWidth / 2, textY - boxHeight / 2, boxWidth, boxHeight, 10 * scale);
         ctx.fill();
         
-        ctx.strokeStyle = '#94A3B8';
-        ctx.lineWidth = 1.8 * scale;
+        ctx.shadowColor = 'transparent';
+        ctx.strokeStyle = '#000000';
+        ctx.lineWidth = 2 * scale;
         ctx.stroke();
 
         const drawOutlinedText = (
@@ -414,7 +437,7 @@ const sealRenderer = {
             centerX,
             textY - 10 * scale,
             `bold ${Math.max(22, Math.round(28 * scale))}px sans-serif`,
-            '#0F172A'
+            TEXT_PRIMARY_COLOR
         );
 
         drawOutlinedText(
@@ -422,7 +445,7 @@ const sealRenderer = {
             centerX,
             textY + 14 * scale,
             `bold ${Math.max(18, Math.round(22 * scale))}px sans-serif`,
-            '#1D4ED8'
+            TEXT_SECONDARY_COLOR
         );
 
         ctx.restore();
