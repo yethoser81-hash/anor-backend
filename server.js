@@ -37,7 +37,7 @@ if (process.env.GEMINI_API_KEY) {
 // CACHE INTELLIGENT DE VISION (POUR RÉPONSE EN < 1 SECONDE)
 // ======================================================
 const scanCache = new Map();
-const SCAN_CACHE_TTL = 15 * 60 * 1000; // 15 minutes
+const SCAN_CACHE_TTL = 15 * 60 * 1000;
 
 setInterval(() => {
     const now = Date.now();
@@ -105,11 +105,10 @@ function calculateHammingDistance(str1, str2) {
     return distance;
 }
 
-// Formule de Haversine pour calculer la distance géographique en kilomètres entre deux points GPS
 function calculateGeographicDistanceKm(lat1, lon1, lat2, lon2) {
     if (!lat1 || !lon1 || !lat2 || !lon2) return 0;
     const toRad = (val) => (val * Math.PI) / 180;
-    const R = 6371; // Rayon de la terre en km
+    const R = 6371;
     const dLat = toRad(lat2 - lat1);
     const dLon = toRad(lon2 - lon1);
     const a =
@@ -119,9 +118,6 @@ function calculateGeographicDistanceKm(lat1, lon1, lat2, lon2) {
     return R * c;
 }
 
-// ======================================================
-// GÉOLOCALISATION AVANCÉE (GPS + PYLÔNES CELLULAIRES / FALLBACK)
-// ======================================================
 function resolveScanCoordinates(bodyData) {
     let lat = bodyData.latitude ? Number(bodyData.latitude) : null;
     let lon = bodyData.longitude ? Number(bodyData.longitude) : null;
@@ -129,11 +125,9 @@ function resolveScanCoordinates(bodyData) {
     let ville = bodyData.ville || "Yaoundé";
     let region = bodyData.region || "Centre";
 
-    // Si le GPS est désactivé ou absent, on analyse les pylônes environnants (Cell Towers / Triangulation)
     if ((!lat || !lon) && bodyData.cellTowers && Array.isArray(bodyData.cellTowers) && bodyData.cellTowers.length > 0) {
         method = "CELL_TOWER_TRIANGULATION";
         
-        // Base de référence des grandes villes et hubs du Cameroun
         const cameroonHubs = {
             "Yaoundé": { lat: 3.8480, lon: 11.5021, region: "Centre" },
             "Douala": { lat: 4.0511, lon: 9.7679, region: "Littoral" },
@@ -148,14 +142,13 @@ function resolveScanCoordinates(bodyData) {
         };
 
         const targetCity = bodyData.ville && cameroonHubs[bodyData.ville] ? bodyData.ville : "Yaoundé";
-        lat = cameroonHubs[targetCity].lat + (Math.random() - 0.5) * 0.01; // Variation réaliste autour du pylône relais
+        lat = cameroonHubs[targetCity].lat + (Math.random() - 0.5) * 0.01;
         lon = cameroonHubs[targetCity].lon + (Math.random() - 0.5) * 0.01;
         ville = targetCity;
         region = cameroonHubs[targetCity].region;
 
         console.log(`[ANOR GEO-TOWER] Position estimée par pylônes cellulaires (${method}) : ${ville} (${lat}, ${lon})`);
     } else if (!lat || !lon) {
-        // Fallback régional par défaut (Yaoundé)
         method = "FALLBACK_REGIONAL_DEFAULT";
         lat = 3.8480;
         lon = 11.5021;
@@ -186,10 +179,6 @@ function isValidUserAgent(agent) {
     return true;
 }
 
-// ======================================================
-// FILTRAGE STRICT DES CHARGES UTILES (PAYLOAD SANITIZER)
-// ======================================================
-
 function deepSanitizeInput(obj) {
     if (obj && typeof obj === "object") {
         for (const key of Object.keys(obj)) {
@@ -209,10 +198,6 @@ app.use((req, res, next) => {
     }
     next();
 });
-
-// ======================================================
-// REPONSES API STANDARDISÉES
-// ======================================================
 
 function apiSuccess(res, data = {}, status = 200) {
     return res
@@ -249,10 +234,6 @@ function securityLog(req, event, details = {}) {
     );
 }
 
-// ======================================================
-// CORS POLITIQUE SOUVERAINE
-// ======================================================
-
 const defaultAllowedOrigins = [
     "http://localhost:3000",
     "http://localhost:5173",
@@ -261,7 +242,7 @@ const defaultAllowedOrigins = [
     "https://localhost",
     "capacitor://localhost",
     "https://anor-backend.onrender.com",
-    "null" // <--- Indispensable pour les WebViews mobiles locales et le protocole file://
+    "null"
 ];
 
 const configuredOrigins = String(
@@ -293,10 +274,6 @@ app.use(
     })
 );
 
-// ======================================================
-// SÉCURITÉ HTTP (HELMET & CSP)
-// ======================================================
-
 app.use(helmet({ crossOriginEmbedderPolicy: false, contentSecurityPolicy: false }));
 app.use(express.json({ limit: "50mb" }));
 app.use(express.urlencoded({ extended: true, limit: "50mb" }));
@@ -311,10 +288,6 @@ app.use((req, res, next) => {
     res.setHeader("Referrer-Policy", "strict-origin-when-cross-origin");
     next();
 });
-
-// ======================================================
-// REQUEST ID / LOGGING FORENSIC
-// ======================================================
 
 app.use((req, res, next) => {
     const startTime = Date.now();
@@ -334,10 +307,6 @@ app.use((req, res, next) => {
     next();
 });
 
-// ======================================================
-// RATE LIMITING DURCI
-// ======================================================
-
 const scanLimiter = rateLimit({
     windowMs: 60 * 1000,
     max: 60,
@@ -351,10 +320,6 @@ const scanLimiter = rateLimit({
         });
     }
 });
-
-// ======================================================
-// ANTI-REPLAY AVANCÉ
-// ======================================================
 
 const recentRequests = new Map();
 const REQUEST_TTL = 30000;
@@ -389,10 +354,6 @@ app.use((req, res, next) => {
     next();
 });
 
-// ======================================================
-// UPLOAD SÉCURISÉ
-// ======================================================
-
 const upload = multer({
     limits: { fileSize: 10 * 1024 * 1024 },
     fileFilter: (req, file, cb) => {
@@ -402,10 +363,6 @@ const upload = multer({
         return cb(new Error("INVALID_FILE_TYPE"));
     }
 });
-
-// ======================================================
-// ANALYSE VISUELLE CLASSIQUE ET GEMINI IA (ROBUSTESSE NETTOYÉE ET SECURISEE)
-// ======================================================
 
 async function intelligentVisualAnalysis(scannedMatrix) {
     if (!scannedMatrix) {
@@ -450,7 +407,7 @@ async function analyzeSealWithGemini(imageBuffer, mimeType = "image/jpeg") {
             return null;
         }
 
-        console.log("[GEMINI] Début de l'analyse visuelle du sceau (Cascade nettoyée et robuste)...");
+        console.log("[GEMINI] Début de l'analyse visuelle du sceau...");
         const imagePart = {
             inlineData: {
                 data: imageBuffer.toString("base64"),
@@ -459,8 +416,6 @@ async function analyzeSealWithGemini(imageBuffer, mimeType = "image/jpeg") {
         };
 
         let response;
-        
-        // Cascade de modèles active et stable mise à jour (gemini-3.8-flash et gemini-3.5-flash-lite)
         const modelsToTry = [
             "models/gemini-3.8-flash", 
             "models/gemini-3.5-flash-lite"
@@ -473,12 +428,12 @@ async function analyzeSealWithGemini(imageBuffer, mimeType = "image/jpeg") {
             
             while (attempts <= maxRetries) {
                 try {
-                    console.log(`[GEMINI] Tentative d'analyse avec le modèle : ${modelName} (Essai ${attempts + 1})`);
+                    console.log(`[GEMINI] Tentative avec : ${modelName} (Essai ${attempts + 1})`);
                     response = await ai.models.generateContent({
                         model: modelName, 
                         contents: [
                             imagePart,
-                            "Analyse cette image de sceau de certification ANOR. Extrais textuellement et fidèlement le numéro de lot visible (ex: LOT 54P-2026, LOT 01, etc.). Réponds STRICTEMENT au format JSON brut, sans balises markdown (pas de ```json), avec exactement ces clés : 'lot' (string ou null), 'reference' (string ou null), 'confidence' (nombre entre 0 et 1)."
+                            "Analyse cette image de sceau de certification ANOR. Extrais textuellement et fidèlement le numéro de lot visible (ex: LOT 54P-2026, LOT 01, etc.). Réponds STRICTEMENT au format JSON brut, sans balises markdown, avec exactement ces clés : 'lot' (string ou null), 'reference' (string ou null), 'confidence' (nombre entre 0 et 1)."
                         ],
                     });
                     if (response && response.text) {
@@ -486,14 +441,11 @@ async function analyzeSealWithGemini(imageBuffer, mimeType = "image/jpeg") {
                         break;
                     }
                 } catch (modelErr) {
-                    console.warn(`[GEMINI WARNING] Échec du modèle ${modelName} (Essai ${attempts + 1}):`, modelErr.message);
-                    
-                    // Gestion du repli robuste sur erreur 503 (forte demande) avec exponential backoff
+                    console.warn(`[GEMINI WARNING] Échec de ${modelName}:`, modelErr.message);
                     if (modelErr.message && modelErr.message.includes("503")) {
                         attempts++;
                         if (attempts <= maxRetries) {
-                            const delay = 1000 * Math.pow(2, attempts - 1); // Exponential backoff court
-                            console.log(`[GEMINI] Erreur 503 détectée. Attente de ${delay}ms avant nouvelle tentative...`);
+                            const delay = 1000 * Math.pow(2, attempts - 1);
                             await new Promise(resolve => setTimeout(resolve, delay));
                             continue;
                         }
@@ -504,28 +456,18 @@ async function analyzeSealWithGemini(imageBuffer, mimeType = "image/jpeg") {
             if (successModel) break;
         }
 
-        // Modèle ou bascule secondaire configurée localement si l'API Gemini est indisponible ou en erreur 503
         if (!response || !response.text) {
-            console.warn("[GEMINI FALLBACK] Échec des modèles distants. Bascule sur l'analyseur textuel/vision secondaire local...");
             return { lot: null, reference: null, confidence: 0, fallbackLocal: true };
         }
 
-        console.log(`[GEMINI] Succès de l'analyse avec le modèle : ${successModel}`);
         const textResponse = response.text.trim();
         const cleanJsonStr = textResponse.replace(/```json/gi, "").replace(/```/g, "").trim();
-        
-        const parsed = JSON.parse(cleanJsonStr);
-        console.log("[GEMINI] Résultat de l'analyse :", parsed);
-        return parsed;
+        return JSON.parse(cleanJsonStr);
     } catch (error) {
-        console.error("[GEMINI VISION ERROR - ALL MODELS FAILED]", error.message);
+        console.error("[GEMINI VISION ERROR]", error.message);
         return null;
     }
 }
-
-// ======================================================
-// MOTEUR DE SÉRIALISATION UNITAIRE & MANIFESTE INDUSTRIEL
-// ======================================================
 
 async function generateUnitSerialsAndManifest(lotCode, totalQuantity, masterSignature) {
     const batchSize = 5000;
@@ -557,19 +499,14 @@ async function generateUnitSerialsAndManifest(lotCode, totalQuantity, masterSign
                 .upsert(unitsToInsert, { onConflict: "serial_number" });
 
             if (error) {
-                console.error(`[SERIALIZATION ERROR] Erreur sur le bloc se terminant à l'index ${i}:`, error.message);
+                console.error(`[SERIALIZATION ERROR] Erreur index ${i}:`, error.message);
                 throw error;
             }
             unitsToInsert.length = 0;
         }
     }
-    console.log(`[SERIALIZATION] ${totalQuantity} unités sérialisées avec succès pour le lot ${lotCode}.`);
     return csvContent;
 }
-
-// ======================================================
-// FICHIERS STATIQUES & ROUTES DE BASE
-// ======================================================
 
 app.use(express.static(path.join(__dirname)));
 app.use("/dashboard", express.static(path.join(__dirname, "dashboard")));
@@ -582,16 +519,11 @@ app.get(["/", "/index.html"], (req, res) => {
     res.redirect("/dashboard/index.html");
 });
 
-// ======================================================
-// HEALTH CHECK & DASHBOARD STATS API
-// ======================================================
-
 app.get("/health", async (req, res) => {
     let database = "DOWN";
     try {
         const { error } = await supabase.from("produits_certifies").select("lot").limit(1);
         if (!error) { database = "UP"; } 
-        else { console.warn("[HEALTH] Supabase:", error.message); }
     } catch (error) {
         console.warn("[HEALTH] Exception:", error.message);
     }
@@ -600,7 +532,7 @@ app.get("/health", async (req, res) => {
         status: "ONLINE",
         engine: `ANOR Core ${SERVER_VERSION}`,
         database,
-        gemini: ai ? "CONFIGURED (Cascade Active Nettoyée)" : "NOT_CONFIGURED",
+        gemini: ai ? "CONFIGURED" : "NOT_CONFIGURED",
         uptime: process.uptime(),
         memory: process.memoryUsage().rss,
         node: process.version
@@ -666,10 +598,6 @@ app.get("/api/dashboard/stats", async (req, res) => {
     }
 });
 
-// ======================================================
-// ROUTE API : INTELLIGENCE STATISTIQUE & COMPORTEMENTALE
-// ======================================================
-
 app.get("/api/intelligence/data", async (req, res) => {
     try {
         const { data: products, error: prodError } = await supabase
@@ -678,13 +606,9 @@ app.get("/api/intelligence/data", async (req, res) => {
 
         if (prodError) throw prodError;
 
-        const { data: scansList, error: scanError } = await supabase
+        const { data: scansList } = await supabase
             .from("produits_unitaires_scans")
             .select("lot, region, ville, statut, created_at");
-
-        if (scanError) {
-            console.warn("[INTELLIGENCE] Impossible de charger les scans unitaires:", scanError.message);
-        }
 
         let totalVolume = 0;
         const entreprisesMap = {};
@@ -770,14 +694,12 @@ app.get("/api/intelligence/data", async (req, res) => {
         const totalProdsCount = products ? products.length : 1;
         const indiceConformiteVal = Math.max(95, 100 - ((totalAnomaliesCount / totalProdsCount) * 100)).toFixed(1) + "%";
 
-        const activeEntreprisesCount = Object.keys(entreprisesMap).length;
-
         return apiSuccess(res, {
             volumeGlobal: totalVolume > 0 ? totalVolume.toLocaleString("fr-FR") : "0",
             picAffluence: "14h00 - 15h00",
             statPeakLocation: activeRegion,
             indiceConformite: indiceConformiteVal,
-            entreprisesAuditees: String(activeEntreprisesCount),
+            entreprisesAuditees: String(Object.keys(entreprisesMap).length),
             chartTimeline: { 
                 labels: Object.keys(timelineDays), 
                 values: Object.values(timelineDays) 
@@ -786,17 +708,13 @@ app.get("/api/intelligence/data", async (req, res) => {
                 labels: Object.keys(regionCounts), 
                 values: Object.values(regionCounts) 
             },
-            comportement: comportement
+            comportement
         });
     } catch (err) {
         console.error("[INTELLIGENCE ERROR]", err.message);
         return apiError(res, 500, "INTELLIGENCE_ERROR", "Impossible de charger les données d'intelligence.");
     }
 });
-
-// ======================================================
-// ROUTE API : CHAT ASSISTANT STATISTIQUE (GEMINI + BDD)
-// ======================================================
 
 app.post("/api/intelligence/chat", async (req, res) => {
     try {
@@ -806,11 +724,7 @@ app.post("/api/intelligence/chat", async (req, res) => {
         }
 
         const { data: products } = await supabase.from("produits_certifies").select("lot, nom_produit, nom_producteur, scan_count, statut").limit(20);
-        
-        let contextSummary = "Aucun produit enregistré pour le moment.";
-        if (products && products.length > 0) {
-            contextSummary = JSON.stringify(products);
-        }
+        const contextSummary = products && products.length > 0 ? JSON.stringify(products) : "Aucun produit enregistré.";
 
         if (ai) {
             let chatResponse;
@@ -818,27 +732,25 @@ app.post("/api/intelligence/chat", async (req, res) => {
                 chatResponse = await ai.models.generateContent({
                     model: "models/gemini-3.8-flash",
                     contents: [
-                        `Tu es l'assistant statistique intelligent de pointe de l'ANOR (Agence des Normes et de la Qualité du Cameroun) propulsé par Gemini. Réponds de manière professionnelle, analytique et souveraine. Voici un extrait des données actuelles : ${contextSummary}`,
-                        `Question de l'utilisateur : ${prompt}`
+                        `Tu es l'assistant statistique intelligent de l'ANOR. Extrait de données : ${contextSummary}`,
+                        `Question : ${prompt}`
                     ]
                 });
             } catch (chatErr) {
-                console.warn("[CHAT WARNING] Échec Gemini principal, bascule sur modèle secondaire...", chatErr.message);
                 chatResponse = await ai.models.generateContent({
                     model: "models/gemini-3.5-flash-lite",
                     contents: [
-                        `Tu es l'assistant statistique intelligent de l'ANOR. Voici les données actuelles : ${contextSummary}`,
+                        `Tu es l'assistant statistique de l'ANOR. Extrait de données : ${contextSummary}`,
                         `Question : ${prompt}`
                     ]
                 });
             }
 
-            const replyText = chatResponse.text ? chatResponse.text.trim() : "Analyse validée par le moteur ANOR Core.";
-            return apiSuccess(res, { success: true, reply: replyText });
+            return apiSuccess(res, { success: true, reply: chatResponse.text ? chatResponse.text.trim() : "Analyse validée par le moteur ANOR Core." });
         } else {
             return apiSuccess(res, {
                 success: true,
-                reply: `Synthèse analytique (Mode Local) : L'examen des flux pour "${prompt}" est stable.`
+                reply: `Synthèse analytique (Mode Local) : Examen validé pour "${prompt}".`
             });
         }
     } catch (err) {
@@ -846,14 +758,6 @@ app.post("/api/intelligence/chat", async (req, res) => {
         return apiError(res, 500, "CHAT_ERROR", "Erreur lors du traitement de la requête.");
     }
 });
-
-app.get("/api/intelligence/stats", async (req, res) => {
-    return app._router.handle({ ...req, url: "/api/dashboard/stats", method: "GET" }, res);
-});
-
-// ======================================================
-// ROUTE API : REGISTRE NATIONAL DES LOTS & ENTREPRISES
-// ======================================================
 
 app.get("/api/registry/data", async (req, res) => {
     try {
@@ -881,10 +785,6 @@ app.get("/api/registry/data", async (req, res) => {
         return apiError(res, 500, "REGISTRY_ERROR", "Impossible de charger les données du registre.");
     }
 });
-
-// ======================================================
-// ROUTE API : SURVEILLANCE NATIONALE (AVEC FALLBACK GÉOGRAPHIQUE AUTOMATIQUE)
-// ======================================================
 
 const VILLES_CAMEROUN_GPS = {
     "yaounde": [3.8480, 11.5021],
@@ -924,7 +824,7 @@ app.get("/api/surveillance/data", async (req, res) => {
     try {
         const { region } = req.query;
 
-        const { data: tousLesScans, error: scanErr } = await supabase
+        const { data: tousLesScans } = await supabase
             .from("produits_unitaires_scans")
             .select("*")
             .order("created_at", { ascending: false })
@@ -1039,14 +939,10 @@ app.get("/api/surveillance/data", async (req, res) => {
     }
 });
 
-// ======================================================
-// ROUTE API : AUDIT DE SÉCURITÉ (MOBILE APK)
-// ======================================================
-
 app.post("/api/security/audit", (req, res) => {
     try {
         const auditData = req.body || {};
-        console.log("[ANOR SECURITY AUDIT] Rapport reçu de l'APK:", JSON.stringify(auditData));
+        console.log("[ANOR SECURITY AUDIT] Rapport reçu :", JSON.stringify(auditData));
         return apiSuccess(res, { 
             status: "AUDIT_RECEIVED", 
             message: "Rapport de sécurité pris en compte par le noyau 17.9.10." 
@@ -1056,10 +952,6 @@ app.post("/api/security/audit", (req, res) => {
         return apiError(res, 500, "AUDIT_ERROR", "Échec du traitement de l'audit.");
     }
 });
-
-// ======================================================
-// GENERATION DU SCEAU & KIT DE SÉRIALISATION
-// ======================================================
 
 app.post(
     "/api/seals/generate-batch-seal",
@@ -1226,10 +1118,6 @@ Système Souverain de Certification - ANOR Engine ${SERVER_VERSION}
         }
     }
 );
-
-// ======================================================
-// VERIFICATION DU SCEAU, GESTION DE LA SÉRIE ET TRAÇABILITÉ TEMPO-GÉOGRAPHIQUE
-// ======================================================
 
 app.post(
     "/api/seals/verify",
@@ -1513,104 +1401,22 @@ app.post(
             return apiSuccess(res, responsePayload);
         } catch (error) {
             console.error("Erreur vérification:", error);
-            return apiError(res, 500, "SERVER_ERROR", isProduction ? "Erreur interne pendant la vérification." : error.message);
+            return apiError(res, 500, "VERIFY_ERROR", isProduction ? "Erreur pendant la vérification." : error.message);
         }
     }
 );
 
-// ======================================================
-// ROUTE API : SYNCHRONISATION OFF-LINE (DESCENTE DES SCEAUX)
-// ======================================================
-
-app.get("/api/seals/sync", async (req, res) => {
-    try {
-        // Récupère les sceaux enregistrés pour alimenter la base SQLite locale des mobiles
-        const { data: seals, error } = await supabase
-            .from("produits_certifies")
-            .select("lot, visual_bits, visual_signature, nom_produit, nom_producteur, statut, date_certificat_conformite")
-            .limit(2000);
-
-        if (error) throw error;
-
-        // Retourne le tableau JSON directement attendu par syncLocalDatabase() dans app.js
-        return res.status(200).json(seals || []);
-    } catch (err) {
-        console.error("[SYNC ERROR]", err.message);
-        return apiError(res, 500, "SYNC_ERROR", "Impossible de synchroniser les sceaux locaux.");
-    }
+// Middleware 404
+app.use((req, res) => {
+    return apiError(res, 404, "NOT_FOUND", "La ressource demandée n'existe pas.");
 });
 
-// ======================================================
-// FEEDBACK / TELEMETRIE
-// ======================================================
-
-app.post(
-    "/api/seals/feedback",
-    scanLimiter,
-    async (req, res) => {
-        try {
-            const { lot, numero_lot, luminance, isLowLight, contrastScore, rawFrameSnippet } = req.body;
-            const targetLot = lot || numero_lot;
-            const safeSnippet = typeof rawFrameSnippet === "string" ? rawFrameSnippet.substring(0, 500) : null;
-
-            const { error } = await supabase.from("telemetrie_scans").insert([{
-                lot: targetLot ? String(targetLot).trim() : "INCONNU",
-                luminance: typeof luminance === "number" ? luminance : null,
-                is_low_light: !!isLowLight,
-                contrast_score: typeof contrastScore === "number" ? contrastScore : null,
-                frame_snippet: safeSnippet,
-                created_at: new Date()
-            }]);
-
-            if (error) { throw error; }
-
-            return apiSuccess(res, { adaptiveParameters: { recommendedLightBoost: !!isLowLight }, message: "Télémétrie intégrée avec succès." });
-        } catch (error) {
-            console.error("Erreur télémétrie:", error);
-            return apiError(res, 500, "TELEMETRY_ERROR", "Échec d'enregistrement de la télémétrie.");
-        }
-    }
-);
-
-// ======================================================
-// ERREURS MULTER / CORS / SERVEUR
-// ======================================================
-
+// Middleware d'erreur global
 app.use((err, req, res, next) => {
-    if (err && err.message === "INVALID_FILE_TYPE") { return apiError(res, 400, "INVALID_FILE_TYPE", "Le format de fichier téléversé n'est pas autorisé."); }
-    if (err && err.code === "LIMIT_FILE_SIZE") { return apiError(res, 413, "FILE_TOO_LARGE", "Le fichier dépasse la taille maximale autorisée de 10 MB."); }
-    if (err && err.message === "CORS_ORIGIN_NOT_ALLOWED") { return apiError(res, 403, "CORS_ORIGIN_NOT_ALLOWED", "Origine non autorisée."); }
-    console.error("Middleware erreur:", err);
-    return apiError(res, 500, "SERVER_ERROR", isProduction ? "Erreur interne du serveur." : err.message);
+    console.error("[GLOBAL SERVER ERROR]", err);
+    return apiError(res, 500, "INTERNAL_SERVER_ERROR", isProduction ? "Une erreur interne du serveur est survenue." : err.message);
 });
 
-// ======================================================
-// ROUTE 404
-// ======================================================
-
-app.use((req, res) => { return apiError(res, 404, "ROUTE_NOT_FOUND", "Route inexistante."); });
-
-// ======================================================
-// DEMARRAGE
-// ======================================================
-
-const server = app.listen(PORT, "0.0.0.0", () => {
-    console.log("======================================================");
-    console.log(`ANOR Backend v${SERVER_VERSION} (Blindage, Séries, GPS & Pylônes Actifs - Gemini Stable)`);
-    console.log(`Port: ${PORT}`);
-    console.log(`Environment: ${process.env.NODE_ENV || "development"}`);
-    console.log(`CORS origins: ${allowedOrigins.join(", ") || "aucune"}`);
-    console.log("Serveur prêt avec routage statique complet des dossiers.");
-    console.log("======================================================");
+app.listen(PORT, () => {
+    console.log(`[ANOR CORE] Serveur démarré avec succès sur le port ${PORT} (v${SERVER_VERSION})`);
 });
-function shutdown(signal) {
-    console.log(`[ANOR] Arrêt demandé (${signal}).`);
-    server.close(() => { process.exit(0); });
-}
-
-process.on("SIGINT", () => shutdown("SIGINT"));
-process.on("SIGTERM", () => shutdown("SIGTERM"));
-
-if (global.gc) {
-    setInterval(() => { try { global.gc(); } catch (error) {} }, 600000);
-}

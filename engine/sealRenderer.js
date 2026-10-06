@@ -9,7 +9,7 @@ const { createCanvas, loadImage } = require('canvas');
 const path = require('path');
 const fs = require('fs');
 const crypto = require('crypto');
-const GlyphsLibrary = require('../library/glyphsLibrary');
+const GlyphsLibrary = require('./glyphsLibrary');
 
 const VISUAL_VERSION = 1;
 const VISIBLE_GLYPH_COUNT = 51;
@@ -210,7 +210,7 @@ const sealRenderer = {
             !options.isMasterSeal &&
             !payload.isMasterSeal
                 ? `N° ${rawItemNumber}`
-                : 'DM / 000 000';
+                : (options.masterSerialLabel || 'DM / 000 000');
 
         const secureSignature =
             payload.secureSignature ||
@@ -322,7 +322,7 @@ const sealRenderer = {
                 glyphType,
                 glyphDef,
                 isFilled,
-            glyphScale,
+                glyphScale,
                 strokeWidth
             );
 
@@ -381,10 +381,9 @@ const sealRenderer = {
         ctx.textBaseline = 'middle';
 
         const textY = centerY + 128 * scale; 
-        const boxWidth = 295 * scale; // Largeur optimisée pour éviter l'effet étriqué
+        const boxWidth = 295 * scale;
         const boxHeight = 58 * scale;
 
-        // Boîte blanche de fond
         ctx.fillStyle = 'rgba(255, 255, 255, 0.98)';
         ctx.beginPath();
         ctx.roundRect(centerX - boxWidth / 2, textY - boxHeight / 2, boxWidth, boxHeight, 10 * scale);
@@ -403,14 +402,13 @@ const sealRenderer = {
         ) => {
             ctx.font = font;
             ctx.strokeStyle = '#FFFFFF';
-            ctx.lineWidth = Math.max(4, 5 * scale); // Contour large pour détacher les caractères des glyphes
+            ctx.lineWidth = Math.max(4, 5 * scale);
             ctx.lineJoin = 'round';
             ctx.strokeText(text, x, y);
             ctx.fillStyle = textColor;
             ctx.fillText(text, x, y);
         };
 
-        // Nom du Lot (plus grand et plus gras)
         drawOutlinedText(
             batchText,
             centerX,
@@ -419,7 +417,6 @@ const sealRenderer = {
             '#0F172A'
         );
 
-        // Numéro de série / DM (plus épais, bien lisible en format compact)
         drawOutlinedText(
             itemText,
             centerX,
