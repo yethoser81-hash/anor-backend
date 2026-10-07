@@ -2,7 +2,7 @@
  * ======================================================
  * SYSTEME SOUVERAIN DE CERTIFICATION ANOR
  * SERVER CORE (VERSION ARCHITECTURE HAUTE SÉCURITÉ)
- * Version: 17.10.0 (Moteur OCR Gratuit & Reconnaissance Locale)
+ * Version: 17.9.10 (Traçabilité Avancée, GPS & OCR Gratuit)
  * ======================================================
  */
 
@@ -18,61 +18,23 @@ const rateLimit = require("express-rate-limit");
 const helmet = require("helmet");
 const supabase = require("./config/database");
 const SealRenderer = require("./engine/sealRenderer");
+const { GoogleGenAI } = require("@google/genai");
 
 const app = express();
 
 // ======================================================
-// CONFIGURATION DU MOTEUR OCR GRATUIT (OCR.SPACE)
+// CONFIGURATION GEMINI IA (RÉSERVÉ POUR L'INTELLIGENCE & CHAT)
 // ======================================================
-async function extractLotWithFreeOCR(base64Image) {
-    try {
-        if (!base64Image) return null;
-
-        const formData = new URLSearchParams();
-        formData.append("base64Image", base64Image);
-        formData.append("language", "fre");
-        formData.append("isOverlayRequired", "false");
-        formData.append("OCREngine", "2"); // Engine 2 est optimal pour les chiffres, codes et lots
-
-        console.log("[OCR GRATUIT] Envoi de l'image au moteur OCR.space...");
-
-        const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 6000); // Timeout rapide à 6 sec max
-
-        const response = await fetch("https://api.ocr.space/parse/image", {
-            method: "POST",
-            headers: {
-                "apikey": process.env.OCR_SPACE_API_KEY || "helloworld", // Clé par défaut ou votre clé gratuite
-                "Content-Type": "application/x-www-form-urlencoded"
-            },
-            body: formData,
-            signal: controller.signal
-        });
-
-        clearTimeout(timeoutId);
-
-        const data = await response.json();
-        if (data && data.ParsedResults && data.ParsedResults.length > 0) {
-            const detectedText = data.ParsedResults[0].ParsedText;
-            console.log("[OCR GRATUIT] Texte extrait :", detectedText.replace(/\r?\n|\r/g, " "));
-            
-            // Regex pour capturer le numéro de lot (ex: LOT 54P-2026 ou 54P-2026)
-            const lotMatch = detectedText.match(/LOT\s*([A-Z0-9\-]+)/i);
-            if (lotMatch) {
-                const cleanLot = lotMatch[0].toUpperCase().trim();
-                console.log("[OCR GRATUIT] Lot détecté :", cleanLot);
-                return cleanLot;
-            }
-        }
-        return null;
-    } catch (err) {
-        console.error("[OCR ERROR]", err.message);
-        return null;
-    }
+let ai = null;
+if (process.env.GEMINI_API_KEY) {
+    ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+    console.log("[ANOR CORE] Module IA Conversationnel & Analytics initialisé.");
+} else {
+    console.warn("[ANOR CORE] Clé GEMINI_API_KEY absente. Module Chat Analytics passera en mode local.");
 }
 
 // ======================================================
-// CACHE INTELLIGENT DE VISION (RÉPONSE EN < 1 SECONDE)
+// CACHE INTELLIGENT DE SCAN (POUR RÉPONSE EN < 1 SECONDE)
 // ======================================================
 const scanCache = new Map();
 const SCAN_CACHE_TTL = 15 * 60 * 1000;
@@ -90,7 +52,7 @@ setInterval(() => {
 // VERSION / CONFIGURATION
 // ======================================================
 
-const SERVER_VERSION = "17.10.0";
+const SERVER_VERSION = "17.9.10";
 const VISUAL_VERSION = 1;
 const VISUAL_BITS_LENGTH = 51;
 const isProduction = process.env.NODE_ENV === "production";
@@ -438,6 +400,50 @@ async function intelligentVisualAnalysis(scannedMatrix) {
     return { lot: null, signature: null, bits: null, confidence: 0 };
 }
 
+// ======================================================
+// REMPLACEMENT DE L'IA PAR OCR.SPACE (100% GRATUIT & RAPIDE)
+// ======================================================
+async function extractLotWithFreeOCR(base64Image) {
+    try {
+        if (!base64Image || typeof base64Image !== "string") return null;
+
+        const formData = new URLSearchParams();
+        formData.append("base64Image", base64Image.startsWith("data:") ? base64Image : `data:image/jpeg;base64,${base64Image}`);
+        formData.append("language", "fre");
+        formData.append("isOverlayRequired", "false");
+        formData.append("OCREngine", "2");
+
+        const response = await fetch("https://api.ocr.space/parse/image", {
+            method: "POST",
+            headers: {
+                "apikey": process.env.OCR_SPACE_API_KEY || "helloworld",
+                "Content-Type": "application/x-www-form-urlencoded"
+            },
+            body: formData
+        });
+
+        const data = await response.json();
+        if (data && data.ParsedResults && data.ParsedResults.length > 0) {
+            const detectedText = data.ParsedResults[0].ParsedText || "";
+            console.log("[OCR GRATUIT] Texte extrait :", detectedText.replace(/\n/g, " "));
+            
+            const lotMatch = detectedText.match(/LOT\s*([A-Z0-9\-]+)/i);
+            if (lotMatch && lotMatch[1]) {
+                return lotMatch[1].toUpperCase();
+            }
+            
+            const directCodeMatch = detectedText.match(/([0-9]{2,4}[A-Z]{1,3}\-[0-9]{4})/i);
+            if (directCodeMatch) {
+                return directCodeMatch[0].toUpperCase();
+            }
+        }
+        return null;
+    } catch (err) {
+        console.error("[OCR ERROR]", err.message);
+        return null;
+    }
+}
+
 async function generateUnitSerialsAndManifest(lotCode, totalQuantity, masterSignature) {
     const batchSize = 5000;
     let csvContent = "Index,Numero_De_Serie,Hachage_Securise\n";
@@ -501,7 +507,8 @@ app.get("/health", async (req, res) => {
         status: "ONLINE",
         engine: `ANOR Core ${SERVER_VERSION}`,
         database,
-        ocrEngine: "OCR.SPACE_FREE",
+        ocrEngine: "OCR.space (Gratuit)",
+        geminiAnalytics: ai ? "CONFIGURED" : "NOT_CONFIGURED",
         uptime: process.uptime(),
         memory: process.memoryUsage().rss,
         node: process.version
@@ -520,6 +527,7 @@ app.get("/api/dashboard/stats", async (req, res) => {
 
         let totalScans = 0;
         let alertesCount = 0;
+        let successfulScans = 0;
         const fluxRecents = [];
         const regionCounts = {};
 
@@ -529,6 +537,8 @@ app.get("/api/dashboard/stats", async (req, res) => {
                 totalScans += scans;
                 if (p.statut === "ALERTE" || p.statut === "CONTREFAÇON") {
                     alertesCount++;
+                } else {
+                    successfulScans += scans;
                 }
 
                 const reg = p.region || "Centre";
@@ -554,8 +564,12 @@ app.get("/api/dashboard/stats", async (req, res) => {
             }
         }
 
+        const calculatedPrecision = totalScans > 0 
+            ? ((successfulScans / totalScans) * 100).toFixed(2) + "%" 
+            : "100.0%";
+
         return apiSuccess(res, {
-            precision: "99.92%",
+            precision: calculatedPrecision,
             totalScans: totalScans.toLocaleString("fr-FR"),
             regionActive: activeRegion,
             anomalies: String(alertesCount),
@@ -582,7 +596,8 @@ app.get("/api/intelligence/data", async (req, res) => {
         let totalVolume = 0;
         const entreprisesMap = {};
         const regionCounts = { "Centre": 0, "Littoral": 0, "Ouest": 0, "Sud": 0, "Nord": 0, "Adamaoua": 0, "Est": 0, "Extrême-Nord": 0, "Nord-Ouest": 0, "Sud-Ouest": 0 };
-        
+        const hourlyDistribution = {};
+
         const timelineDays = { "Lun": 0, "Mar": 0, "Mer": 0, "Jeu": 0, "Ven": 0, "Sam": 0, "Dim": 0 };
         const dayNames = ["Dim", "Lun", "Mar", "Mer", "Jeu", "Ven", "Sam"];
 
@@ -611,6 +626,8 @@ app.get("/api/intelligence/data", async (req, res) => {
                     if (timelineDays[dayStr] !== undefined) {
                         timelineDays[dayStr] += scans > 0 ? scans : 1;
                     }
+                    const hour = d.getHours();
+                    hourlyDistribution[hour] = (hourlyDistribution[hour] || 0) + 1;
                 }
             });
         }
@@ -626,14 +643,27 @@ app.get("/api/intelligence/data", async (req, res) => {
                     if (timelineDays[dayStr] !== undefined) {
                         timelineDays[dayStr] += 1;
                     }
+                    const hour = d.getHours();
+                    hourlyDistribution[hour] = (hourlyDistribution[hour] || 0) + 1;
                 }
             });
         }
 
+        // Calcul dynamique du pic d'affluence selon la base de données
+        let peakHour = 14;
+        let maxScansHour = -1;
+        for (const [hour, count] of Object.entries(hourlyDistribution)) {
+            if (count > maxScansHour) {
+                maxScansHour = count;
+                peakHour = Number(hour);
+            }
+        }
+        const dynamicPeakAffluence = `${String(peakHour).padStart(2, '0')}h00 - ${String((peakHour + 1) % 24).padStart(2, '0')}h00`;
+
         const comportement = Object.keys(entreprisesMap).map(ent => {
             const dataEnt = entreprisesMap[ent];
             let statutConf = "CONFORME";
-            let tauxRisque = "0.08%";
+            let tauxRisque = "0.0%";
             
             if (dataEnt.anomalies > 0) {
                 statutConf = "SOUS SURVEILLANCE";
@@ -661,11 +691,11 @@ app.get("/api/intelligence/data", async (req, res) => {
         let totalAnomaliesCount = 0;
         Object.values(entreprisesMap).forEach(e => totalAnomaliesCount += e.anomalies);
         const totalProdsCount = products ? products.length : 1;
-        const indiceConformiteVal = Math.max(95, 100 - ((totalAnomaliesCount / totalProdsCount) * 100)).toFixed(1) + "%";
+        const indiceConformiteVal = Math.max(0, 100 - ((totalAnomaliesCount / totalProdsCount) * 100)).toFixed(1) + "%";
 
         return apiSuccess(res, {
             volumeGlobal: totalVolume > 0 ? totalVolume.toLocaleString("fr-FR") : "0",
-            picAffluence: "14h00 - 15h00",
+            picAffluence: dynamicPeakAffluence,
             statPeakLocation: activeRegion,
             indiceConformite: indiceConformiteVal,
             entreprisesAuditees: String(Object.keys(entreprisesMap).length),
@@ -692,10 +722,41 @@ app.post("/api/intelligence/chat", async (req, res) => {
             return apiError(res, 400, "INVALID_PROMPT", "Le message de l'assistant est requis.");
         }
 
-        return apiSuccess(res, {
-            success: true,
-            reply: `Analyse analytique ANOR (Noyau 17.10) : Votre demande concernant "${prompt}" a été traitée avec succès par notre registre de certification.`
+        const { data: products } = await supabase.from("produits_certifies").select("lot, nom_produit, nom_producteur, scan_count, statut").limit(20);
+        const { data: recentScans } = await supabase.from("produits_unitaires_scans").select("lot, ville, region, statut, created_at").limit(30);
+        
+        const contextSummary = JSON.stringify({
+            produits: products || [],
+            scansRecents: recentScans || []
         });
+
+        if (ai) {
+            let chatResponse;
+            try {
+                chatResponse = await ai.models.generateContent({
+                    model: "models/gemini-3.8-flash",
+                    contents: [
+                        `Tu es l'assistant statistique et détective de fraudes intelligent de l'ANOR. Utilise ces données pour détecter et expliquer les fraudes : ${contextSummary}`,
+                        `Question de l'inspecteur : ${prompt}`
+                    ]
+                });
+            } catch (chatErr) {
+                chatResponse = await ai.models.generateContent({
+                    model: "models/gemini-3.5-flash-lite",
+                    contents: [
+                        `Tu es l'assistant statistique de l'ANOR. Extrait de données : ${contextSummary}`,
+                        `Question de l'inspecteur : ${prompt}`
+                    ]
+                });
+            }
+
+            return apiSuccess(res, { success: true, reply: chatResponse.text ? chatResponse.text.trim() : "Analyse validée par le moteur ANOR Core." });
+        } else {
+            return apiSuccess(res, {
+                success: true,
+                reply: `Synthèse analytique (Mode Local ANOR) : Analyse effectuée sur ${products ? products.length : 0} produits pour "${prompt}".`
+            });
+        }
     } catch (err) {
         console.error("[INTELLIGENCE CHAT ERROR]", err.message);
         return apiError(res, 500, "CHAT_ERROR", "Erreur lors du traitement de la requête.");
@@ -835,7 +896,7 @@ app.get("/api/surveillance/data", async (req, res) => {
                     entreprise: p.nom_producteur || "Inconnu",
                     ville: p.ville || "Yaoundé",
                     region: p.region || "Centre",
-                    inspecteur: "Système ANOR",
+                    inspecteur: "IA ANOR",
                     resultat: stat
                 });
             });
@@ -865,13 +926,13 @@ app.get("/api/surveillance/data", async (req, res) => {
         return apiSuccess(res, {
             stats: {
                 scans: String(totalScansCount),
-                inspecteurs: String(producteursSet.size > 0 ? producteursSet.size : 12),
+                inspecteurs: String(producteursSet.size > 0 ? producteursSet.size : 0),
                 alertes: String(alertesCount),
                 produits: String(totalProduitsCertifies)
             },
             points,
             alerts: alerts.length > 0 ? alerts : [
-                { titre: "Réseau de surveillance synchronisé : " + totalScansCount + " scans chargés", source: "ANOR Core", temps: "En direct", niveau: "normal" }
+                { titre: "Réseau de surveillance synchronisé : " + totalScansCount + " scans chargés", source: "ANOR Engine", temps: "En direct", niveau: "normal" }
             ],
             history: history.slice(0, 30)
         });
@@ -888,7 +949,7 @@ app.post("/api/security/audit", (req, res) => {
         console.log("[ANOR SECURITY AUDIT] Rapport reçu :", JSON.stringify(auditData));
         return apiSuccess(res, { 
             status: "AUDIT_RECEIVED", 
-            message: `Rapport de sécurité pris en compte par le noyau ${SERVER_VERSION}.` 
+            message: "Rapport de sécurité pris en compte par le noyau 17.9.10." 
         });
     } catch (error) {
         console.error("[SECURITY AUDIT ERROR]", error.message);
@@ -1062,6 +1123,9 @@ Système Souverain de Certification - ANOR Engine ${SERVER_VERSION}
     }
 );
 
+// ======================================================
+// ROUTE VÉRIFICATION DE SCEAU (AVEC CASCADE OCR & MATRICE LOCAL)
+// ======================================================
 app.post(
     "/api/seals/verify",
     scanLimiter,
@@ -1106,12 +1170,19 @@ app.post(
             let row = null;
             let verificationMode = "LOT";
             let matchConfidence = 1.0;
+            let detectedLot = targetLot;
 
-            // ----------------------------------------------------
-            // ETAPE 1 : MATCH RAPIDE PAR RECHERCHE DE LOT EN BASE
-            // ----------------------------------------------------
-            if (targetLot) {
-                const cleanLot = String(targetLot).trim();
+            // Étape 1 : Si pas de lot fourni mais une image reçue, extraction via l'OCR Gratuit
+            if (!detectedLot && scannedMatrix) {
+                detectedLot = await extractLotWithFreeOCR(scannedMatrix);
+                if (detectedLot) {
+                    verificationMode = "OCR_FREE_LOT_EXTRACTED";
+                }
+            }
+
+            // Étape 2 : Recherche directe en base Supabase par Lot
+            if (detectedLot) {
+                const cleanLot = String(detectedLot).trim();
                 const { data, error } = await supabase
                     .from("produits_certifies")
                     .select("*")
@@ -1120,37 +1191,17 @@ app.post(
 
                 if (!error && data) { 
                     row = data; 
-                    verificationMode = "FAST_LOT_DIRECT_MATCH";
+                    if (verificationMode !== "OCR_FREE_LOT_EXTRACTED") {
+                        verificationMode = "FAST_LOT_DIRECT_MATCH";
+                    }
                     matchConfidence = 1.0;
                 }
             }
 
-            // ----------------------------------------------------
-            // ETAPE 2 : EXTRACTION PAR OCR GRATUIT (SI IMAGE DÉTECTÉE)
-            // ----------------------------------------------------
-            if (!row && scannedMatrix && typeof scannedMatrix === "string" && scannedMatrix.startsWith("data:image")) {
-                verificationMode = "OCR_FREE_VISUAL_SCAN";
-                
-                const extractedLot = await extractLotWithFreeOCR(scannedMatrix);
-                if (extractedLot) {
-                    const { data } = await supabase
-                        .from("produits_certifies")
-                        .select("*")
-                        .ilike("lot", extractedLot)
-                        .maybeSingle();
-
-                    if (data) {
-                        row = data;
-                        verificationMode = "OCR_SPACE_EXACT_MATCH";
-                        matchConfidence = 0.98;
-                    }
-                }
-            }
-
-            // ----------------------------------------------------
-            // ETAPE 3 : DECODAGE DE MATRICE DE SECOURS (ANOR51 / BITS)
-            // ----------------------------------------------------
+            // Étape 3 : Décodage matriciel local (51 bits) si l'OCR n'a pas trouvé de produit correspondant
             if (!row && scannedMatrix) {
+                verificationMode = "INTELLIGENT_VISUAL_SCAN";
+
                 const analysis = await intelligentVisualAnalysis(
                     scannedMatrix || { bits: normalizedRequestBits, visualBits: normalizedRequestBits, signature: requestSignature }
                 );
@@ -1211,7 +1262,7 @@ app.post(
             }
 
             if (!row) {
-                securityLog(req, "UNKNOWN_SEAL_ATTEMPT", { lot: targetLot || "N/A", verificationMode });
+                securityLog(req, "UNKNOWN_SEAL_ATTEMPT", { lot: targetLot || detectedLot || "N/A", verificationMode });
                 return apiError(res, 404, "UNKNOWN_SEAL", "Sceau inconnu ou non authentifié.", { status: "CONTREFAÇON_REJETEE", processingTime: Date.now() - startTime, engineVersion: SERVER_VERSION });
             }
 
