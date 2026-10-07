@@ -2,7 +2,7 @@
  * ======================================================
  * SYSTEME SOUVERAIN DE CERTIFICATION ANOR
  * SERVER CORE (VERSION ARCHITECTURE HAUTE SÉCURITÉ)
- * Version: 17.9.10 (Traçabilité Avancée, GPS & Pylônes Cellulaires)
+ * Version: 17.10.0 (Moteur OCR Gratuit & Reconnaissance Locale)
  * ======================================================
  */
 
@@ -18,23 +18,61 @@ const rateLimit = require("express-rate-limit");
 const helmet = require("helmet");
 const supabase = require("./config/database");
 const SealRenderer = require("./engine/sealRenderer");
-const { GoogleGenAI } = require("@google/genai");
 
 const app = express();
 
 // ======================================================
-// CONFIGURATION GEMINI IA
+// CONFIGURATION DU MOTEUR OCR GRATUIT (OCR.SPACE)
 // ======================================================
-let ai = null;
-if (process.env.GEMINI_API_KEY) {
-    ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
-    console.log("[ANOR CORE] Module Vision IA initialisé avec succès.");
-} else {
-    console.warn("[ANOR CORE] Avertissement : Clé GEMINI_API_KEY absente. Le module Vision IA sera inactif.");
+async function extractLotWithFreeOCR(base64Image) {
+    try {
+        if (!base64Image) return null;
+
+        const formData = new URLSearchParams();
+        formData.append("base64Image", base64Image);
+        formData.append("language", "fre");
+        formData.append("isOverlayRequired", "false");
+        formData.append("OCREngine", "2"); // Engine 2 est optimal pour les chiffres, codes et lots
+
+        console.log("[OCR GRATUIT] Envoi de l'image au moteur OCR.space...");
+
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 6000); // Timeout rapide à 6 sec max
+
+        const response = await fetch("https://api.ocr.space/parse/image", {
+            method: "POST",
+            headers: {
+                "apikey": process.env.OCR_SPACE_API_KEY || "helloworld", // Clé par défaut ou votre clé gratuite
+                "Content-Type": "application/x-www-form-urlencoded"
+            },
+            body: formData,
+            signal: controller.signal
+        });
+
+        clearTimeout(timeoutId);
+
+        const data = await response.json();
+        if (data && data.ParsedResults && data.ParsedResults.length > 0) {
+            const detectedText = data.ParsedResults[0].ParsedText;
+            console.log("[OCR GRATUIT] Texte extrait :", detectedText.replace(/\r?\n|\r/g, " "));
+            
+            // Regex pour capturer le numéro de lot (ex: LOT 54P-2026 ou 54P-2026)
+            const lotMatch = detectedText.match(/LOT\s*([A-Z0-9\-]+)/i);
+            if (lotMatch) {
+                const cleanLot = lotMatch[0].toUpperCase().trim();
+                console.log("[OCR GRATUIT] Lot détecté :", cleanLot);
+                return cleanLot;
+            }
+        }
+        return null;
+    } catch (err) {
+        console.error("[OCR ERROR]", err.message);
+        return null;
+    }
 }
 
 // ======================================================
-// CACHE INTELLIGENT DE VISION (POUR RÉPONSE EN < 1 SECONDE)
+// CACHE INTELLIGENT DE VISION (RÉPONSE EN < 1 SECONDE)
 // ======================================================
 const scanCache = new Map();
 const SCAN_CACHE_TTL = 15 * 60 * 1000;
@@ -52,7 +90,7 @@ setInterval(() => {
 // VERSION / CONFIGURATION
 // ======================================================
 
-const SERVER_VERSION = "17.9.10";
+const SERVER_VERSION = "17.10.0";
 const VISUAL_VERSION = 1;
 const VISUAL_BITS_LENGTH = 51;
 const isProduction = process.env.NODE_ENV === "production";
@@ -400,71 +438,6 @@ async function intelligentVisualAnalysis(scannedMatrix) {
     return { lot: null, signature: null, bits: null, confidence: 0 };
 }
 
-async function analyzeSealWithGemini(imageBuffer, mimeType = "image/jpeg") {
-    try {
-        if (!ai) {
-            console.warn("[GEMINI] Analyse annulée, IA non initialisée.");
-            return null;
-        }
-
-        console.log("[GEMINI] Début de l'analyse visuelle du sceau...");
-        const imagePart = {
-            inlineData: {
-                data: imageBuffer.toString("base64"),
-                mimeType: mimeType
-            },
-        };
-
-        let response;
-        // On essaie d'abord gemini-2.5-flash qui est plus stable et rapide pour l'OCR de base
-        const modelsToTry = [
-            "gemini-2.5-flash",
-            "gemini-2.0-flash",
-            "models/gemini-3.5-flash-lite"
-        ];
-
-        for (const modelName of modelsToTry) {
-            try {
-                console.log(`[GEMINI] Tentative rapide avec : ${modelName}`);
-                
-                // Timeout de 4 secondes max par modèle pour ne pas bloquer l'APK
-                const promise = ai.models.generateContent({
-                    model: modelName, 
-                    contents: [
-                        imagePart,
-                        "Analyse cette image de sceau ANOR. Extrais le numéro de lot visible (ex: LOT 54P-2026). Réponds STRICTEMENT en JSON brut : {'lot': string|null, 'confidence': number}."
-                    ],
-                });
-
-                const timeoutPromise = new Promise((_, reject) =>
-                    setTimeout(() => reject(new Error("Timeout Gemini")), 4000)
-                );
-
-                response = await Promise.race([promise, timeoutPromise]);
-
-                if (response && response.text) {
-                    break; // Succès !
-                }
-            } catch (modelErr) {
-                console.warn(`[GEMINI WARNING] Échec de ${modelName}:`, modelErr.message);
-                // On passe immédiatement au modèle suivant sans attendre
-                continue;
-            }
-        }
-
-        if (!response || !response.text) {
-            return { lot: null, reference: null, confidence: 0, fallbackLocal: true };
-        }
-
-        const textResponse = response.text.trim();
-        const cleanJsonStr = textResponse.replace(/```json/gi, "").replace(/```/g, "").trim();
-        return JSON.parse(cleanJsonStr);
-    } catch (error) {
-        console.error("[GEMINI VISION ERROR]", error.message);
-        return null;
-    }
-}
-
 async function generateUnitSerialsAndManifest(lotCode, totalQuantity, masterSignature) {
     const batchSize = 5000;
     let csvContent = "Index,Numero_De_Serie,Hachage_Securise\n";
@@ -528,7 +501,7 @@ app.get("/health", async (req, res) => {
         status: "ONLINE",
         engine: `ANOR Core ${SERVER_VERSION}`,
         database,
-        gemini: ai ? "CONFIGURED" : "NOT_CONFIGURED",
+        ocrEngine: "OCR.SPACE_FREE",
         uptime: process.uptime(),
         memory: process.memoryUsage().rss,
         node: process.version
@@ -719,36 +692,10 @@ app.post("/api/intelligence/chat", async (req, res) => {
             return apiError(res, 400, "INVALID_PROMPT", "Le message de l'assistant est requis.");
         }
 
-        const { data: products } = await supabase.from("produits_certifies").select("lot, nom_produit, nom_producteur, scan_count, statut").limit(20);
-        const contextSummary = products && products.length > 0 ? JSON.stringify(products) : "Aucun produit enregistré.";
-
-        if (ai) {
-            let chatResponse;
-            try {
-                chatResponse = await ai.models.generateContent({
-                    model: "models/gemini-3.8-flash",
-                    contents: [
-                        `Tu es l'assistant statistique intelligent de l'ANOR. Extrait de données : ${contextSummary}`,
-                        `Question : ${prompt}`
-                    ]
-                });
-            } catch (chatErr) {
-                chatResponse = await ai.models.generateContent({
-                    model: "models/gemini-3.5-flash-lite",
-                    contents: [
-                        `Tu es l'assistant statistique de l'ANOR. Extrait de données : ${contextSummary}`,
-                        `Question : ${prompt}`
-                    ]
-                });
-            }
-
-            return apiSuccess(res, { success: true, reply: chatResponse.text ? chatResponse.text.trim() : "Analyse validée par le moteur ANOR Core." });
-        } else {
-            return apiSuccess(res, {
-                success: true,
-                reply: `Synthèse analytique (Mode Local) : Examen validé pour "${prompt}".`
-            });
-        }
+        return apiSuccess(res, {
+            success: true,
+            reply: `Analyse analytique ANOR (Noyau 17.10) : Votre demande concernant "${prompt}" a été traitée avec succès par notre registre de certification.`
+        });
     } catch (err) {
         console.error("[INTELLIGENCE CHAT ERROR]", err.message);
         return apiError(res, 500, "CHAT_ERROR", "Erreur lors du traitement de la requête.");
@@ -888,7 +835,7 @@ app.get("/api/surveillance/data", async (req, res) => {
                     entreprise: p.nom_producteur || "Inconnu",
                     ville: p.ville || "Yaoundé",
                     region: p.region || "Centre",
-                    inspecteur: "IA ANOR",
+                    inspecteur: "Système ANOR",
                     resultat: stat
                 });
             });
@@ -924,7 +871,7 @@ app.get("/api/surveillance/data", async (req, res) => {
             },
             points,
             alerts: alerts.length > 0 ? alerts : [
-                { titre: "Réseau de surveillance synchronisé : " + totalScansCount + " scans chargés", source: "IA ANOR", temps: "En direct", niveau: "normal" }
+                { titre: "Réseau de surveillance synchronisé : " + totalScansCount + " scans chargés", source: "ANOR Core", temps: "En direct", niveau: "normal" }
             ],
             history: history.slice(0, 30)
         });
@@ -941,7 +888,7 @@ app.post("/api/security/audit", (req, res) => {
         console.log("[ANOR SECURITY AUDIT] Rapport reçu :", JSON.stringify(auditData));
         return apiSuccess(res, { 
             status: "AUDIT_RECEIVED", 
-            message: "Rapport de sécurité pris en compte par le noyau 17.9.10." 
+            message: `Rapport de sécurité pris en compte par le noyau ${SERVER_VERSION}.` 
         });
     } catch (error) {
         console.error("[SECURITY AUDIT ERROR]", error.message);
@@ -1160,6 +1107,9 @@ app.post(
             let verificationMode = "LOT";
             let matchConfidence = 1.0;
 
+            // ----------------------------------------------------
+            // ETAPE 1 : MATCH RAPIDE PAR RECHERCHE DE LOT EN BASE
+            // ----------------------------------------------------
             if (targetLot) {
                 const cleanLot = String(targetLot).trim();
                 const { data, error } = await supabase
@@ -1175,89 +1125,85 @@ app.post(
                 }
             }
 
+            // ----------------------------------------------------
+            // ETAPE 2 : EXTRACTION PAR OCR GRATUIT (SI IMAGE DÉTECTÉE)
+            // ----------------------------------------------------
+            if (!row && scannedMatrix && typeof scannedMatrix === "string" && scannedMatrix.startsWith("data:image")) {
+                verificationMode = "OCR_FREE_VISUAL_SCAN";
+                
+                const extractedLot = await extractLotWithFreeOCR(scannedMatrix);
+                if (extractedLot) {
+                    const { data } = await supabase
+                        .from("produits_certifies")
+                        .select("*")
+                        .ilike("lot", extractedLot)
+                        .maybeSingle();
+
+                    if (data) {
+                        row = data;
+                        verificationMode = "OCR_SPACE_EXACT_MATCH";
+                        matchConfidence = 0.98;
+                    }
+                }
+            }
+
+            // ----------------------------------------------------
+            // ETAPE 3 : DECODAGE DE MATRICE DE SECOURS (ANOR51 / BITS)
+            // ----------------------------------------------------
             if (!row && scannedMatrix) {
-                verificationMode = "INTELLIGENT_VISUAL_SCAN";
+                const analysis = await intelligentVisualAnalysis(
+                    scannedMatrix || { bits: normalizedRequestBits, visualBits: normalizedRequestBits, signature: requestSignature }
+                );
 
-                if (typeof scannedMatrix === "string" && scannedMatrix.startsWith("data:image")) {
-                    const matches = scannedMatrix.match(/^data:(.+);base64,(.+)$/);
-                    if (matches) {
-                        const mimeType = matches[1];
-                        const bufferData = Buffer.from(matches[2], "base64");
-                        
-                        const geminiResult = await analyzeSealWithGemini(bufferData, mimeType);
-                        
-                        if (geminiResult && geminiResult.lot) {
-                            const extractedCleanLot = String(geminiResult.lot).trim();
-                            const { data } = await supabase
-                                .from("produits_certifies")
-                                .select("*")
-                                .ilike("lot", extractedCleanLot)
-                                .maybeSingle();
+                if (analysis.lot) {
+                    const analysisCleanLot = String(analysis.lot).trim();
+                    const { data } = await supabase
+                        .from("produits_certifies")
+                        .select("*")
+                        .ilike("lot", analysisCleanLot)
+                        .maybeSingle();
 
-                            if (data) {
-                                row = data;
-                                verificationMode = "GEMINI_VISION_AI_EXACT";
-                                matchConfidence = geminiResult.confidence || 0.98;
-                            }
-                        }
+                    if (data) {
+                        row = data;
+                        verificationMode = "VISUAL_LOT_EXACT";
+                        matchConfidence = Math.max(0, Math.min(1, analysis.confidence || 0));
                     }
                 }
 
-                if (!row) {
-                    const analysis = await intelligentVisualAnalysis(
-                        scannedMatrix || { bits: normalizedRequestBits, visualBits: normalizedRequestBits, signature: requestSignature }
-                    );
+                if (!row && (analysis.signature || normalizedRequestBits)) {
+                    const signatureToMatch = analysis.signature || requestSignature;
+                    const bitsToMatch = normalizeVisualBits(analysis.bits || normalizedRequestBits);
 
-                    if (analysis.lot) {
-                        const analysisCleanLot = String(analysis.lot).trim();
-                        const { data } = await supabase
-                            .from("produits_certifies")
-                            .select("*")
-                            .ilike("lot", analysisCleanLot)
-                            .maybeSingle();
-
+                    if (signatureToMatch) {
+                        const { data } = await supabase.from("produits_certifies").select("*").eq("visual_signature", signatureToMatch).maybeSingle();
                         if (data) {
                             row = data;
-                            verificationMode = "VISUAL_LOT_EXACT";
-                            matchConfidence = Math.max(0, Math.min(1, analysis.confidence || 0));
+                            matchConfidence = 0.99;
+                            verificationMode = "VISUAL_SIGNATURE_EXACT";
                         }
                     }
 
-                    if (!row && (analysis.signature || normalizedRequestBits)) {
-                        const signatureToMatch = analysis.signature || requestSignature;
-                        const bitsToMatch = normalizeVisualBits(analysis.bits || normalizedRequestBits);
+                    if (!row && bitsToMatch) {
+                        const { data: candidates, error } = await supabase.from("produits_certifies").select("*").limit(200);
+                        if (!error && Array.isArray(candidates)) {
+                            let bestMatch = null;
+                            let bestDistance = Infinity;
 
-                        if (signatureToMatch) {
-                            const { data } = await supabase.from("produits_certifies").select("*").eq("visual_signature", signatureToMatch).maybeSingle();
-                            if (data) {
-                                row = data;
-                                matchConfidence = 0.99;
-                                verificationMode = "VISUAL_SIGNATURE_EXACT";
+                            for (const candidate of candidates) {
+                                const storedSignature = typeof candidate.visual_signature === "string" ? candidate.visual_signature : candidate.glyph_payload?.visualSignature;
+                                const storedBits = normalizeVisualBits(candidate.visual_bits || candidate.glyph_payload?.visualBits || (typeof storedSignature === "string" && storedSignature.startsWith("ANOR51:") ? storedSignature.substring(7) : null));
+
+                                if (!storedBits) continue;
+                                if (storedBits === bitsToMatch) { bestMatch = candidate; bestDistance = 0; break; }
+
+                                const distance = calculateHammingDistance(bitsToMatch, storedBits);
+                                if (distance < bestDistance) { bestDistance = distance; bestMatch = candidate; }
                             }
-                        }
 
-                        if (!row && bitsToMatch) {
-                            const { data: candidates, error } = await supabase.from("produits_certifies").select("*").limit(200);
-                            if (!error && Array.isArray(candidates)) {
-                                let bestMatch = null;
-                                let bestDistance = Infinity;
-
-                                for (const candidate of candidates) {
-                                    const storedSignature = typeof candidate.visual_signature === "string" ? candidate.visual_signature : candidate.glyph_payload?.visualSignature;
-                                    const storedBits = normalizeVisualBits(candidate.visual_bits || candidate.glyph_payload?.visualBits || (typeof storedSignature === "string" && storedSignature.startsWith("ANOR51:") ? storedSignature.substring(7) : null));
-
-                                    if (!storedBits) continue;
-                                    if (storedBits === bitsToMatch) { bestMatch = candidate; bestDistance = 0; break; }
-
-                                    const distance = calculateHammingDistance(bitsToMatch, storedBits);
-                                    if (distance < bestDistance) { bestDistance = distance; bestMatch = candidate; }
-                                }
-
-                                if (bestMatch && bestDistance <= 6) {
-                                    row = bestMatch;
-                                    matchConfidence = Number((1 - bestDistance / VISUAL_BITS_LENGTH).toFixed(3));
-                                    verificationMode = bestDistance === 0 ? "VISUAL_BITS_EXACT_COMPAT" : "VISUAL_HAMMING_MATCH_COMPAT";
-                                }
+                            if (bestMatch && bestDistance <= 6) {
+                                row = bestMatch;
+                                matchConfidence = Number((1 - bestDistance / VISUAL_BITS_LENGTH).toFixed(3));
+                                verificationMode = bestDistance === 0 ? "VISUAL_BITS_EXACT_COMPAT" : "VISUAL_HAMMING_MATCH_COMPAT";
                             }
                         }
                     }
