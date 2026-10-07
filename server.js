@@ -2,7 +2,7 @@
  * ======================================================
  * SYSTEME SOUVERAIN DE CERTIFICATION ANOR
  * SERVER CORE (VERSION ARCHITECTURE HAUTE SÉCURITÉ)
- * Version: 17.9.10 (Traçabilité Avancée, GPS & OCR Gratuit)
+ * Version: 17.9.11 (Correction OCR Lot Flexible & Anti-Doublon)
  * ======================================================
  */
 
@@ -34,7 +34,7 @@ if (process.env.GEMINI_API_KEY) {
 }
 
 // ======================================================
-// CACHE INTELLIGENT DE SCAN (POUR RÉPONSE EN < 1 SECONDE)
+// CACHE INTELLIGENT DE SCAN
 // ======================================================
 const scanCache = new Map();
 const SCAN_CACHE_TTL = 15 * 60 * 1000;
@@ -52,7 +52,7 @@ setInterval(() => {
 // VERSION / CONFIGURATION
 // ======================================================
 
-const SERVER_VERSION = "17.9.10";
+const SERVER_VERSION = "17.9.11";
 const VISUAL_VERSION = 1;
 const VISUAL_BITS_LENGTH = 51;
 const isProduction = process.env.NODE_ENV === "production";
@@ -401,7 +401,7 @@ async function intelligentVisualAnalysis(scannedMatrix) {
 }
 
 // ======================================================
-// REMPLACEMENT DE L'IA PAR OCR.SPACE (100% GRATUIT & RAPIDE)
+// EXTRACTION PAR OCR.SPACE (100% GRATUIT & SANS GEMINI)
 // ======================================================
 async function extractLotWithFreeOCR(base64Image) {
     try {
@@ -429,12 +429,12 @@ async function extractLotWithFreeOCR(base64Image) {
             
             const lotMatch = detectedText.match(/LOT\s*([A-Z0-9\-]+)/i);
             if (lotMatch && lotMatch[1]) {
-                return lotMatch[1].toUpperCase();
+                return lotMatch[1].toUpperCase().trim();
             }
             
             const directCodeMatch = detectedText.match(/([0-9]{2,4}[A-Z]{1,3}\-[0-9]{4})/i);
             if (directCodeMatch) {
-                return directCodeMatch[0].toUpperCase();
+                return directCodeMatch[0].toUpperCase().trim();
             }
         }
         return null;
@@ -649,7 +649,6 @@ app.get("/api/intelligence/data", async (req, res) => {
             });
         }
 
-        // Calcul dynamique du pic d'affluence selon la base de données
         let peakHour = 14;
         let maxScansHour = -1;
         for (const [hour, count] of Object.entries(hourlyDistribution)) {
@@ -949,7 +948,7 @@ app.post("/api/security/audit", (req, res) => {
         console.log("[ANOR SECURITY AUDIT] Rapport reçu :", JSON.stringify(auditData));
         return apiSuccess(res, { 
             status: "AUDIT_RECEIVED", 
-            message: "Rapport de sécurité pris en compte par le noyau 17.9.10." 
+            message: "Rapport de sécurité pris en compte par le noyau 17.9.11." 
         });
     } catch (error) {
         console.error("[SECURITY AUDIT ERROR]", error.message);
@@ -1124,7 +1123,7 @@ Système Souverain de Certification - ANOR Engine ${SERVER_VERSION}
 );
 
 // ======================================================
-// ROUTE VÉRIFICATION DE SCEAU (AVEC CASCADE OCR & MATRICE LOCAL)
+// ROUTE VÉRIFICATION DE SCEAU (RECHERCHE FLEXIBLE AVEC/SANS PREFIXE LOT)
 // ======================================================
 app.post(
     "/api/seals/verify",
@@ -1172,7 +1171,7 @@ app.post(
             let matchConfidence = 1.0;
             let detectedLot = targetLot;
 
-            // Étape 1 : Si pas de lot fourni mais une image reçue, extraction via l'OCR Gratuit
+            // Étape 1 : Extraction par l'OCR Gratuit si aucun lot fourni
             if (!detectedLot && scannedMatrix) {
                 detectedLot = await extractLotWithFreeOCR(scannedMatrix);
                 if (detectedLot) {
@@ -1180,13 +1179,15 @@ app.post(
                 }
             }
 
-            // Étape 2 : Recherche directe en base Supabase par Lot
+            // Étape 2 : Recherche flexible Supabase (Lot brut, avec "LOT ", ou certificate_code)
             if (detectedLot) {
-                const cleanLot = String(detectedLot).trim();
+                const rawLot = String(detectedLot).trim();
+                const cleanCode = rawLot.replace(/^LOT\s+/i, "").trim();
+
                 const { data, error } = await supabase
                     .from("produits_certifies")
                     .select("*")
-                    .ilike("lot", cleanLot)
+                    .or(`lot.ilike.${cleanCode},lot.ilike.LOT ${cleanCode},certificate_code.ilike.${cleanCode},certificate_code.ilike.LOT ${cleanCode}`)
                     .maybeSingle();
 
                 if (!error && data) { 
@@ -1198,7 +1199,7 @@ app.post(
                 }
             }
 
-            // Étape 3 : Décodage matriciel local (51 bits) si l'OCR n'a pas trouvé de produit correspondant
+            // Étape 3 : Décodage matriciel local (51 bits) si l'OCR/Code n'a pas matché directement
             if (!row && scannedMatrix) {
                 verificationMode = "INTELLIGENT_VISUAL_SCAN";
 
@@ -1207,11 +1208,11 @@ app.post(
                 );
 
                 if (analysis.lot) {
-                    const analysisCleanLot = String(analysis.lot).trim();
+                    const analysisCleanLot = String(analysis.lot).trim().replace(/^LOT\s+/i, "");
                     const { data } = await supabase
                         .from("produits_certifies")
                         .select("*")
-                        .ilike("lot", analysisCleanLot)
+                        .or(`lot.ilike.${analysisCleanLot},lot.ilike.LOT ${analysisCleanLot}`)
                         .maybeSingle();
 
                     if (data) {
