@@ -416,44 +416,40 @@ async function analyzeSealWithGemini(imageBuffer, mimeType = "image/jpeg") {
         };
 
         let response;
+        // On essaie d'abord gemini-2.5-flash qui est plus stable et rapide pour l'OCR de base
         const modelsToTry = [
-            "models/gemini-3.8-flash", 
+            "gemini-2.5-flash",
+            "gemini-2.0-flash",
             "models/gemini-3.5-flash-lite"
         ];
 
-        let successModel = null;
         for (const modelName of modelsToTry) {
-            let attempts = 0;
-            const maxRetries = 1;
-            
-            while (attempts <= maxRetries) {
-                try {
-                    console.log(`[GEMINI] Tentative avec : ${modelName} (Essai ${attempts + 1})`);
-                    response = await ai.models.generateContent({
-                        model: modelName, 
-                        contents: [
-                            imagePart,
-                            "Analyse cette image de sceau de certification ANOR. Extrais textuellement et fidèlement le numéro de lot visible (ex: LOT 54P-2026, LOT 01, etc.). Réponds STRICTEMENT au format JSON brut, sans balises markdown, avec exactement ces clés : 'lot' (string ou null), 'reference' (string ou null), 'confidence' (nombre entre 0 et 1)."
-                        ],
-                    });
-                    if (response && response.text) {
-                        successModel = modelName;
-                        break;
-                    }
-                } catch (modelErr) {
-                    console.warn(`[GEMINI WARNING] Échec de ${modelName}:`, modelErr.message);
-                    if (modelErr.message && modelErr.message.includes("503")) {
-                        attempts++;
-                        if (attempts <= maxRetries) {
-                            const delay = 1000 * Math.pow(2, attempts - 1);
-                            await new Promise(resolve => setTimeout(resolve, delay));
-                            continue;
-                        }
-                    }
-                    break;
+            try {
+                console.log(`[GEMINI] Tentative rapide avec : ${modelName}`);
+                
+                // Timeout de 4 secondes max par modèle pour ne pas bloquer l'APK
+                const promise = ai.models.generateContent({
+                    model: modelName, 
+                    contents: [
+                        imagePart,
+                        "Analyse cette image de sceau ANOR. Extrais le numéro de lot visible (ex: LOT 54P-2026). Réponds STRICTEMENT en JSON brut : {'lot': string|null, 'confidence': number}."
+                    ],
+                });
+
+                const timeoutPromise = new Promise((_, reject) =>
+                    setTimeout(() => reject(new Error("Timeout Gemini")), 4000)
+                );
+
+                response = await Promise.race([promise, timeoutPromise]);
+
+                if (response && response.text) {
+                    break; // Succès !
                 }
+            } catch (modelErr) {
+                console.warn(`[GEMINI WARNING] Échec de ${modelName}:`, modelErr.message);
+                // On passe immédiatement au modèle suivant sans attendre
+                continue;
             }
-            if (successModel) break;
         }
 
         if (!response || !response.text) {
