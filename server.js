@@ -2,7 +2,7 @@
  * ======================================================
  * SYSTEME SOUVERAIN DE CERTIFICATION ANOR
  * SERVER CORE (VERSION ARCHITECTURE HAUTE SÉCURITÉ)
- * Version: 17.9.11 (Correction OCR Lot Flexible & Anti-Doublon)
+ * Version: 17.9.12 (Matching Souple OCR & Supabase Multi-Inclusion)
  * ======================================================
  */
 
@@ -52,7 +52,7 @@ setInterval(() => {
 // VERSION / CONFIGURATION
 // ======================================================
 
-const SERVER_VERSION = "17.9.11";
+const SERVER_VERSION = "17.9.12";
 const VISUAL_VERSION = 1;
 const VISUAL_BITS_LENGTH = 51;
 const isProduction = process.env.NODE_ENV === "production";
@@ -401,7 +401,7 @@ async function intelligentVisualAnalysis(scannedMatrix) {
 }
 
 // ======================================================
-// EXTRACTION PAR OCR.SPACE (100% GRATUIT & SANS GEMINI)
+// EXTRACTION OCR SANS INTERPRÉTATION
 // ======================================================
 async function extractLotWithFreeOCR(base64Image) {
     try {
@@ -427,14 +427,15 @@ async function extractLotWithFreeOCR(base64Image) {
             const detectedText = data.ParsedResults[0].ParsedText || "";
             console.log("[OCR GRATUIT] Texte extrait :", detectedText.replace(/\n/g, " "));
             
+            // Recherche brute : extrait le motif du lot exact (ex: 78U-2026)
+            const directCodeMatch = detectedText.match(/([A-Z0-9]{2,6}[-\/][A-Z0-9]{2,6})/i);
+            if (directCodeMatch) {
+                return directCodeMatch[0].toUpperCase().trim();
+            }
+
             const lotMatch = detectedText.match(/LOT\s*([A-Z0-9\-]+)/i);
             if (lotMatch && lotMatch[1]) {
                 return lotMatch[1].toUpperCase().trim();
-            }
-            
-            const directCodeMatch = detectedText.match(/([0-9]{2,4}[A-Z]{1,3}\-[0-9]{4})/i);
-            if (directCodeMatch) {
-                return directCodeMatch[0].toUpperCase().trim();
             }
         }
         return null;
@@ -948,7 +949,7 @@ app.post("/api/security/audit", (req, res) => {
         console.log("[ANOR SECURITY AUDIT] Rapport reçu :", JSON.stringify(auditData));
         return apiSuccess(res, { 
             status: "AUDIT_RECEIVED", 
-            message: "Rapport de sécurité pris en compte par le noyau 17.9.11." 
+            message: "Rapport de sécurité pris en compte par le noyau 17.9.12." 
         });
     } catch (error) {
         console.error("[SECURITY AUDIT ERROR]", error.message);
@@ -1123,7 +1124,7 @@ Système Souverain de Certification - ANOR Engine ${SERVER_VERSION}
 );
 
 // ======================================================
-// ROUTE VÉRIFICATION DE SCEAU (RECHERCHE FLEXIBLE AVEC/SANS PREFIXE LOT)
+// ROUTE VÉRIFICATION DE SCEAU (RECHERCHE INTELLIGENTE ET SOUPLE SUPABASE)
 // ======================================================
 app.post(
     "/api/seals/verify",
@@ -1171,7 +1172,7 @@ app.post(
             let matchConfidence = 1.0;
             let detectedLot = targetLot;
 
-            // Étape 1 : Extraction par l'OCR Gratuit si aucun lot fourni
+            // Étape 1 : Extraire le lot exactement via l'OCR si aucune saisie manuelle
             if (!detectedLot && scannedMatrix) {
                 detectedLot = await extractLotWithFreeOCR(scannedMatrix);
                 if (detectedLot) {
@@ -1179,7 +1180,8 @@ app.post(
                 }
             }
 
-            // Étape 2 : Recherche flexible Supabase (Lot brut, avec "LOT ", ou certificate_code)
+            // Étape 2 : RECHERCHE SOUPLE ET INTELLIGENTE SUR SUPABASE
+            // Interroge Supabase aussi bien sur "LOT 78U-2026" que "78U-2026"
             if (detectedLot) {
                 const rawLot = String(detectedLot).trim();
                 const cleanCode = rawLot.replace(/^LOT\s+/i, "").trim();
@@ -1187,11 +1189,11 @@ app.post(
                 const { data, error } = await supabase
                     .from("produits_certifies")
                     .select("*")
-                    .or(`lot.ilike.${cleanCode},lot.ilike.LOT ${cleanCode},certificate_code.ilike.${cleanCode},certificate_code.ilike.LOT ${cleanCode}`)
-                    .maybeSingle();
+                    .or(`lot.eq.${rawLot},lot.eq.${cleanCode},lot.ilike.%${cleanCode}%,certificate_code.eq.${rawLot},certificate_code.eq.${cleanCode},certificate_code.ilike.%${cleanCode}%`)
+                    .limit(1);
 
-                if (!error && data) { 
-                    row = data; 
+                if (!error && data && data.length > 0) { 
+                    row = data[0]; 
                     if (verificationMode !== "OCR_FREE_LOT_EXTRACTED") {
                         verificationMode = "FAST_LOT_DIRECT_MATCH";
                     }
@@ -1199,7 +1201,7 @@ app.post(
                 }
             }
 
-            // Étape 3 : Décodage matriciel local (51 bits) si l'OCR/Code n'a pas matché directement
+            // Étape 3 : Décodage matriciel local (51 bits) si l'OCR/Code direct n'a pas matché
             if (!row && scannedMatrix) {
                 verificationMode = "INTELLIGENT_VISUAL_SCAN";
 
@@ -1212,11 +1214,11 @@ app.post(
                     const { data } = await supabase
                         .from("produits_certifies")
                         .select("*")
-                        .or(`lot.ilike.${analysisCleanLot},lot.ilike.LOT ${analysisCleanLot}`)
-                        .maybeSingle();
+                        .or(`lot.ilike.%${analysisCleanLot}%,certificate_code.ilike.%${analysisCleanLot}%`)
+                        .limit(1);
 
-                    if (data) {
-                        row = data;
+                    if (data && data.length > 0) {
+                        row = data[0];
                         verificationMode = "VISUAL_LOT_EXACT";
                         matchConfidence = Math.max(0, Math.min(1, analysis.confidence || 0));
                     }
