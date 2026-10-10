@@ -1,8 +1,8 @@
 /**
  * ======================================================
  * SYSTEME SOUVERAIN DE CERTIFICATION ANOR
- * SERVER CORE (VERSION ARCHITECTURE HAUTE SÉCURITÉ)
- * Version: 17.9.12 (Matching Souple OCR & Supabase Multi-Inclusion)
+ * SERVER CORE (VERSION ARCHITECTURE HAUTE SÉCURITÉ - 2 ANNEAUX / 36 BITS)
+ * Version: 18.0.0 (Matching Souple OCR & Architecture 2 Anneaux & Nord Absolu)
  * ======================================================
  */
 
@@ -49,12 +49,12 @@ setInterval(() => {
 }, 60000);
 
 // ======================================================
-// VERSION / CONFIGURATION
+// VERSION / CONFIGURATION (NOUVELLE ARCHITECTURE 36 BITS)
 // ======================================================
 
-const SERVER_VERSION = "17.9.12";
-const VISUAL_VERSION = 1;
-const VISUAL_BITS_LENGTH = 51;
+const SERVER_VERSION = "18.0.0";
+const VISUAL_VERSION = 2; // Version 2 pour la nouvelle architecture 2 anneaux
+const VISUAL_BITS_LENGTH = 36; // Mis à jour à 36 bits (16 inner + 20 outer)
 const isProduction = process.env.NODE_ENV === "production";
 const PORT = process.env.PORT || 10000;
 
@@ -79,7 +79,7 @@ function formatDateOnly(dateValue) {
 }
 
 function normalizeVisualBits(bits) {
-    if (typeof bits === "string" && /^[01]{51}$/.test(bits)) {
+    if (typeof bits === "string" && /^[01]{36}$/.test(bits)) {
         return bits;
     }
     return null;
@@ -373,14 +373,14 @@ async function intelligentVisualAnalysis(scannedMatrix) {
         const trimmed = scannedMatrix.trim();
         if (!trimmed) { return { lot: null, signature: null, bits: null, confidence: 0 }; }
 
-        if (trimmed.startsWith("ANOR51:")) {
+        if (trimmed.startsWith("ANOR36:")) {
             const bits = normalizeVisualBits(trimmed.substring(7));
             if (bits) { return { lot: null, signature: trimmed, bits, confidence: 0.90 }; }
         }
 
         const directBits = normalizeVisualBits(trimmed);
         if (directBits) {
-            return { lot: null, signature: `ANOR51:${directBits}`, bits: directBits, confidence: 0.90 };
+            return { lot: null, signature: `ANOR36:${directBits}`, bits: directBits, confidence: 0.90 };
         }
 
         if (trimmed.length < 50) {
@@ -427,7 +427,6 @@ async function extractLotWithFreeOCR(base64Image) {
             const detectedText = data.ParsedResults[0].ParsedText || "";
             console.log("[OCR GRATUIT] Texte extrait :", detectedText.replace(/\n/g, " "));
             
-            // Recherche brute : extrait le motif du lot exact (ex: 78U-2026)
             const directCodeMatch = detectedText.match(/([A-Z0-9]{2,6}[-\/][A-Z0-9]{2,6})/i);
             if (directCodeMatch) {
                 return directCodeMatch[0].toUpperCase().trim();
@@ -949,7 +948,7 @@ app.post("/api/security/audit", (req, res) => {
         console.log("[ANOR SECURITY AUDIT] Rapport reçu :", JSON.stringify(auditData));
         return apiSuccess(res, { 
             status: "AUDIT_RECEIVED", 
-            message: "Rapport de sécurité pris en compte par le noyau 17.9.12." 
+            message: "Rapport de sécurité pris en compte par le noyau 18.0.0." 
         });
     } catch (error) {
         console.error("[SECURITY AUDIT ERROR]", error.message);
@@ -1001,7 +1000,7 @@ app.post(
                 throw new Error(`La matrice visuelle ANOR doit contenir exactement ${VISUAL_BITS_LENGTH} bits.`);
             }
 
-            const visualSignature = `ANOR51:${visualBits}`;
+            const visualSignature = `ANOR36:${visualBits}`;
 
             const imageBuffer = await SealRenderer.renderSealToBuffer(
                 { secureSignature, visualBits },
@@ -1009,7 +1008,7 @@ app.post(
                     lot, quantite: parsedQuantite, type_emballage,
                     productName: nom_produit, nom_produit, nom_producteur,
                     isMasterSeal: true,
-                    masterSerialLabel: `SÉRIE : ${productSerie} / ${parsedQuantite.toLocaleString("fr-FR")}`
+                    masterSerialLabel: `${productSerie} / ${parsedQuantite.toLocaleString("fr-FR")}`
                 }
             );
 
@@ -1060,7 +1059,7 @@ app.post(
                 visual_bits: visualBits, visual_signature: visualSignature,
                 matrix_hash: sha256Hex(visualBits), ai_signature_hash: secureSignature,
                 sha256_hash: secureSignature, signature_ia: secureSignature,
-                visual_geometry: { inner: 7, middle: 24, outer: 20, total: 51 },
+                visual_geometry: { inner: 16, outer: 20, total: 36 },
                 engine_version: SERVER_VERSION, statut: "CERTIFIÉ", scan_count: 0
             };
 
@@ -1089,7 +1088,7 @@ SYSTEME SOUVERAIN DE CERTIFICATION - NOTICE OFFICIELLE DE LOT
    - Chaque unité de ce lot embarque un identifiant de série unique inclus dans 'manifeste_serialisation_unitaire.csv'.
 
 3. AVIS JURIDIQUE ET RÉPRESSION DES FRAUDES :
-   - Le sceau numérique ANOR est protégé par les lois de la République du Cameroun. Toute contrefaçon est passible de poursuites.
+   - Le sceau numérique ANOR (Architecture 36 bits - 2 Anneaux) est protégé par les lois de la République du Cameroun. Toute contrefaçon est passible de poursuites.
 
 Fait à Yaoundé, le ${formatDateOnly(new Date())}
 Système Souverain de Certification - ANOR Engine ${SERVER_VERSION}
@@ -1124,7 +1123,7 @@ Système Souverain de Certification - ANOR Engine ${SERVER_VERSION}
 );
 
 // ======================================================
-// ROUTE VÉRIFICATION DE SCEAU (RECHERCHE INTELLIGENTE ET SOUPLE SUPABASE)
+// ROUTE VÉRIFICATION DE SCEAU
 // ======================================================
 app.post(
     "/api/seals/verify",
@@ -1161,7 +1160,7 @@ app.post(
             }
 
             const normalizedRequestBits = normalizeVisualBits(requestVisualBits || scannedMatrix?.bits || scannedMatrix?.visualBits);
-            const requestSignature = typeof requestVisualSignature === "string" ? requestVisualSignature.trim() : (typeof scannedMatrix?.signature === "string" ? scannedMatrix.signature.trim() : (normalizedRequestBits ? `ANOR51:${normalizedRequestBits}` : null));
+            const requestSignature = typeof requestVisualSignature === "string" ? requestVisualSignature.trim() : (typeof scannedMatrix?.signature === "string" ? scannedMatrix.signature.trim() : (normalizedRequestBits ? `ANOR36:${normalizedRequestBits}` : null));
 
             if (!targetLot && !scannedMatrix && !normalizedRequestBits && !requestSignature) {
                 return apiError(res, 400, "MISSING_SCAN", "Données de scan insuffisantes.");
@@ -1172,7 +1171,6 @@ app.post(
             let matchConfidence = 1.0;
             let detectedLot = targetLot;
 
-            // Étape 1 : Extraire le lot exactement via l'OCR si aucune saisie manuelle
             if (!detectedLot && scannedMatrix) {
                 detectedLot = await extractLotWithFreeOCR(scannedMatrix);
                 if (detectedLot) {
@@ -1180,8 +1178,6 @@ app.post(
                 }
             }
 
-            // Étape 2 : RECHERCHE SOUPLE ET INTELLIGENTE SUR SUPABASE
-            // Interroge Supabase aussi bien sur "LOT 78U-2026" que "78U-2026"
             if (detectedLot) {
                 const rawLot = String(detectedLot).trim();
                 const cleanCode = rawLot.replace(/^LOT\s+/i, "").trim();
@@ -1201,7 +1197,6 @@ app.post(
                 }
             }
 
-            // Étape 3 : Décodage matriciel local (51 bits) si l'OCR/Code direct n'a pas matché
             if (!row && scannedMatrix) {
                 verificationMode = "INTELLIGENT_VISUAL_SCAN";
 
@@ -1245,7 +1240,7 @@ app.post(
 
                             for (const candidate of candidates) {
                                 const storedSignature = typeof candidate.visual_signature === "string" ? candidate.visual_signature : candidate.glyph_payload?.visualSignature;
-                                const storedBits = normalizeVisualBits(candidate.visual_bits || candidate.glyph_payload?.visualBits || (typeof storedSignature === "string" && storedSignature.startsWith("ANOR51:") ? storedSignature.substring(7) : null));
+                                const storedBits = normalizeVisualBits(candidate.visual_bits || candidate.glyph_payload?.visualBits || (typeof storedSignature === "string" && storedSignature.startsWith("ANOR36:") ? storedSignature.substring(7) : null));
 
                                 if (!storedBits) continue;
                                 if (storedBits === bitsToMatch) { bestMatch = candidate; bestDistance = 0; break; }
@@ -1254,7 +1249,7 @@ app.post(
                                 if (distance < bestDistance) { bestDistance = distance; bestMatch = candidate; }
                             }
 
-                            if (bestMatch && bestDistance <= 6) {
+                            if (bestMatch && bestDistance <= 4) {
                                 row = bestMatch;
                                 matchConfidence = Number((1 - bestDistance / VISUAL_BITS_LENGTH).toFixed(3));
                                 verificationMode = bestDistance === 0 ? "VISUAL_BITS_EXACT_COMPAT" : "VISUAL_HAMMING_MATCH_COMPAT";

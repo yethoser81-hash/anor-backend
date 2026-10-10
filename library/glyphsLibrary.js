@@ -1,7 +1,7 @@
 /**
  * ====================================================================
  * ANOR CHECK
- * GLYPHS LIBRARY V6.0 - TRUTHMODE
+ * GLYPHS LIBRARY V7.0 - ARCHITECTURE 2 ANNEAUX & ORIENTATION NORD
  * ====================================================================
  */
 
@@ -9,7 +9,7 @@ const GlyphsLibrary = {
 
     types: ["square", "rect", "circle", "diamond", "plus"],
 
-    VERSION: "6.0.0",
+    VERSION: "7.0.0",
 
     TRUTHMODE: {
         emptyThreshold: 0.45,
@@ -23,15 +23,15 @@ const GlyphsLibrary = {
         passes: 5,
         minimumCoverage: 0.60,
         edgeTolerance: 0.15,
-        minimumGlyphPixels: 3,
+        minimumGlyphPixels: 4,
         reconstructionSize: 32
     },
 
     definitions: {
         square: {
             type: "square",
-            width: 18,
-            height: 18,
+            width: 22,
+            height: 22,
             sides: 4,
             symmetry: "rotational",
             orientation: 0,
@@ -40,8 +40,8 @@ const GlyphsLibrary = {
         },
         rect: {
             type: "rect",
-            width: 36,
-            height: 9,
+            width: 42,
+            height: 11,
             sides: 4,
             symmetry: "horizontal",
             orientation: 0,
@@ -50,9 +50,9 @@ const GlyphsLibrary = {
         },
         circle: {
             type: "circle",
-            width: 18,
-            height: 18,
-            radius: 9,
+            width: 22,
+            height: 22,
+            radius: 11,
             symmetry: "radial",
             orientation: 0,
             areaModel: "circle",
@@ -60,8 +60,8 @@ const GlyphsLibrary = {
         },
         diamond: {
             type: "diamond",
-            width: 16,
-            height: 16,
+            width: 20,
+            height: 20,
             rotation: 45,
             symmetry: "rotational",
             orientation: 45,
@@ -70,8 +70,8 @@ const GlyphsLibrary = {
         },
         plus: {
             type: "plus",
-            width: 20,
-            height: 20,
+            width: 24,
+            height: 24,
             symbol: "+",
             symmetry: "cross",
             orientation: 0,
@@ -91,8 +91,8 @@ const GlyphsLibrary = {
         if (!type || !this.definitions[type]) {
             return {
                 type: "unknown",
-                width: 18,
-                height: 18,
+                width: 22,
+                height: 22,
                 areaModel: "rectangle",
                 reconstruction: "rectangle"
             };
@@ -264,42 +264,12 @@ const GlyphsLibrary = {
         };
     },
 
-    getReconstructionProfile(type) {
-        const glyph = this.getGlyphDefinition(type);
-        const theoreticalArea = this.getTheoreticalArea(type);
-
-        return {
-            type,
-            model: glyph.reconstruction,
-            width: glyph.width,
-            height: glyph.height,
-            theoreticalArea,
-            symmetry: glyph.symmetry,
-            orientation: glyph.orientation || 0,
-            targetSize: this.MEASUREMENT.reconstructionSize,
-            minimumCoverage: this.MEASUREMENT.minimumCoverage,
-            edgeTolerance: this.MEASUREMENT.edgeTolerance
-        };
-    },
-
-    decodeGlyph(type, fillRatio, options = {}) {
-        return this.analyzeGlyph(type, fillRatio, options);
-    },
-
-    isValidType(type) {
-        return this.types.includes(type);
-    },
-
     getProtocolInfo() {
         return {
             version: this.VERSION,
             types: [...this.types],
             truthMode: { ...this.TRUTHMODE },
-            measurement: { ...this.MEASUREMENT },
-            definitions: Object.keys(this.definitions).reduce((result, type) => {
-                result[type] = this.getGlyphDefinition(type);
-                return result;
-            }, {})
+            measurement: { ...this.MEASUREMENT }
         };
     }
 };
