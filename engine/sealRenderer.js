@@ -1,7 +1,7 @@
 /**
  * ====================================================================
  * ANOR CHECK
- * SEAL RENDERER V12.0 - REPARTITION REGULIERE 32 BITS
+ * SEAL RENDERER V14.0 - HARMONISATION MAXIMALE & ESPACES OPTIMISÉS
  * ====================================================================
  */
 
@@ -12,7 +12,7 @@ const crypto = require('crypto');
 const GlyphsLibrary = require('../library/glyphsLibrary');
 
 const VISUAL_VERSION = 2;
-const VISIBLE_GLYPH_COUNT = 32;
+const VISIBLE_GLYPH_COUNT = 32; // 12 anneau intérieur + 20 anneau extérieur
 const CANONICAL_OUTER_RADIUS = 375;
 
 const sealRenderer = {
@@ -54,15 +54,18 @@ const sealRenderer = {
     },
 
     getGeometry(width, height) {
-        const outerRadius = Math.min(width, height) / 2 - 20;
+        const outerRadius = Math.min(width, height) / 2 - 12;
         const centerX = width / 2;
         const centerY = height / 2;
         
-        const logoSize = 280; 
+        // Logo encore plus grand
+        const logoSize = 340; 
         const logoRadius = logoSize / 2;
 
-        const outerRingRadius = outerRadius - 35;
-        const innerRingRadius = outerRingRadius - 65;
+        // Anneau extérieur collé au bord pour maximiser la surface utile
+        const outerRingRadius = outerRadius - 20; 
+        // Anneau intérieur rapproché au maximum du logo pour éliminer le vide central
+        const innerRingRadius = logoRadius + 25; 
 
         return {
             centerX,
@@ -77,7 +80,7 @@ const sealRenderer = {
 
     getFinderAngles() {
         return [
-            -Math.PI / 2, // Nord
+            -Math.PI / 2, // Nord (sens de départ)
             0,            // Est
             Math.PI / 2,  // Sud
             Math.PI       // Ouest
@@ -87,9 +90,10 @@ const sealRenderer = {
     getVisiblePositions() {
         const positions = [];
 
-        // 12 glyphes anneau intérieur
+        // 1. ANNEAU INTERIEUR (12 GLYPHES EN PARFAIT QUINCONCE)
         const innerCount = 12;
         for (let i = 0; i < innerCount; i++) {
+            // Décalage de PI/12 pour alterner exactement entre les positions externes/mires
             const angle = (i / innerCount) * Math.PI * 2 + (Math.PI / 12);
             positions.push({
                 ring: 'inner',
@@ -98,12 +102,12 @@ const sealRenderer = {
             });
         }
 
-        // 20 glyphes anneau extérieur (5 par quadrant)
+        // 2. ANNEAU EXTERIEUR (20 GLYPHES RÉPARTIS DANS LES 4 QUADRANTS)
         const quadrantAngles = [
-            -Math.PI / 2,
-            0,
-            Math.PI / 2,
-            Math.PI,
+            -Math.PI / 2, // Nord
+            0,            // Est
+            Math.PI / 2,  // Sud
+            Math.PI,      // Ouest
             Math.PI * 1.5
         ];
 
@@ -171,6 +175,10 @@ const sealRenderer = {
         const normalizedBatchName = String(rawBatchName).trim().toUpperCase();
         const batchText = normalizedBatchName.replace(/^LOT\s*/i, '');
 
+        // Nettoyage de la série : suppression de tout ce qui se trouve après le "/"
+        const rawMasterLabel = options.masterSerialLabel || '000000';
+        const cleanSerialNum = rawMasterLabel.split('/')[0].trim();
+
         const rawItemNumber =
             payload.itemNumber ??
             options.itemNumber ??
@@ -182,8 +190,8 @@ const sealRenderer = {
             rawItemNumber !== null &&
             !options.isMasterSeal &&
             !payload.isMasterSeal
-                ? `${rawItemNumber}`
-                : (options.masterSerialLabel || '000000 / 2 500');
+                ? String(rawItemNumber).split('/')[0].trim()
+                : cleanSerialNum;
 
         const secureSignature =
             payload.secureSignature ||
@@ -202,16 +210,16 @@ const sealRenderer = {
             throw new Error(`[sealRenderer] Matrice visuelle invalide : ${VISIBLE_GLYPH_COUNT} bits requis.`);
         }
 
-        // Cercle extérieur
+        // 1. CERCLE EXTERNE DU SCEAU
         ctx.save();
         ctx.strokeStyle = GEOMETRY_COLOR;
         ctx.lineWidth = 5 * scale;
         ctx.beginPath();
-        ctx.arc(centerX, centerY, outerRingRadius + 22 * scale, 0, Math.PI * 2);
+        ctx.arc(centerX, centerY, outerRingRadius + 16 * scale, 0, Math.PI * 2);
         ctx.stroke();
         ctx.restore();
 
-        // Logo central
+        // 2. LOGO CENTRAL AGRANDI (légèrement remonté pour laisser de l'espace au texte)
         const logoPath =
             options.logoPath ||
             payload.logoPath ||
@@ -223,7 +231,7 @@ const sealRenderer = {
                 ctx.drawImage(
                     img,
                     centerX - logoRadius,
-                    centerY - logoRadius - 20 * scale,
+                    centerY - logoRadius - 32 * scale,
                     logoSize,
                     logoSize
                 );
@@ -232,7 +240,7 @@ const sealRenderer = {
             }
         }
 
-        // Mires cardinales
+        // 3. MIRES CARDINALES
         const finderAngles = this.getFinderAngles();
 
         ctx.save();
@@ -260,9 +268,9 @@ const sealRenderer = {
         }
         ctx.restore();
 
-        // Glyphes
+        // 4. RENDU DES GLYPHES (DOUBLE ANNEAU HARMONISÉ)
         const positions = this.getVisiblePositions();
-        const glyphScale = 1.30;
+        const glyphScale = 1.35;
         const strokeWidth = 4;
 
         const rings = {
@@ -303,20 +311,21 @@ const sealRenderer = {
         }
         ctx.restore();
 
-        // Bloc texte sans cadre
+        // 5. TEXTE AGRANDI ET BIEN SÉPARÉ DU LOGO
         ctx.save();
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
 
-        const textY = centerY + 140 * scale;
+        // Position abaissée pour garantir un espace visuel net entre le bas du logo et le texte
+        const textY = centerY + 145 * scale;
 
-        ctx.font = `bold ${Math.max(30, Math.round(38 * scale))}px sans-serif`;
+        ctx.font = `bold ${Math.max(34, Math.round(42 * scale))}px sans-serif`;
         ctx.fillStyle = TEXT_PRIMARY_COLOR;
-        ctx.fillText(batchText, centerX, textY - 14 * scale);
+        ctx.fillText(batchText, centerX, textY - 16 * scale);
 
-        ctx.font = `bold ${Math.max(22, Math.round(28 * scale))}px sans-serif`;
+        ctx.font = `bold ${Math.max(24, Math.round(30 * scale))}px sans-serif`;
         ctx.fillStyle = TEXT_SECONDARY_COLOR;
-        ctx.fillText(itemText, centerX, textY + 22 * scale);
+        ctx.fillText(itemText, centerX, textY + 26 * scale);
 
         ctx.restore();
 
