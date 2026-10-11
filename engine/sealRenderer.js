@@ -1,7 +1,7 @@
 /**
  * ====================================================================
  * ANOR CHECK
- * SEAL RENDERER V19.0 - ARCHITECTURE HARMONISÉE & QUINCONCE EXACT
+ * SEAL RENDERER V20.0 - VERSION FINALE CONFORME (QUINCONCE, LOGO 2D, CADRE TEXTE)
  * ====================================================================
  */
 
@@ -58,12 +58,12 @@ const sealRenderer = {
         const centerX = width / 2;
         const centerY = height / 2;
         
-        // Logo agrandi pour absorber le vide central (comme sur l'image de référence)
-        const logoSize = 220; 
+        // Logo agrandi pour occuper l'espace central
+        const logoSize = 320; 
         const logoRadius = logoSize / 2;
 
         const outerRingRadius = outerRadius - 35;
-        const innerRingRadius = outerRingRadius - 95; // Rayon intermédiaire parfait pour le double anneau
+        const innerRingRadius = outerRingRadius - 85; // Double anneau en quinconce bien réparti
 
         return {
             centerX,
@@ -78,7 +78,7 @@ const sealRenderer = {
 
     getFinderAngles() {
         return [
-            -Math.PI / 2, // Nord (Mire de départ principale)
+            -Math.PI / 2, // Nord (Mire de départ)
             0,            // Est
             Math.PI / 2,  // Sud
             Math.PI       // Ouest
@@ -88,7 +88,7 @@ const sealRenderer = {
     getVisiblePositions() {
         const positions = [];
 
-        // 1. ANNEAU INTÉRIEUR (12 glyphes en quinconce exact, décalés de Math.PI / 12)
+        // 1. ANNEAU INTÉRIEUR (12 glyphes en quinconce exact avec offset Math.PI / 12)
         const innerCount = 12;
         for (let i = 0; i < innerCount; i++) {
             const angle = (i / innerCount) * Math.PI * 2 + (Math.PI / 12);
@@ -172,7 +172,7 @@ const sealRenderer = {
         const normalizedBatchName = String(rawBatchName).trim().toUpperCase();
         const batchText = normalizedBatchName.replace(/^LOT\s*/i, '');
 
-        // Nettoyage de la série : suppression de tout ce qui suit le "/"
+        // Nettoyage de la série : suppression de tout ce qui suit le "/" pour ne garder que les chiffres
         const rawMasterLabel = options.masterSerialLabel || '000000';
         const cleanSerialNum = rawMasterLabel.split('/')[0].trim();
 
@@ -216,13 +216,13 @@ const sealRenderer = {
         ctx.stroke();
         ctx.restore();
 
-        // Logo central remonté pour laisser l'espace au bloc texte en bas
+        // Logo central agrandi et remonté
         const logoPath =
             options.logoPath ||
             payload.logoPath ||
             path.join(__dirname, '../assets/logo_anor_master.png');
 
-        const logoCenterY = centerY - 50 * scale;
+        const logoCenterY = centerY - 45 * scale;
 
         if (fs.existsSync(logoPath)) {
             try {
@@ -267,9 +267,9 @@ const sealRenderer = {
         }
         ctx.restore();
 
-        // Rendu des glyphes (Double anneau en quinconce avec effet 2D / ombrage)
+        // Rendu des glyphes avec effet 2D (ombrage relief)
         const positions = this.getVisiblePositions();
-        const glyphScale = 1.25;
+        const glyphScale = 1.30;
         const strokeWidth = 4;
 
         const rings = {
@@ -297,7 +297,7 @@ const sealRenderer = {
             ctx.translate(px, py);
             ctx.rotate(angle);
 
-            // Effet relief 2D (ombrage type QR code)
+            // Effet 2D / Relief (ombrage façon QR code)
             ctx.shadowColor = 'rgba(0, 0, 0, 0.22)';
             ctx.shadowBlur = 4 * scale;
             ctx.shadowOffsetX = 1.5 * scale;
@@ -316,33 +316,30 @@ const sealRenderer = {
         }
         ctx.restore();
 
-        // Bloc texte encadré, agrandi et parfaitement espacé sous le logo (style image de référence)
+        // Bloc texte encadré, espacé du logo et agrandi
         ctx.save();
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
 
         const textY = centerY + 135 * scale;
-        const boxWidth = 320 * scale;
-        const boxHeight = 70 * scale;
+        const boxWidth = 340 * scale;
+        const boxHeight = 65 * scale;
 
-        // Cadre propre autour du texte
         ctx.strokeStyle = GEOMETRY_COLOR;
         ctx.lineWidth = 3 * scale;
         ctx.fillStyle = '#FFFFFF';
         ctx.beginPath();
-        ctx.roundRect(centerX - boxWidth / 2, textY - boxHeight / 2, boxWidth, boxHeight, 10 * scale);
+        ctx.roundRect(centerX - boxWidth / 2, textY - boxHeight / 2, boxWidth, boxHeight, 8 * scale);
         ctx.fill();
         ctx.stroke();
 
-        // Texte du Lot
-        ctx.font = `bold ${Math.max(26, Math.round(32 * scale))}px sans-serif`;
+        ctx.font = `bold ${Math.max(24, Math.round(30 * scale))}px sans-serif`;
         ctx.fillStyle = TEXT_PRIMARY_COLOR;
-        ctx.fillText(`LOT ${batchText}`, centerX, textY - 14 * scale);
+        ctx.fillText(`LOT ${batchText}`, centerX, textY - 12 * scale);
 
-        // Texte de la Série (nettoyée sans /XXX)
-        ctx.font = `bold ${Math.max(18, Math.round(22 * scale))}px sans-serif`;
+        ctx.font = `bold ${Math.max(16, Math.round(20 * scale))}px sans-serif`;
         ctx.fillStyle = TEXT_SECONDARY_COLOR;
-        ctx.fillText(`SÉRIE : ${itemText}`, centerX, textY + 18 * scale);
+        ctx.fillText(`SÉRIE : ${itemText}`, centerX, textY + 16 * scale);
 
         ctx.restore();
 
