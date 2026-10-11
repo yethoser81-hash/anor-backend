@@ -1,8 +1,8 @@
 /**
  * ======================================================
  * SYSTEME SOUVERAIN DE CERTIFICATION ANOR
- * SERVER CORE (VERSION ARCHITECTURE HAUTE SÉCURITÉ - 2 ANNEAUX / 36 BITS)
- * Version: 18.0.0 (Matching Souple OCR & Architecture 2 Anneaux & Nord Absolu)
+ * SERVER CORE (VERSION ARCHITECTURE HAUTE SÉCURITÉ - 2 ANNEAUX / 32 BITS)
+ * Version: 18.1.0 (Synchronisé 32 bits - Anneau 12/20)
  * ======================================================
  */
 
@@ -49,12 +49,12 @@ setInterval(() => {
 }, 60000);
 
 // ======================================================
-// VERSION / CONFIGURATION (NOUVELLE ARCHITECTURE 36 BITS)
+// VERSION / CONFIGURATION (ARCHITECTURE 32 BITS)
 // ======================================================
 
-const SERVER_VERSION = "18.0.0";
-const VISUAL_VERSION = 2; // Version 2 pour la nouvelle architecture 2 anneaux
-const VISUAL_BITS_LENGTH = 36; // Mis à jour à 36 bits (16 inner + 20 outer)
+const SERVER_VERSION = "18.1.0";
+const VISUAL_VERSION = 2; 
+const VISUAL_BITS_LENGTH = 32; // Aligné sur 32 bits (12 inner + 20 outer)
 const isProduction = process.env.NODE_ENV === "production";
 const PORT = process.env.PORT || 10000;
 
@@ -79,7 +79,7 @@ function formatDateOnly(dateValue) {
 }
 
 function normalizeVisualBits(bits) {
-    if (typeof bits === "string" && /^[01]{36}$/.test(bits)) {
+    if (typeof bits === "string" && /^[01]{32}$/.test(bits)) {
         return bits;
     }
     return null;
@@ -146,8 +146,6 @@ function resolveScanCoordinates(bodyData) {
         lon = cameroonHubs[targetCity].lon + (Math.random() - 0.5) * 0.01;
         ville = targetCity;
         region = cameroonHubs[targetCity].region;
-
-        console.log(`[ANOR GEO-TOWER] Position estimée par pylônes cellulaires (${method}) : ${ville} (${lat}, ${lon})`);
     } else if (!lat || !lon) {
         method = "FALLBACK_REGIONAL_DEFAULT";
         lat = 3.8480;
@@ -265,7 +263,6 @@ app.use(
             if (!isProduction && isPrivateNetworkOrigin(origin)) { return callback(null, true); }
             if (!isProduction) { return callback(null, true); }
             
-            console.warn(`[CORS] Origine refusée par la politique de sécurité: ${origin}`);
             return callback(new Error("CORS_ORIGIN_NOT_ALLOWED"));
         },
         credentials: true,
@@ -373,14 +370,14 @@ async function intelligentVisualAnalysis(scannedMatrix) {
         const trimmed = scannedMatrix.trim();
         if (!trimmed) { return { lot: null, signature: null, bits: null, confidence: 0 }; }
 
-        if (trimmed.startsWith("ANOR36:")) {
+        if (trimmed.startsWith("ANOR32:")) {
             const bits = normalizeVisualBits(trimmed.substring(7));
             if (bits) { return { lot: null, signature: trimmed, bits, confidence: 0.90 }; }
         }
 
         const directBits = normalizeVisualBits(trimmed);
         if (directBits) {
-            return { lot: null, signature: `ANOR36:${directBits}`, bits: directBits, confidence: 0.90 };
+            return { lot: null, signature: `ANOR32:${directBits}`, bits: directBits, confidence: 0.90 };
         }
 
         if (trimmed.length < 50) {
@@ -425,7 +422,6 @@ async function extractLotWithFreeOCR(base64Image) {
         const data = await response.json();
         if (data && data.ParsedResults && data.ParsedResults.length > 0) {
             const detectedText = data.ParsedResults[0].ParsedText || "";
-            console.log("[OCR GRATUIT] Texte extrait :", detectedText.replace(/\n/g, " "));
             
             const directCodeMatch = detectedText.match(/([A-Z0-9]{2,6}[-\/][A-Z0-9]{2,6})/i);
             if (directCodeMatch) {
@@ -948,7 +944,7 @@ app.post("/api/security/audit", (req, res) => {
         console.log("[ANOR SECURITY AUDIT] Rapport reçu :", JSON.stringify(auditData));
         return apiSuccess(res, { 
             status: "AUDIT_RECEIVED", 
-            message: "Rapport de sécurité pris en compte par le noyau 18.0.0." 
+            message: "Rapport de sécurité pris en compte par le noyau 18.1.0." 
         });
     } catch (error) {
         console.error("[SECURITY AUDIT ERROR]", error.message);
@@ -1000,7 +996,7 @@ app.post(
                 throw new Error(`La matrice visuelle ANOR doit contenir exactement ${VISUAL_BITS_LENGTH} bits.`);
             }
 
-            const visualSignature = `ANOR36:${visualBits}`;
+            const visualSignature = `ANOR32:${visualBits}`;
 
             const imageBuffer = await SealRenderer.renderSealToBuffer(
                 { secureSignature, visualBits },
@@ -1059,7 +1055,7 @@ app.post(
                 visual_bits: visualBits, visual_signature: visualSignature,
                 matrix_hash: sha256Hex(visualBits), ai_signature_hash: secureSignature,
                 sha256_hash: secureSignature, signature_ia: secureSignature,
-                visual_geometry: { inner: 16, outer: 20, total: 36 },
+                visual_geometry: { inner: 12, outer: 20, total: 32 },
                 engine_version: SERVER_VERSION, statut: "CERTIFIÉ", scan_count: 0
             };
 
@@ -1088,7 +1084,7 @@ SYSTEME SOUVERAIN DE CERTIFICATION - NOTICE OFFICIELLE DE LOT
    - Chaque unité de ce lot embarque un identifiant de série unique inclus dans 'manifeste_serialisation_unitaire.csv'.
 
 3. AVIS JURIDIQUE ET RÉPRESSION DES FRAUDES :
-   - Le sceau numérique ANOR (Architecture 36 bits - 2 Anneaux) est protégé par les lois de la République du Cameroun. Toute contrefaçon est passible de poursuites.
+   - Le sceau numérique ANOR (Architecture 32 bits - 2 Anneaux) est protégé par les lois de la République du Cameroun. Toute contrefaçon est passible de poursuites.
 
 Fait à Yaoundé, le ${formatDateOnly(new Date())}
 Système Souverain de Certification - ANOR Engine ${SERVER_VERSION}
@@ -1160,7 +1156,7 @@ app.post(
             }
 
             const normalizedRequestBits = normalizeVisualBits(requestVisualBits || scannedMatrix?.bits || scannedMatrix?.visualBits);
-            const requestSignature = typeof requestVisualSignature === "string" ? requestVisualSignature.trim() : (typeof scannedMatrix?.signature === "string" ? scannedMatrix.signature.trim() : (normalizedRequestBits ? `ANOR36:${normalizedRequestBits}` : null));
+            const requestSignature = typeof requestVisualSignature === "string" ? requestVisualSignature.trim() : (typeof scannedMatrix?.signature === "string" ? scannedMatrix.signature.trim() : (normalizedRequestBits ? `ANOR32:${normalizedRequestBits}` : null));
 
             if (!targetLot && !scannedMatrix && !normalizedRequestBits && !requestSignature) {
                 return apiError(res, 400, "MISSING_SCAN", "Données de scan insuffisantes.");
@@ -1240,7 +1236,7 @@ app.post(
 
                             for (const candidate of candidates) {
                                 const storedSignature = typeof candidate.visual_signature === "string" ? candidate.visual_signature : candidate.glyph_payload?.visualSignature;
-                                const storedBits = normalizeVisualBits(candidate.visual_bits || candidate.glyph_payload?.visualBits || (typeof storedSignature === "string" && storedSignature.startsWith("ANOR36:") ? storedSignature.substring(7) : null));
+                                const storedBits = normalizeVisualBits(candidate.visual_bits || candidate.glyph_payload?.visualBits || (typeof storedSignature === "string" && storedSignature.startsWith("ANOR32:") ? storedSignature.substring(7) : null));
 
                                 if (!storedBits) continue;
                                 if (storedBits === bitsToMatch) { bestMatch = candidate; bestDistance = 0; break; }
