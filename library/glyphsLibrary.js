@@ -1,15 +1,107 @@
 /**
  * ====================================================================
  * ANOR CHECK
- * GLYPHS LIBRARY V7.0 - ARCHITECTURE 2 ANNEAUX & ORIENTATION NORD
+ * GLYPHS LIBRARY V6.1 - TRUTHMODE & CHROMATIC EXTENSION
+ *
+ * SOURCE DE VÉRITÉ DES GLYPHES & PALETTE CHROMATIQUE
+ *
+ * Types :
+ *   - square
+ *   - rect
+ *   - circle
+ *   - diamond
+ *   - plus
+ *
+ * OBJECTIF :
+ *
+ * Cette bibliothèque décrit la géométrie des glyphes et fournit
+ * une logique commune permettant au SealDecoder de déterminer :
+ *
+ *   1. quelle forme est attendue ;
+ *   2. quelle surface théorique doit être analysée ;
+ *   3. quelle proportion de cette surface paraît occupée ;
+ *   4. si le glyphe est vide ou plein ;
+ *   5. le bit correspondant ;
+ *   6. un niveau de confiance ;
+ *   7. les paramètres nécessaires à une reconstruction géométrique.
+ *   8. l'indexation et la validation chromatique (palette univoque).
+ *
+ * IMPORTANT :
+ *
+ * Le bit ne dépend PAS de la luminosité absolue.
+ *
+ * Il dépend de l'état logique du glyphe :
+ *
+ *        VIDE  -> 0
+ *        PLEIN -> 1
+ *
+ * L'environnement lumineux doit donc influencer la mesure,
+ * mais ne doit pas changer la logique du protocole.
+ *
  * ====================================================================
  */
 
 const GlyphsLibrary = {
 
-    types: ["square", "rect", "circle", "diamond", "plus"],
+    /**
+     * ================================================================
+     * TYPES OFFICIELS
+     * ================================================================
+     */
 
-    VERSION: "7.0.0",
+    types: [   "square",  "rect",  "circle",  "diamond",    "plus"    ],
+
+    /**
+     * ================================================================
+     * VERSION DU PROTOCOLE GLYPHES
+     * ================================================================
+     */
+
+    VERSION: "6.1.1",
+
+    /**
+     * ================================================================
+     * PALETTE CHROMATIQUE OFFICIELLE (10 COULEURS UNIQUES : 5 FORMES x 2 ÉTATS)
+     * ================================================================
+     */
+
+    colorsPalette: {
+        0: { hex: '#000000', name: 'Carré Plein (Noir)' },
+        1: { hex: '#3B9CFF', name: 'Carré Vide (Bleu clair)' },
+        2: { hex: '#A6192E', name: 'Rectangle Plein (Rouge cramoisi)' },
+        3: { hex: '#708090', name: 'Rectangle Vide (Gris ardoise)' },
+        4: { hex: '#006747', name: 'Cercle Plein (Vert émeraude)' },
+        5: { hex: '#D9531F', name: 'Cercle Vide (Orange brûlé)' },
+        6: { hex: '#5C2D91', name: 'Losange Plein (Violet foncé)' },
+        7: { hex: '#8B4513', name: 'Losange Vide (Marron / brique)' },
+        8: { hex: '#008080', name: 'Croix Pleine (Teal)' },
+        9: { hex: '#1B365D', name: 'Croix Vide (Bleu marine profond)' }
+    },
+
+    /**
+     * Correspondance directe par type et par état (plein / vide)
+     */
+    glyphColorMap: {
+        square:  { full: '#000000', empty: '#3B9CFF' },
+        rect:    { full: '#A6192E', empty: '#708090' },
+        circle:  { full: '#006747', empty: '#D9531F' },
+        diamond: { full: '#5C2D91', empty: '#8B4513' },
+        plus:    { full: '#008080', empty: '#1B365D' }
+    },
+
+    getGlyphColor(type, isFilled) {
+        const stateKey = isFilled ? 'full' : 'empty';
+        if (this.glyphColorMap && this.glyphColorMap[type]) {
+            return this.glyphColorMap[type][stateKey];
+        }
+        return '#000000';
+    },
+
+    /**
+     * ================================================================
+     * LOGIQUE TRUTHMODE
+     * ================================================================
+     */
 
     TRUTHMODE: {
         emptyThreshold: 0.45,
@@ -19,65 +111,32 @@ const GlyphsLibrary = {
         reconstructionThreshold: 0.70
     },
 
+    /**
+     * ================================================================
+     * PARAMÈTRES DE MESURE
+     * ================================================================
+     */
+
     MEASUREMENT: {
         passes: 5,
         minimumCoverage: 0.60,
         edgeTolerance: 0.15,
-        minimumGlyphPixels: 4,
+        minimumGlyphPixels: 3,
         reconstructionSize: 32
     },
 
+    /**
+     * ================================================================
+     * DÉFINITIONS DES GLYPHES
+     * ================================================================
+     */
+
     definitions: {
-        square: {
-            type: "square",
-            width: 22,
-            height: 22,
-            sides: 4,
-            symmetry: "rotational",
-            orientation: 0,
-            areaModel: "rectangle",
-            reconstruction: "square"
-        },
-        rect: {
-            type: "rect",
-            width: 42,
-            height: 11,
-            sides: 4,
-            symmetry: "horizontal",
-            orientation: 0,
-            areaModel: "rectangle",
-            reconstruction: "rectangle"
-        },
-        circle: {
-            type: "circle",
-            width: 22,
-            height: 22,
-            radius: 11,
-            symmetry: "radial",
-            orientation: 0,
-            areaModel: "circle",
-            reconstruction: "circle"
-        },
-        diamond: {
-            type: "diamond",
-            width: 20,
-            height: 20,
-            rotation: 45,
-            symmetry: "rotational",
-            orientation: 45,
-            areaModel: "diamond",
-            reconstruction: "diamond"
-        },
-        plus: {
-            type: "plus",
-            width: 24,
-            height: 24,
-            symbol: "+",
-            symmetry: "cross",
-            orientation: 0,
-            areaModel: "plus",
-            reconstruction: "plus"
-        }
+        square: { type: "square", width: 18, height: 18, sides: 4, symmetry: "rotational", orientation: 0, areaModel: "rectangle", reconstruction: "square" },
+        rect: { type: "rect", width: 36, height: 9, sides: 4, symmetry: "horizontal", orientation: 0, areaModel: "rectangle", reconstruction: "rectangle" },
+        circle: { type: "circle", width: 18, height: 18, radius: 9, symmetry: "radial", orientation: 0, areaModel: "circle", reconstruction: "circle" },
+        diamond: { type: "diamond", width: 16, height: 16, rotation: 45, symmetry: "rotational", orientation: 45, areaModel: "diamond", reconstruction: "diamond" },
+        plus: { type: "plus", width: 20, height: 20, symbol: "+", symmetry: "cross", orientation: 0, areaModel: "plus", reconstruction: "plus" }
     },
 
     resolveGlyph(index) {
@@ -89,38 +148,28 @@ const GlyphsLibrary = {
 
     getGlyphDefinition(type) {
         if (!type || !this.definitions[type]) {
-            return {
-                type: "unknown",
-                width: 22,
-                height: 22,
-                areaModel: "rectangle",
-                reconstruction: "rectangle"
-            };
+            return { type: "unknown", width: 18, height: 18, areaModel: "rectangle", reconstruction: "rectangle" };
         }
         return { ...this.definitions[type] };
     },
 
     getTheoreticalArea(type) {
         const glyph = this.getGlyphDefinition(type);
-
         switch (glyph.areaModel) {
             case "circle":
                 return Math.PI * Math.pow(glyph.radius, 2);
-
             case "diamond":
                 return (glyph.width * glyph.height) / 2;
-
             case "plus": {
                 const branch = glyph.width / 3;
                 const horizontal = glyph.width * branch;
                 const vertical = glyph.height * branch;
                 const overlap = branch * branch;
-                return horizontal + vertical - overlap;
+                return (horizontal + vertical - overlap);
             }
-
             case "rectangle":
             default:
-                return glyph.width * glyph.height;
+                return (glyph.width * glyph.height);
         }
     },
 
@@ -144,8 +193,12 @@ const GlyphsLibrary = {
     },
 
     stateToBit(state) {
-        if (state === "FULL") return 1;
-        if (state === "EMPTY") return 0;
+        if (state === "FULL") {
+            return 1;
+        }
+        if (state === "EMPTY") {
+            return 0;
+        }
         return null;
     },
 
@@ -155,29 +208,36 @@ const GlyphsLibrary = {
         const fullThreshold = this.TRUTHMODE.fullThreshold;
 
         if (ratio <= emptyThreshold) {
-            return Number(
-                Math.min(
-                    1,
-                    (emptyThreshold - ratio) / emptyThreshold + 0.5
-                ).toFixed(3)
-            );
+            return Number(Math.min(1, (emptyThreshold - ratio) / emptyThreshold + 0.5).toFixed(3));
         }
-
         if (ratio >= fullThreshold) {
-            return Number(
-                Math.min(
-                    1,
-                    (ratio - fullThreshold) / (1 - fullThreshold) + 0.5
-                ).toFixed(3)
-            );
+            return Number(Math.min(1, (ratio - fullThreshold) / (1 - fullThreshold) + 0.5).toFixed(3));
         }
-
-        const distance = Math.min(
-            ratio - emptyThreshold,
-            fullThreshold - ratio
-        );
-
+        const distance = Math.min(ratio - emptyThreshold, fullThreshold - ratio);
         return Number(Math.max(0, 0.5 - distance).toFixed(3));
+    },
+
+    resolveColorIndex(hexColor) {
+        if (!hexColor) return 0;
+        const normalized = String(hexColor).toUpperCase().trim();
+        for (const [index, data] of Object.entries(this.colorsPalette)) {
+            if (data.hex === normalized) {
+                return Number(index);
+            }
+        }
+        return 0;
+    },
+
+    validateChromaticGlyph(type, fillRatio, detectedHexColor) {
+        const baseAnalysis = this.analyzeGlyph(type, fillRatio);
+        const colorIndex = this.resolveColorIndex(detectedHexColor);
+        return {
+            ...baseAnalysis,
+            colorIndex,
+            colorName: this.colorsPalette[colorIndex]?.name || 'Inconnu',
+            chromaticValid: colorIndex >= 0 && colorIndex <= 9,
+            strictMatch: baseAnalysis.reliable && (colorIndex >= 0)
+        };
     },
 
     analyzeGlyph(type, fillRatio, options = {}) {
@@ -198,8 +258,8 @@ const GlyphsLibrary = {
             state,
             bit,
             confidence,
-            reliable: bit !== null && confidence >= this.TRUTHMODE.minimumConfidence,
-            needsReconstruction: confidence < this.TRUTHMODE.minimumConfidence,
+            reliable: (bit !== null && confidence >= this.TRUTHMODE.minimumConfidence),
+            needsReconstruction: (confidence < this.TRUTHMODE.minimumConfidence),
             definition: glyph
         };
     },
@@ -226,9 +286,13 @@ const GlyphsLibrary = {
         let uncertainVotes = 0;
 
         for (const analysis of analyses) {
-            if (analysis.state === "EMPTY") emptyVotes++;
-            else if (analysis.state === "FULL") fullVotes++;
-            else uncertainVotes++;
+            if (analysis.state === "EMPTY") {
+                emptyVotes++;
+            } else if (analysis.state === "FULL") {
+                fullVotes++;
+            } else {
+                uncertainVotes++;
+            }
         }
 
         const average = analyses.reduce((sum, item) => sum + item.fillRatio, 0) / analyses.length;
@@ -244,9 +308,7 @@ const GlyphsLibrary = {
         const baseConfidence = this.calculateConfidence(average);
         const winningVotes = Math.max(emptyVotes, fullVotes);
         const consensus = winningVotes / analyses.length;
-        const confidence = Number(
-            Math.min(1, baseConfidence * 0.60 + consensus * 0.40).toFixed(3)
-        );
+        const confidence = Number(Math.min(1, (baseConfidence * 0.60) + (consensus * 0.40)).toFixed(3));
 
         return {
             type,
@@ -254,14 +316,35 @@ const GlyphsLibrary = {
             bit,
             fillRatio: Number(average.toFixed(4)),
             confidence,
-            reliable: bit !== null && confidence >= this.TRUTHMODE.minimumConfidence,
-            votes: {
-                empty: emptyVotes,
-                full: fullVotes,
-                uncertain: uncertainVotes
-            },
+            reliable: (bit !== null && confidence >= this.TRUTHMODE.minimumConfidence),
+            votes: { empty: emptyVotes, full: fullVotes, uncertain: uncertainVotes },
             measurements: analyses
         };
+    },
+
+    getReconstructionProfile(type) {
+        const glyph = this.getGlyphDefinition(type);
+        const theoreticalArea = this.getTheoreticalArea(type);
+        return {
+            type,
+            model: glyph.reconstruction,
+            width: glyph.width,
+            height: glyph.height,
+            theoreticalArea,
+            symmetry: glyph.symmetry,
+            orientation: glyph.orientation || 0,
+            targetSize: this.MEASUREMENT.reconstructionSize,
+            minimumCoverage: this.MEASUREMENT.minimumCoverage,
+            edgeTolerance: this.MEASUREMENT.edgeTolerance
+        };
+    },
+
+    decodeGlyph(type, fillRatio, options = {}) {
+        return this.analyzeGlyph(type, fillRatio, options);
+    },
+
+    isValidType(type) {
+        return this.types.includes(type);
     },
 
     getProtocolInfo() {
@@ -269,7 +352,12 @@ const GlyphsLibrary = {
             version: this.VERSION,
             types: [...this.types],
             truthMode: { ...this.TRUTHMODE },
-            measurement: { ...this.MEASUREMENT }
+            measurement: { ...this.MEASUREMENT },
+            colorsPalette: { ...this.colorsPalette },
+            definitions: Object.keys(this.definitions).reduce((result, type) => {
+                result[type] = this.getGlyphDefinition(type);
+                return result;
+            }, {})
         };
     }
 };
