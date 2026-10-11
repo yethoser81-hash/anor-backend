@@ -1,7 +1,7 @@
 /**
  * ====================================================================
  * ANOR CHECK
- * SEAL RENDERER V26.0 - HAUTE VISIBILITÉ & RELIEF 2D OPTIMISÉ (2CM)
+ * SEAL RENDERER V27.0 - LOGO MAXIMISÉ, TEXTE ÉPURÉ SANS CADRE & 28 BITS
  * ====================================================================
  */
 
@@ -58,12 +58,12 @@ const sealRenderer = {
         const centerX = width / 2;
         const centerY = height / 2;
         
-        // Logo étendu pour éliminer tout vide central
-        const logoSize = 340; 
+        // Logo maximisé pour occuper tout l'espace central disponible
+        const logoSize = 360; 
         const logoRadius = logoSize / 2;
 
-        const outerRingRadius = outerRadius - 28;
-        const singleRingRadius = outerRingRadius - 42; // Anneau collé au plus près pour un design compact et dense
+        const outerRingRadius = outerRadius - 26;
+        const singleRingRadius = outerRingRadius - 38; 
 
         return {
             centerX,
@@ -188,13 +188,13 @@ const sealRenderer = {
         ctx.stroke();
         ctx.restore();
 
-        // Logo central maximisé
+        // Logo central remonté et agrandi (plus de contact avec le texte)
         const logoPath =
             options.logoPath ||
             payload.logoPath ||
             path.join(__dirname, '../assets/logo_anor_master.png');
 
-        const logoCenterY = centerY - 38 * scale;
+        const logoCenterY = centerY - 55 * scale;
 
         if (fs.existsSync(logoPath)) {
             try {
@@ -239,7 +239,7 @@ const sealRenderer = {
         }
         ctx.restore();
 
-        // Rendu des glyphes avec un VRAI effet relief 2D prononcé
+        // Rendu des glyphes avec effet relief 2D
         const positions = this.getVisiblePositions();
         const glyphScale = 1.40; 
         const strokeWidth = 4.8;
@@ -262,7 +262,6 @@ const sealRenderer = {
             ctx.translate(px, py);
             ctx.rotate(angle);
 
-            // Relief 2D fort : Ombre décalée + contour lumineux/contrasté
             ctx.shadowColor = 'rgba(0, 0, 0, 0.45)';
             ctx.shadowBlur = 4 * scale;
             ctx.shadowOffsetX = 1.5 * scale;
@@ -282,33 +281,22 @@ const sealRenderer = {
         }
         ctx.restore();
 
-        // Bloc texte massif et ultra-lisible en bas (Optimisé pour 2cm)
+        // Bloc texte SANS CADRE, ultra-grand et parfaitement lisible à l'œil nu en bas
         ctx.save();
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
 
-        const textY = centerY + 138 * scale;
-        const boxWidth = 330 * scale;
-        const boxHeight = 68 * scale;
+        const textY = centerY + 135 * scale;
 
-        // Fond blanc opaque pour détacher nettement le texte du fond
-        ctx.strokeStyle = GEOMETRY_COLOR;
-        ctx.lineWidth = 3.5 * scale;
-        ctx.fillStyle = '#FFFFFF';
-        ctx.beginPath();
-        ctx.roundRect(centerX - boxWidth / 2, textY - boxHeight / 2, boxWidth, boxHeight, 10 * scale);
-        ctx.fill();
-        ctx.stroke();
-
-        // Numéro de lot ultra-grand et gras (très visible à l'œil nu)
-        ctx.font = `900 ${Math.max(26, Math.round(36 * scale))}px sans-serif`;
+        // Numéro de lot massif et ultra-lisible (sans cadre)
+        ctx.font = `900 ${Math.max(30, Math.round(42 * scale))}px sans-serif`;
         ctx.fillStyle = TEXT_PRIMARY_COLOR;
-        ctx.fillText(`LOT ${batchText}`, centerX, textY - 12 * scale);
+        ctx.fillText(`LOT ${batchText}`, centerX, textY - 14 * scale);
 
-        // Numéro de série bien visible
-        ctx.font = `bold ${Math.max(16, Math.round(22 * scale))}px sans-serif`;
+        // Numéro de série agrandi et bien distinct
+        ctx.font = `bold ${Math.max(18, Math.round(24 * scale))}px sans-serif`;
         ctx.fillStyle = TEXT_SECONDARY_COLOR;
-        ctx.fillText(`SÉRIE : ${itemText}`, centerX, textY + 16 * scale);
+        ctx.fillText(`SÉRIE : ${itemText}`, centerX, textY + 20 * scale);
 
         ctx.restore();
 
@@ -322,7 +310,6 @@ function drawGlyphWithRelief2D(ctx, type, def, isFilled, glyphScale = 1, strokeW
 
     ctx.lineWidth = strokeWidth;
 
-    // Effet 2D biseauté : traçage d'une bordure de contraste sous le glyphe
     ctx.strokeStyle = '#000000';
     ctx.fillStyle = '#000000';
 
@@ -331,7 +318,6 @@ function drawGlyphWithRelief2D(ctx, type, def, isFilled, glyphScale = 1, strokeW
         case 'rect':
             if (isFilled) {
                 ctx.fillRect(-width / 2, -height / 2, width, height);
-                // Effet de lumière interne 2D
                 ctx.fillStyle = '#333333';
                 ctx.fillRect(-width / 2 + 2, -height / 2 + 2, width - 4, height - 4);
             } else {
