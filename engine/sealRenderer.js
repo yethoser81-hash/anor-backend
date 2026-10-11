@@ -1,7 +1,7 @@
 /**
  * ====================================================================
  * ANOR CHECK
- * SEAL RENDERER V24.0 - ANNEAU UNIQUE 28 BITS (268M COMBINAISONS / 2CM)
+ * SEAL RENDERER V25.0 - ANNEAU UNIQUE 28 BITS (HAUTE VISIBILITÉ)
  * ====================================================================
  */
 
@@ -12,7 +12,7 @@ const crypto = require('crypto');
 const GlyphsLibrary = require('../library/glyphsLibrary');
 
 const VISUAL_VERSION = 2;
-const VISIBLE_GLYPH_COUNT = 28; // 28 bits (268 435 456 combinaisons uniques)
+const VISIBLE_GLYPH_COUNT = 28; // 28 bits (268 435 456 combinaisons uniques)[cite: 16]
 const CANONICAL_OUTER_RADIUS = 375;
 
 const sealRenderer = {
@@ -58,8 +58,8 @@ const sealRenderer = {
         const centerX = width / 2;
         const centerY = height / 2;
         
-        // Logo optimisé pour laisser respirer l'anneau unique
-        const logoSize = 260; 
+        // Logo agrandi pour occuper plus d'espace au centre
+        const logoSize = 310; 
         const logoRadius = logoSize / 2;
 
         const outerRingRadius = outerRadius - 35;
@@ -87,7 +87,7 @@ const sealRenderer = {
 
     getVisiblePositions() {
         const positions = [];
-        const count = VISIBLE_GLYPH_COUNT; // 28 glyphes répartis sur l'anneau unique
+        const count = VISIBLE_GLYPH_COUNT; // 28 glyphes répartis sur l'anneau unique[cite: 16]
 
         for (let i = 0; i < count; i++) {
             const angle = (i / count) * Math.PI * 2;
@@ -189,13 +189,13 @@ const sealRenderer = {
         ctx.stroke();
         ctx.restore();
 
-        // Logo central remonté
+        // Logo central élargi et bien positionné
         const logoPath =
             options.logoPath ||
             payload.logoPath ||
             path.join(__dirname, '../assets/logo_anor_master.png');
 
-        const logoCenterY = centerY - 50 * scale;
+        const logoCenterY = centerY - 45 * scale;
 
         if (fs.existsSync(logoPath)) {
             try {
@@ -240,9 +240,9 @@ const sealRenderer = {
         }
         ctx.restore();
 
-        // Rendu de l'anneau unique à 28 glyphes avec effet relief 2D
+        // Rendu de l'anneau unique à 28 glyphes
         const positions = this.getVisiblePositions();
-        const glyphScale = 1.35; // Échelle ajustée pour 28 glyphes afin d'éviter la fusion des bordures
+        const glyphScale = 1.35; 
         const strokeWidth = 4.2;
 
         ctx.save();
@@ -265,7 +265,6 @@ const sealRenderer = {
             ctx.translate(px, py);
             ctx.rotate(angle);
 
-            // Effet relief 2D net
             ctx.shadowColor = 'rgba(0, 0, 0, 0.25)';
             ctx.shadowBlur = 3 * scale;
             ctx.shadowOffsetX = 1 * scale;
@@ -284,30 +283,32 @@ const sealRenderer = {
         }
         ctx.restore();
 
-        // Bloc texte encadré et sécurisé en bas
+        // Bloc texte agrandi et ultra-lisible à l'œil nu en bas
         ctx.save();
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
 
-        const textY = centerY + 138 * scale;
-        const boxWidth = 280 * scale;
-        const boxHeight = 55 * scale;
+        const textY = centerY + 142 * scale;
+        const boxWidth = 310 * scale;
+        const boxHeight = 65 * scale;
 
         ctx.strokeStyle = GEOMETRY_COLOR;
-        ctx.lineWidth = 2.5 * scale;
+        ctx.lineWidth = 3 * scale;
         ctx.fillStyle = '#FFFFFF';
         ctx.beginPath();
-        ctx.roundRect(centerX - boxWidth / 2, textY - boxHeight / 2, boxWidth, boxHeight, 6 * scale);
+        ctx.roundRect(centerX - boxWidth / 2, textY - boxHeight / 2, boxWidth, boxHeight, 8 * scale);
         ctx.fill();
         ctx.stroke();
 
-        ctx.font = `bold ${Math.max(20, Math.round(26 * scale))}px sans-serif`;
+        // Police du Lot agrandie (32px)
+        ctx.font = `bold ${Math.max(24, Math.round(32 * scale))}px sans-serif`;
         ctx.fillStyle = TEXT_PRIMARY_COLOR;
-        ctx.fillText(`LOT ${batchText}`, centerX, textY - 9 * scale);
+        ctx.fillText(`LOT ${batchText}`, centerX, textY - 11 * scale);
 
-        ctx.font = `bold ${Math.max(13, Math.round(17 * scale))}px sans-serif`;
+        // Police de la Série agrandie (20px)
+        ctx.font = `bold ${Math.max(15, Math.round(20 * scale))}px sans-serif`;
         ctx.fillStyle = TEXT_SECONDARY_COLOR;
-        ctx.fillText(`SÉRIE : ${itemText}`, centerX, textY + 13 * scale);
+        ctx.fillText(`SÉRIE : ${itemText}`, centerX, textY + 15 * scale);
 
         ctx.restore();
 
