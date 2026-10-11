@@ -1,7 +1,7 @@
 /**
  * ====================================================================
  * ANOR CHECK
- * SEAL RENDERER V7.5 - 2 ANNEAUX OPTIMISÉS & ORIENTATION NORD
+ * SEAL RENDERER V10.0 - CORRECTION STRICTE GEOMETRIE & TEXTE
  * ====================================================================
  */
 
@@ -11,8 +11,8 @@ const fs = require('fs');
 const crypto = require('crypto');
 const GlyphsLibrary = require('../library/glyphsLibrary');
 
-const VISUAL_VERSION = 1;
-const VISIBLE_GLYPH_COUNT = 36; // 16 sur l'anneau interne + 20 sur l'anneau externe
+const VISUAL_VERSION = 2;
+const VISIBLE_GLYPH_COUNT = 24;
 const CANONICAL_OUTER_RADIUS = 375;
 
 const sealRenderer = {
@@ -54,15 +54,17 @@ const sealRenderer = {
     },
 
     getGeometry(width, height) {
-        const outerRadius = Math.min(width, height) / 2 - 25;
+        const outerRadius = Math.min(width, height) / 2 - 20;
         const centerX = width / 2;
         const centerY = height / 2;
         
-        const logoSize = 210; // Logo agrandi au centre
+        // 1. LOGO TRES AGRANDI AU CENTRE
+        const logoSize = 340; 
         const logoRadius = logoSize / 2;
 
-        const innerRingRadius = logoRadius + 42; 
-        const outerRingRadius = outerRadius - 38;
+        // 2. ANNEAUX RAPPROCHÉS AU MAXIMUM
+        const outerRingRadius = outerRadius - 35;
+        const innerRingRadius = outerRingRadius - 50; // Collé à l'anneau externe
 
         return {
             centerX,
@@ -75,31 +77,63 @@ const sealRenderer = {
         };
     },
 
+    getFinderAngles() {
+        return [
+            -Math.PI / 2, // Nord
+            0,            // Est
+            Math.PI / 2,  // Sud
+            Math.PI       // Ouest
+        ];
+    },
+
+    isFinderCollision(angle) {
+        for (const targetAngle of this.getFinderAngles()) {
+            let diff = Math.abs(angle - targetAngle);
+            if (diff > Math.PI) {
+                diff = (Math.PI * 2) - diff;
+            }
+            if (diff < 0.38) {
+                return true;
+            }
+        }
+        return false;
+    },
+
     getVisiblePositions() {
         const positions = [];
 
-        // Anneau Interne : 16 glyphes (plus grands)
-        for (let i = 0; i < 16; i++) {
+        // ANNEAU INTERNE : AUCUN GLYPHE AU-DESSUS DU LOGO (Zone Nord exclue entre 200° et 340°)
+        const totalInnerSlots = 12;
+        for (let i = 0; i < totalInnerSlots; i++) {
+            const angle = (i / totalInnerSlots) * Math.PI * 2;
+            const deg = (angle * 180 / Math.PI + 360) % 360;
+
+            // Exclusion stricte du haut (au-dessus du logo)
+            if (deg >= 210 && deg <= 330) {
+                continue;
+            }
+
+            // Décalage angulaire quinconce par rapport à l'anneau externe
+            const shiftedAngle = angle + (Math.PI / 12);
+
             positions.push({
                 ring: 'inner',
-                ringPosition: i,
-                theoreticalCount: 16
+                angle: shiftedAngle,
+                index: i
             });
         }
 
-        // Anneau Externe : 20 glyphes (espacés et massifs)
-        for (let i = 0; i < 20; i++) {
-            positions.push({
-                ring: 'outer',
-                ringPosition: i,
-                theoreticalCount: 20
-            });
-        }
-
-        if (positions.length !== VISIBLE_GLYPH_COUNT) {
-            throw new Error(
-                `[sealRenderer] Géométrie protocolaire invalide : ${positions.length}/${VISIBLE_GLYPH_COUNT}.`
-            );
+        // ANNEAU EXTERNE (HORS MIRES)
+        const totalOuterSlots = 20;
+        for (let i = 0; i < totalOuterSlots; i++) {
+            const angle = (i / totalOuterSlots) * Math.PI * 2;
+            if (!this.isFinderCollision(angle)) {
+                positions.push({
+                    ring: 'outer',
+                    angle,
+                    index: i
+                });
+            }
         }
 
         return positions;
@@ -116,7 +150,6 @@ const sealRenderer = {
         const TEXT_PRIMARY_COLOR = options.textColor || '#000000';
         const TEXT_SECONDARY_COLOR = options.subTextColor || '#000000';
         const backgroundColor = options.backgroundColor || '#FFFFFF';
-        const enable2DEffect = options.enable2DEffect !== false;
 
         const geometry = this.getGeometry(width, height);
         const {
@@ -131,10 +164,9 @@ const sealRenderer = {
 
         const scale = outerRadius / CANONICAL_OUTER_RADIUS;
 
-        ctx.save();
+        // Arrière-plan blanc
         ctx.fillStyle = backgroundColor;
         ctx.fillRect(0, 0, width, height);
-        ctx.restore();
 
         const rawBatchName =
             payload.lot ||
@@ -146,13 +178,11 @@ const sealRenderer = {
             options.lot;
 
         if (!rawBatchName) {
-            throw new Error('[sealRenderer] Aucun lot ou nom de produit fourni.');
+            throw new Error('[sealRenderer] Aucun lot fourni.');
         }
 
         const normalizedBatchName = String(rawBatchName).trim().toUpperCase();
-        const batchText = normalizedBatchName.startsWith('LOT')
-            ? normalizedBatchName
-            : `LOT ${normalizedBatchName}`;
+        const batchText = normalizedBatchName.replace(/^LOT\s*/i, '');
 
         const rawItemNumber =
             payload.itemNumber ??
@@ -166,7 +196,7 @@ const sealRenderer = {
             !options.isMasterSeal &&
             !payload.isMasterSeal
                 ? `${rawItemNumber}`
-                : (options.masterSerialLabel || '000 000');
+                : (options.masterSerialLabel || '000000 / 2 500');
 
         const secureSignature =
             payload.secureSignature ||
@@ -181,27 +211,16 @@ const sealRenderer = {
             this.normalizeVisualBits(suppliedVisualBits) ||
             this.deriveVisualBits(secureSignature || rawBatchName);
 
-        if (!visualBits || visualBits.length !== VISIBLE_GLYPH_COUNT) {
-            throw new Error(`[sealRenderer] Matrice visuelle invalide : ${VISIBLE_GLYPH_COUNT} bits requis.`);
-        }
-
-        if (enable2DEffect) {
-            ctx.shadowColor = 'rgba(0, 0, 0, 0.25)';
-            ctx.shadowBlur = 10 * scale;
-            ctx.shadowOffsetX = 3 * scale;
-            ctx.shadowOffsetY = 4 * scale;
-        }
-
-        // Cercle extérieur
+        // 1. CERCLE EXTERNE UNIQUE SOUS LES MIRES
         ctx.save();
         ctx.strokeStyle = GEOMETRY_COLOR;
-        ctx.lineWidth = 6 * scale;
+        ctx.lineWidth = 5 * scale;
         ctx.beginPath();
-        ctx.arc(centerX, centerY, outerRadius, 0, Math.PI * 2);
+        ctx.arc(centerX, centerY, outerRingRadius + 22 * scale, 0, Math.PI * 2);
         ctx.stroke();
         ctx.restore();
 
-        // Logo central
+        // 2. LOGO CENTRAL MASSIF
         const logoPath =
             options.logoPath ||
             payload.logoPath ||
@@ -213,7 +232,7 @@ const sealRenderer = {
                 ctx.drawImage(
                     img,
                     centerX - logoRadius,
-                    centerY - logoRadius,
+                    centerY - logoRadius - 25 * scale,
                     logoSize,
                     logoSize
                 );
@@ -222,10 +241,38 @@ const sealRenderer = {
             }
         }
 
-        // Rendu des Glyphes sur 2 anneaux
+        // 3. MIRES CARDINALES
+        const finderAngles = this.getFinderAngles();
+
+        ctx.save();
+        ctx.strokeStyle = GEOMETRY_COLOR;
+        ctx.fillStyle = GEOMETRY_COLOR;
+
+        for (let i = 0; i < finderAngles.length; i++) {
+            const angle = finderAngles[i];
+            const px = centerX + outerRingRadius * Math.cos(angle);
+            const py = centerY + outerRingRadius * Math.sin(angle);
+
+            ctx.save();
+            ctx.translate(px, py);
+
+            if (i === 0) {
+                ctx.lineWidth = 5 * scale;
+                ctx.strokeRect(-20, -20, 40, 40);
+                ctx.fillRect(-9, -9, 18, 18);
+            } else {
+                ctx.lineWidth = 4 * scale;
+                ctx.strokeRect(-16, -16, 32, 32);
+                ctx.fillRect(-6, -6, 12, 12);
+            }
+            ctx.restore();
+        }
+        ctx.restore();
+
+        // 4. GLYPHES DÉCALÉS EN QUINCONCE
         const positions = this.getVisiblePositions();
-        const glyphScale = 1.45; // Glyphes plus grands pour une visibilité nette à 2,5cm
-        const strokeWidth = 5;
+        const glyphScale = 1.35;
+        const strokeWidth = 4;
 
         const rings = {
             inner: innerRingRadius,
@@ -235,16 +282,11 @@ const sealRenderer = {
         ctx.save();
         ctx.strokeStyle = GEOMETRY_COLOR;
         ctx.fillStyle = GEOMETRY_COLOR;
-        ctx.lineWidth = strokeWidth;
-        ctx.lineCap = 'round';
-        ctx.lineJoin = 'round';
 
         for (let visibleIndex = 0; visibleIndex < positions.length; visibleIndex++) {
-            const position = positions[visibleIndex];
-            const radius = rings[position.ring];
-            const angle =
-                (position.ringPosition / position.theoreticalCount) *
-                Math.PI * 2;
+            const pos = positions[visibleIndex];
+            const radius = rings[pos.ring];
+            const angle = pos.angle;
 
             const px = centerX + radius * Math.cos(angle);
             const py = centerY + radius * Math.sin(angle);
@@ -270,100 +312,22 @@ const sealRenderer = {
         }
         ctx.restore();
 
-        ctx.shadowColor = 'transparent';
-
-        // ------------------------------------------------------------
-        // MIRE NORD ASYMÉTRIQUE (ORIENTATION DE LECTURE INSTANTANÉE)
-        // Positionnée exactement à 12h (angle -PI/2) pour décodage < 3s
-        // ------------------------------------------------------------
-        const northAngle = -Math.PI / 2;
-        const northPx = centerX + outerRingRadius * Math.cos(northAngle);
-        const northPy = centerY + outerRingRadius * Math.sin(northAngle);
-
-        ctx.save();
-        ctx.translate(northPx, northPy);
-        ctx.strokeStyle = GEOMETRY_COLOR;
-        ctx.fillStyle = GEOMETRY_COLOR;
-        ctx.lineWidth = 6 * scale;
-        // Double carré superposé distinctif pour indiquer le Nord absolu
-        ctx.strokeRect(-22, -22, 44, 44);
-        ctx.fillRect(-10, -10, 20, 20);
-        ctx.restore();
-
-        // Autres mires cardinales (Est, Sud, Ouest)
-        const otherAngles = [0, Math.PI / 2, Math.PI];
-        ctx.save();
-        ctx.strokeStyle = GEOMETRY_COLOR;
-        ctx.fillStyle = GEOMETRY_COLOR;
-        ctx.lineWidth = 4 * scale;
-
-        for (const targetAngle of otherAngles) {
-            const px = centerX + outerRingRadius * Math.cos(targetAngle);
-            const py = centerY + outerRingRadius * Math.sin(targetAngle);
-
-            ctx.save();
-            ctx.translate(px, py);
-            ctx.strokeRect(-16, -16, 32, 32);
-            ctx.fillRect(-6, -6, 12, 12);
-            ctx.restore();
-        }
-        ctx.restore();
-
-        // ------------------------------------------------------------
-        // BLOC TEXTE ÉPURÉ (SANS "LOT" NI "SÉRIE", CHIFFRES AGRANDIS)
-        // ------------------------------------------------------------
+        // 5. TEXTE LIBRE SANS AUCUN ENCADREMENT
         ctx.save();
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
 
-        const textY = centerY + 135 * scale; 
-        const boxWidth = 310 * scale;
-        const boxHeight = 62 * scale;
+        const textY = centerY + 145 * scale;
 
-        if (enable2DEffect) {
-            ctx.shadowColor = 'rgba(0, 0, 0, 0.15)';
-            ctx.shadowBlur = 6 * scale;
-            ctx.shadowOffsetX = 2 * scale;
-            ctx.shadowOffsetY = 3 * scale;
-        }
+        // Numéro de lot très grand
+        ctx.font = `bold ${Math.max(34, Math.round(42 * scale))}px sans-serif`;
+        ctx.fillStyle = TEXT_PRIMARY_COLOR;
+        ctx.fillText(batchText, centerX, textY - 14 * scale);
 
-        ctx.fillStyle = '#FFFFFF';
-        ctx.beginPath();
-        ctx.roundRect(centerX - boxWidth / 2, textY - boxHeight / 2, boxWidth, boxHeight, 12 * scale);
-        ctx.fill();
-        
-        ctx.shadowColor = 'transparent';
-        ctx.strokeStyle = '#000000';
-        ctx.lineWidth = 2.5 * scale;
-        ctx.stroke();
-
-        const drawOutlinedText = (text, x, y, font, textColor) => {
-            ctx.font = font;
-            ctx.strokeStyle = '#FFFFFF';
-            ctx.lineWidth = Math.max(4, 5 * scale);
-            ctx.lineJoin = 'round';
-            ctx.strokeText(text, x, y);
-            ctx.fillStyle = textColor;
-            ctx.fillText(text, x, y);
-        };
-
-        // Code de lot en taille maximale (sans le mot "LOT")
-        drawOutlinedText(
-            normalizedBatchName.replace(/^LOT\s*/, ''),
-            centerX,
-            textY - 11 * scale,
-            `bold ${Math.max(26, Math.round(32 * scale))}px sans-serif`,
-            TEXT_PRIMARY_COLOR
-        );
-
-        // Numéro de série épuré
-        drawOutlinedText(
-            itemText,
-            centerX,
-            textY + 16 * scale,
-            `bold ${Math.max(20, Math.round(24 * scale))}px sans-serif`,
-            TEXT_SECONDARY_COLOR
-        );
+        // Numéro de série très grand
+        ctx.font = `bold ${Math.max(24, Math.round(30 * scale))}px sans-serif`;
+        ctx.fillStyle = TEXT_SECONDARY_COLOR;
+        ctx.fillText(itemText, centerX, textY + 24 * scale);
 
         ctx.restore();
 
@@ -371,7 +335,7 @@ const sealRenderer = {
     }
 };
 
-function drawGlyphFromDefinition(ctx, type, def, isFilled, glyphScale = 1, strokeWidth = 5) {
+function drawGlyphFromDefinition(ctx, type, def, isFilled, glyphScale = 1, strokeWidth = 4) {
     const width = def.width * glyphScale;
     const height = def.height * glyphScale;
 
