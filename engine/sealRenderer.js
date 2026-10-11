@@ -1,7 +1,7 @@
 /**
  * ====================================================================
  * ANOR CHECK
- * SEAL RENDERER V27.0 - LOGO MAXIMISÉ, TEXTE ÉPURÉ SANS CADRE & 28 BITS
+ * SEAL RENDERER V28.0 - ALIGNEMENT PARFAIT, ZÉRO CHEVAUCHEMENT (28 BITS)
  * ====================================================================
  */
 
@@ -58,12 +58,13 @@ const sealRenderer = {
         const centerX = width / 2;
         const centerY = height / 2;
         
-        // Logo maximisé pour occuper tout l'espace central disponible
-        const logoSize = 360; 
+        // Taille équilibrée pour combler l'espace sans étouffer les glyphes
+        const logoSize = 320; 
         const logoRadius = logoSize / 2;
 
-        const outerRingRadius = outerRadius - 26;
-        const singleRingRadius = outerRingRadius - 38; 
+        const outerRingRadius = outerRadius - 25;
+        // Rayon ajusté pour resserrer le cercle de glyphes autour du logo
+        const singleRingRadius = outerRingRadius - 48; 
 
         return {
             centerX,
@@ -88,9 +89,12 @@ const sealRenderer = {
     getVisiblePositions() {
         const positions = [];
         const count = VISIBLE_GLYPH_COUNT;
+        
+        // Décalage angulaire d'un demi-pas pour éviter que les glyphes ne touchent les mires
+        const angleOffset = Math.PI / count;
 
         for (let i = 0; i < count; i++) {
-            const angle = (i / count) * Math.PI * 2;
+            const angle = (i / count) * Math.PI * 2 + angleOffset;
             positions.push({
                 ring: 'single',
                 angle,
@@ -179,7 +183,7 @@ const sealRenderer = {
             throw new Error(`[sealRenderer] Matrice visuelle invalide : ${VISIBLE_GLYPH_COUNT} bits requis.`);
         }
 
-        // Cercle extérieur global renforcé
+        // Cercle extérieur global
         ctx.save();
         ctx.strokeStyle = GEOMETRY_COLOR;
         ctx.lineWidth = 6 * scale;
@@ -188,13 +192,13 @@ const sealRenderer = {
         ctx.stroke();
         ctx.restore();
 
-        // Logo central remonté et agrandi (plus de contact avec le texte)
+        // Logo central positionné plus haut pour isoler le texte
         const logoPath =
             options.logoPath ||
             payload.logoPath ||
             path.join(__dirname, '../assets/logo_anor_master.png');
 
-        const logoCenterY = centerY - 55 * scale;
+        const logoCenterY = centerY - 65 * scale;
 
         if (fs.existsSync(logoPath)) {
             try {
@@ -211,7 +215,7 @@ const sealRenderer = {
             }
         }
 
-        // Mires cardinales
+        // Mires cardinales (Nord, Sud, Est, Ouest)
         const finderAngles = this.getFinderAngles();
 
         ctx.save();
@@ -239,10 +243,10 @@ const sealRenderer = {
         }
         ctx.restore();
 
-        // Rendu des glyphes avec effet relief 2D
+        // Rendu des glyphes (parfaitement décalés des mires)
         const positions = this.getVisiblePositions();
-        const glyphScale = 1.40; 
-        const strokeWidth = 4.8;
+        const glyphScale = 1.35; 
+        const strokeWidth = 4.5;
 
         ctx.save();
 
@@ -262,10 +266,10 @@ const sealRenderer = {
             ctx.translate(px, py);
             ctx.rotate(angle);
 
-            ctx.shadowColor = 'rgba(0, 0, 0, 0.45)';
-            ctx.shadowBlur = 4 * scale;
-            ctx.shadowOffsetX = 1.5 * scale;
-            ctx.shadowOffsetY = 1.5 * scale;
+            ctx.shadowColor = 'rgba(0, 0, 0, 0.40)';
+            ctx.shadowBlur = 3.5 * scale;
+            ctx.shadowOffsetX = 1.2 * scale;
+            ctx.shadowOffsetY = 1.2 * scale;
 
             drawGlyphWithRelief2D(
                 ctx,
@@ -281,22 +285,22 @@ const sealRenderer = {
         }
         ctx.restore();
 
-        // Bloc texte SANS CADRE, ultra-grand et parfaitement lisible à l'œil nu en bas
+        // Texte placé plus bas avec une marge dégagée nette sous le logo
         ctx.save();
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
 
-        const textY = centerY + 135 * scale;
+        const textY = centerY + 148 * scale;
 
-        // Numéro de lot massif et ultra-lisible (sans cadre)
-        ctx.font = `900 ${Math.max(30, Math.round(42 * scale))}px sans-serif`;
+        // Numéro de Lot très net et lisible
+        ctx.font = `900 ${Math.max(28, Math.round(38 * scale))}px sans-serif`;
         ctx.fillStyle = TEXT_PRIMARY_COLOR;
         ctx.fillText(`LOT ${batchText}`, centerX, textY - 14 * scale);
 
-        // Numéro de série agrandi et bien distinct
-        ctx.font = `bold ${Math.max(18, Math.round(24 * scale))}px sans-serif`;
+        // Numéro de Série
+        ctx.font = `bold ${Math.max(16, Math.round(22 * scale))}px sans-serif`;
         ctx.fillStyle = TEXT_SECONDARY_COLOR;
-        ctx.fillText(`SÉRIE : ${itemText}`, centerX, textY + 20 * scale);
+        ctx.fillText(`SÉRIE : ${itemText}`, centerX, textY + 18 * scale);
 
         ctx.restore();
 
