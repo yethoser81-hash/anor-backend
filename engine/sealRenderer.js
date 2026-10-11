@@ -1,7 +1,7 @@
 /**
  * ====================================================================
  * ANOR CHECK
- * SEAL RENDERER V20.0 - VERSION FINALE CONFORME (QUINCONCE, LOGO 2D, CADRE TEXTE)
+ * SEAL RENDERER V23.0 - ANNEAU UNIQUE HAUTE VISIBILITÉ (2CM / 24 BITS)
  * ====================================================================
  */
 
@@ -12,7 +12,7 @@ const crypto = require('crypto');
 const GlyphsLibrary = require('../library/glyphsLibrary');
 
 const VISUAL_VERSION = 2;
-const VISIBLE_GLYPH_COUNT = 32; // 12 anneau intérieur + 20 anneau extérieur
+const VISIBLE_GLYPH_COUNT = 24; // Anneau unique de 24 bits (16,7 millions de combinaisons uniques)
 const CANONICAL_OUTER_RADIUS = 375;
 
 const sealRenderer = {
@@ -58,12 +58,12 @@ const sealRenderer = {
         const centerX = width / 2;
         const centerY = height / 2;
         
-        // Logo agrandi pour occuper l'espace central
-        const logoSize = 320; 
+        // Logo optimisé pour laisser respirer l'anneau unique
+        const logoSize = 260; 
         const logoRadius = logoSize / 2;
 
         const outerRingRadius = outerRadius - 35;
-        const innerRingRadius = outerRingRadius - 85; // Double anneau en quinconce bien réparti
+        const singleRingRadius = outerRingRadius - 55; // L'unique ligne de glyphes
 
         return {
             centerX,
@@ -71,7 +71,7 @@ const sealRenderer = {
             outerRadius,
             logoSize,
             logoRadius,
-            innerRingRadius,
+            singleRingRadius,
             outerRingRadius
         };
     },
@@ -87,42 +87,15 @@ const sealRenderer = {
 
     getVisiblePositions() {
         const positions = [];
+        const count = VISIBLE_GLYPH_COUNT; // 24 glyphes sur une seule ligne circulaire
 
-        // 1. ANNEAU INTÉRIEUR (12 glyphes en quinconce exact avec offset Math.PI / 12)
-        const innerCount = 12;
-        for (let i = 0; i < innerCount; i++) {
-            const angle = (i / innerCount) * Math.PI * 2 + (Math.PI / 12);
+        for (let i = 0; i < count; i++) {
+            const angle = (i / count) * Math.PI * 2;
             positions.push({
-                ring: 'inner',
+                ring: 'single',
                 angle,
                 index: i
             });
-        }
-
-        // 2. ANNEAU EXTÉRIEUR (20 glyphes répartis dans les 4 quadrants)
-        const quadrantAngles = [
-            -Math.PI / 2, // Nord
-            0,            // Est
-            Math.PI / 2,  // Sud
-            Math.PI,      // Ouest
-            Math.PI * 1.5
-        ];
-
-        let outerIdx = 0;
-        for (let q = 0; q < 4; q++) {
-            const startAngle = quadrantAngles[q];
-            const endAngle = quadrantAngles[q + 1];
-            const countPerQuadrant = 5;
-
-            for (let k = 1; k <= countPerQuadrant; k++) {
-                const angle = startAngle + (k / (countPerQuadrant + 1)) * (endAngle - startAngle);
-                positions.push({
-                    ring: 'outer',
-                    angle,
-                    index: innerCount + outerIdx
-                });
-                outerIdx++;
-            }
         }
 
         return positions;
@@ -147,7 +120,7 @@ const sealRenderer = {
             outerRadius,
             logoSize,
             logoRadius,
-            innerRingRadius,
+            singleRingRadius,
             outerRingRadius
         } = geometry;
 
@@ -172,7 +145,7 @@ const sealRenderer = {
         const normalizedBatchName = String(rawBatchName).trim().toUpperCase();
         const batchText = normalizedBatchName.replace(/^LOT\s*/i, '');
 
-        // Nettoyage de la série : suppression de tout ce qui suit le "/" pour ne garder que les chiffres
+        // Nettoyage de la série : suppression de tout ce qui suit le "/"
         const rawMasterLabel = options.masterSerialLabel || '000000';
         const cleanSerialNum = rawMasterLabel.split('/')[0].trim();
 
@@ -216,13 +189,13 @@ const sealRenderer = {
         ctx.stroke();
         ctx.restore();
 
-        // Logo central agrandi et remonté
+        // Logo central remonté
         const logoPath =
             options.logoPath ||
             payload.logoPath ||
             path.join(__dirname, '../assets/logo_anor_master.png');
 
-        const logoCenterY = centerY - 45 * scale;
+        const logoCenterY = centerY - 50 * scale;
 
         if (fs.existsSync(logoPath)) {
             try {
@@ -256,26 +229,21 @@ const sealRenderer = {
 
             if (i === 0) {
                 ctx.lineWidth = 5 * scale;
-                ctx.strokeRect(-20, -20, 40, 40);
-                ctx.fillRect(-9, -9, 18, 18);
+                ctx.strokeRect(-18, -18, 36, 36);
+                ctx.fillRect(-8, -8, 16, 16);
             } else {
                 ctx.lineWidth = 4 * scale;
-                ctx.strokeRect(-16, -16, 32, 32);
+                ctx.strokeRect(-15, -15, 30, 30);
                 ctx.fillRect(-6, -6, 12, 12);
             }
             ctx.restore();
         }
         ctx.restore();
 
-        // Rendu des glyphes avec effet 2D (ombrage relief)
+        // Rendu de l'anneau unique de glyphes avec effet relief 2D
         const positions = this.getVisiblePositions();
-        const glyphScale = 1.30;
-        const strokeWidth = 4;
-
-        const rings = {
-            inner: innerRingRadius,
-            outer: outerRingRadius
-        };
+        const glyphScale = 1.45; // Glyphes bien larges et bien espacés pour une lecture APK infaillible à 2cm
+        const strokeWidth = 4.5;
 
         ctx.save();
         ctx.strokeStyle = GEOMETRY_COLOR;
@@ -283,7 +251,7 @@ const sealRenderer = {
 
         for (let visibleIndex = 0; visibleIndex < positions.length; visibleIndex++) {
             const pos = positions[visibleIndex];
-            const radius = rings[pos.ring];
+            const radius = singleRingRadius;
             const angle = pos.angle;
 
             const px = centerX + radius * Math.cos(angle);
@@ -297,11 +265,11 @@ const sealRenderer = {
             ctx.translate(px, py);
             ctx.rotate(angle);
 
-            // Effet 2D / Relief (ombrage façon QR code)
-            ctx.shadowColor = 'rgba(0, 0, 0, 0.22)';
-            ctx.shadowBlur = 4 * scale;
-            ctx.shadowOffsetX = 1.5 * scale;
-            ctx.shadowOffsetY = 1.5 * scale;
+            // Effet relief 2D net
+            ctx.shadowColor = 'rgba(0, 0, 0, 0.25)';
+            ctx.shadowBlur = 3 * scale;
+            ctx.shadowOffsetX = 1 * scale;
+            ctx.shadowOffsetY = 1 * scale;
 
             drawGlyphFromDefinition(
                 ctx,
@@ -316,30 +284,30 @@ const sealRenderer = {
         }
         ctx.restore();
 
-        // Bloc texte encadré, espacé du logo et agrandi
+        // Bloc texte encadré et sécurisé en bas
         ctx.save();
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
 
-        const textY = centerY + 135 * scale;
-        const boxWidth = 340 * scale;
-        const boxHeight = 65 * scale;
+        const textY = centerY + 138 * scale;
+        const boxWidth = 280 * scale;
+        const boxHeight = 55 * scale;
 
         ctx.strokeStyle = GEOMETRY_COLOR;
-        ctx.lineWidth = 3 * scale;
+        ctx.lineWidth = 2.5 * scale;
         ctx.fillStyle = '#FFFFFF';
         ctx.beginPath();
-        ctx.roundRect(centerX - boxWidth / 2, textY - boxHeight / 2, boxWidth, boxHeight, 8 * scale);
+        ctx.roundRect(centerX - boxWidth / 2, textY - boxHeight / 2, boxWidth, boxHeight, 6 * scale);
         ctx.fill();
         ctx.stroke();
 
-        ctx.font = `bold ${Math.max(24, Math.round(30 * scale))}px sans-serif`;
+        ctx.font = `bold ${Math.max(20, Math.round(26 * scale))}px sans-serif`;
         ctx.fillStyle = TEXT_PRIMARY_COLOR;
-        ctx.fillText(`LOT ${batchText}`, centerX, textY - 12 * scale);
+        ctx.fillText(`LOT ${batchText}`, centerX, textY - 9 * scale);
 
-        ctx.font = `bold ${Math.max(16, Math.round(20 * scale))}px sans-serif`;
+        ctx.font = `bold ${Math.max(13, Math.round(17 * scale))}px sans-serif`;
         ctx.fillStyle = TEXT_SECONDARY_COLOR;
-        ctx.fillText(`SÉRIE : ${itemText}`, centerX, textY + 16 * scale);
+        ctx.fillText(`SÉRIE : ${itemText}`, centerX, textY + 13 * scale);
 
         ctx.restore();
 
