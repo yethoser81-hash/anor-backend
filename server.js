@@ -1,8 +1,8 @@
 /**
  * ======================================================
  * SYSTEME SOUVERAIN DE CERTIFICATION ANOR
- * SERVER CORE (VERSION ARCHITECTURE HAUTE SÉCURITÉ - 2 ANNEAUX / 36 BITS)
- * Version: 18.0.0 (Matching Souple OCR & Architecture 2 Anneaux & Nord Absolu)
+ * SERVER CORE (VERSION ARCHITECTURE HAUTE SÉCURITÉ - 24 BITS)
+ * Version: 18.0.1 (Correction Validation Longueur Matrice & Rendu Epuré)
  * ======================================================
  */
 
@@ -49,12 +49,12 @@ setInterval(() => {
 }, 60000);
 
 // ======================================================
-// VERSION / CONFIGURATION (NOUVELLE ARCHITECTURE 36 BITS)
+// VERSION / CONFIGURATION (NOUVELLE ARCHITECTURE 24 BITS)
 // ======================================================
 
-const SERVER_VERSION = "18.0.0";
-const VISUAL_VERSION = 2; // Version 2 pour la nouvelle architecture 2 anneaux
-const VISUAL_BITS_LENGTH = 36; // Mis à jour à 36 bits (16 inner + 20 outer)
+const SERVER_VERSION = "18.0.1";
+const VISUAL_VERSION = 2; 
+const VISUAL_BITS_LENGTH = 24; 
 const isProduction = process.env.NODE_ENV === "production";
 const PORT = process.env.PORT || 10000;
 
@@ -79,7 +79,7 @@ function formatDateOnly(dateValue) {
 }
 
 function normalizeVisualBits(bits) {
-    if (typeof bits === "string" && /^[01]{36}$/.test(bits)) {
+    if (typeof bits === "string" && /^[01]{24}$/.test(bits)) {
         return bits;
     }
     return null;
@@ -373,14 +373,14 @@ async function intelligentVisualAnalysis(scannedMatrix) {
         const trimmed = scannedMatrix.trim();
         if (!trimmed) { return { lot: null, signature: null, bits: null, confidence: 0 }; }
 
-        if (trimmed.startsWith("ANOR36:")) {
+        if (trimmed.startsWith("ANOR24:")) {
             const bits = normalizeVisualBits(trimmed.substring(7));
             if (bits) { return { lot: null, signature: trimmed, bits, confidence: 0.90 }; }
         }
 
         const directBits = normalizeVisualBits(trimmed);
         if (directBits) {
-            return { lot: null, signature: `ANOR36:${directBits}`, bits: directBits, confidence: 0.90 };
+            return { lot: null, signature: `ANOR24:${directBits}`, bits: directBits, confidence: 0.90 };
         }
 
         if (trimmed.length < 50) {
@@ -400,9 +400,6 @@ async function intelligentVisualAnalysis(scannedMatrix) {
     return { lot: null, signature: null, bits: null, confidence: 0 };
 }
 
-// ======================================================
-// EXTRACTION OCR SANS INTERPRÉTATION
-// ======================================================
 async function extractLotWithFreeOCR(base64Image) {
     try {
         if (!base64Image || typeof base64Image !== "string") return null;
@@ -948,7 +945,7 @@ app.post("/api/security/audit", (req, res) => {
         console.log("[ANOR SECURITY AUDIT] Rapport reçu :", JSON.stringify(auditData));
         return apiSuccess(res, { 
             status: "AUDIT_RECEIVED", 
-            message: "Rapport de sécurité pris en compte par le noyau 18.0.0." 
+            message: "Rapport de sécurité pris en compte par le noyau 18.0.1." 
         });
     } catch (error) {
         console.error("[SECURITY AUDIT ERROR]", error.message);
@@ -1000,7 +997,7 @@ app.post(
                 throw new Error(`La matrice visuelle ANOR doit contenir exactement ${VISUAL_BITS_LENGTH} bits.`);
             }
 
-            const visualSignature = `ANOR36:${visualBits}`;
+            const visualSignature = `ANOR24:${visualBits}`;
 
             const imageBuffer = await SealRenderer.renderSealToBuffer(
                 { secureSignature, visualBits },
@@ -1059,7 +1056,7 @@ app.post(
                 visual_bits: visualBits, visual_signature: visualSignature,
                 matrix_hash: sha256Hex(visualBits), ai_signature_hash: secureSignature,
                 sha256_hash: secureSignature, signature_ia: secureSignature,
-                visual_geometry: { inner: 16, outer: 20, total: 36 },
+                visual_geometry: { inner: 12, outer: 12, total: 24 },
                 engine_version: SERVER_VERSION, statut: "CERTIFIÉ", scan_count: 0
             };
 
@@ -1088,7 +1085,7 @@ SYSTEME SOUVERAIN DE CERTIFICATION - NOTICE OFFICIELLE DE LOT
    - Chaque unité de ce lot embarque un identifiant de série unique inclus dans 'manifeste_serialisation_unitaire.csv'.
 
 3. AVIS JURIDIQUE ET RÉPRESSION DES FRAUDES :
-   - Le sceau numérique ANOR (Architecture 36 bits - 2 Anneaux) est protégé par les lois de la République du Cameroun. Toute contrefaçon est passible de poursuites.
+   - Le sceau numérique ANOR (Architecture 24 bits - Épurée) est protégé par les lois de la République du Cameroun. Toute contrefaçon est passible de poursuites.
 
 Fait à Yaoundé, le ${formatDateOnly(new Date())}
 Système Souverain de Certification - ANOR Engine ${SERVER_VERSION}
@@ -1122,9 +1119,6 @@ Système Souverain de Certification - ANOR Engine ${SERVER_VERSION}
     }
 );
 
-// ======================================================
-// ROUTE VÉRIFICATION DE SCEAU
-// ======================================================
 app.post(
     "/api/seals/verify",
     scanLimiter,
@@ -1160,7 +1154,7 @@ app.post(
             }
 
             const normalizedRequestBits = normalizeVisualBits(requestVisualBits || scannedMatrix?.bits || scannedMatrix?.visualBits);
-            const requestSignature = typeof requestVisualSignature === "string" ? requestVisualSignature.trim() : (typeof scannedMatrix?.signature === "string" ? scannedMatrix.signature.trim() : (normalizedRequestBits ? `ANOR36:${normalizedRequestBits}` : null));
+            const requestSignature = typeof requestVisualSignature === "string" ? requestVisualSignature.trim() : (typeof scannedMatrix?.signature === "string" ? scannedMatrix.signature.trim() : (normalizedRequestBits ? `ANOR24:${normalizedRequestBits}` : null));
 
             if (!targetLot && !scannedMatrix && !normalizedRequestBits && !requestSignature) {
                 return apiError(res, 400, "MISSING_SCAN", "Données de scan insuffisantes.");
@@ -1240,7 +1234,7 @@ app.post(
 
                             for (const candidate of candidates) {
                                 const storedSignature = typeof candidate.visual_signature === "string" ? candidate.visual_signature : candidate.glyph_payload?.visualSignature;
-                                const storedBits = normalizeVisualBits(candidate.visual_bits || candidate.glyph_payload?.visualBits || (typeof storedSignature === "string" && storedSignature.startsWith("ANOR36:") ? storedSignature.substring(7) : null));
+                                const storedBits = normalizeVisualBits(candidate.visual_bits || candidate.glyph_payload?.visualBits || (typeof storedSignature === "string" && storedSignature.startsWith("ANOR24:") ? storedSignature.substring(7) : null));
 
                                 if (!storedBits) continue;
                                 if (storedBits === bitsToMatch) { bestMatch = candidate; bestDistance = 0; break; }
@@ -1397,12 +1391,10 @@ app.post(
     }
 );
 
-// Middleware 404
 app.use((req, res) => {
     return apiError(res, 404, "NOT_FOUND", "La ressource demandée n'existe pas.");
 });
 
-// Middleware d'erreur global
 app.use((err, req, res, next) => {
     console.error("[GLOBAL SERVER ERROR]", err);
     return apiError(res, 500, "INTERNAL_SERVER_ERROR", isProduction ? "Une erreur interne du serveur est survenue." : err.message);

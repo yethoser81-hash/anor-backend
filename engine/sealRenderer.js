@@ -58,13 +58,11 @@ const sealRenderer = {
         const centerX = width / 2;
         const centerY = height / 2;
         
-        // 1. LOGO TRES AGRANDI AU CENTRE
         const logoSize = 340; 
         const logoRadius = logoSize / 2;
 
-        // 2. ANNEAUX RAPPROCHÉS AU MAXIMUM
         const outerRingRadius = outerRadius - 35;
-        const innerRingRadius = outerRingRadius - 50; // Collé à l'anneau externe
+        const innerRingRadius = outerRingRadius - 50;
 
         return {
             centerX,
@@ -79,10 +77,10 @@ const sealRenderer = {
 
     getFinderAngles() {
         return [
-            -Math.PI / 2, // Nord
-            0,            // Est
-            Math.PI / 2,  // Sud
-            Math.PI       // Ouest
+            -Math.PI / 2,
+            0,            
+            Math.PI / 2,  
+            Math.PI       
         ];
     },
 
@@ -102,18 +100,15 @@ const sealRenderer = {
     getVisiblePositions() {
         const positions = [];
 
-        // ANNEAU INTERNE : AUCUN GLYPHE AU-DESSUS DU LOGO (Zone Nord exclue entre 200° et 340°)
         const totalInnerSlots = 12;
         for (let i = 0; i < totalInnerSlots; i++) {
             const angle = (i / totalInnerSlots) * Math.PI * 2;
             const deg = (angle * 180 / Math.PI + 360) % 360;
 
-            // Exclusion stricte du haut (au-dessus du logo)
             if (deg >= 210 && deg <= 330) {
                 continue;
             }
 
-            // Décalage angulaire quinconce par rapport à l'anneau externe
             const shiftedAngle = angle + (Math.PI / 12);
 
             positions.push({
@@ -123,7 +118,6 @@ const sealRenderer = {
             });
         }
 
-        // ANNEAU EXTERNE (HORS MIRES)
         const totalOuterSlots = 20;
         for (let i = 0; i < totalOuterSlots; i++) {
             const angle = (i / totalOuterSlots) * Math.PI * 2;
@@ -164,7 +158,6 @@ const sealRenderer = {
 
         const scale = outerRadius / CANONICAL_OUTER_RADIUS;
 
-        // Arrière-plan blanc
         ctx.fillStyle = backgroundColor;
         ctx.fillRect(0, 0, width, height);
 
@@ -211,7 +204,6 @@ const sealRenderer = {
             this.normalizeVisualBits(suppliedVisualBits) ||
             this.deriveVisualBits(secureSignature || rawBatchName);
 
-        // 1. CERCLE EXTERNE UNIQUE SOUS LES MIRES
         ctx.save();
         ctx.strokeStyle = GEOMETRY_COLOR;
         ctx.lineWidth = 5 * scale;
@@ -220,7 +212,6 @@ const sealRenderer = {
         ctx.stroke();
         ctx.restore();
 
-        // 2. LOGO CENTRAL MASSIF
         const logoPath =
             options.logoPath ||
             payload.logoPath ||
@@ -241,7 +232,6 @@ const sealRenderer = {
             }
         }
 
-        // 3. MIRES CARDINALES
         const finderAngles = this.getFinderAngles();
 
         ctx.save();
@@ -269,7 +259,6 @@ const sealRenderer = {
         }
         ctx.restore();
 
-        // 4. GLYPHES DÉCALÉS EN QUINCONCE
         const positions = this.getVisiblePositions();
         const glyphScale = 1.35;
         const strokeWidth = 4;
@@ -312,19 +301,16 @@ const sealRenderer = {
         }
         ctx.restore();
 
-        // 5. TEXTE LIBRE SANS AUCUN ENCADREMENT
         ctx.save();
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
 
         const textY = centerY + 145 * scale;
 
-        // Numéro de lot très grand
         ctx.font = `bold ${Math.max(34, Math.round(42 * scale))}px sans-serif`;
         ctx.fillStyle = TEXT_PRIMARY_COLOR;
         ctx.fillText(batchText, centerX, textY - 14 * scale);
 
-        // Numéro de série très grand
         ctx.font = `bold ${Math.max(24, Math.round(30 * scale))}px sans-serif`;
         ctx.fillStyle = TEXT_SECONDARY_COLOR;
         ctx.fillText(itemText, centerX, textY + 24 * scale);
