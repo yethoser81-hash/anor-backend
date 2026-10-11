@@ -1,7 +1,7 @@
 /**
  * ====================================================================
  * ANOR CHECK
- * SEAL RENDERER V23.0 - ANNEAU UNIQUE HAUTE VISIBILITÉ (2CM / 24 BITS)
+ * SEAL RENDERER V24.0 - ANNEAU UNIQUE 28 BITS (268M COMBINAISONS / 2CM)
  * ====================================================================
  */
 
@@ -12,7 +12,7 @@ const crypto = require('crypto');
 const GlyphsLibrary = require('../library/glyphsLibrary');
 
 const VISUAL_VERSION = 2;
-const VISIBLE_GLYPH_COUNT = 24; // Anneau unique de 24 bits (16,7 millions de combinaisons uniques)
+const VISIBLE_GLYPH_COUNT = 28; // 28 bits (268 435 456 combinaisons uniques)
 const CANONICAL_OUTER_RADIUS = 375;
 
 const sealRenderer = {
@@ -87,7 +87,7 @@ const sealRenderer = {
 
     getVisiblePositions() {
         const positions = [];
-        const count = VISIBLE_GLYPH_COUNT; // 24 glyphes sur une seule ligne circulaire
+        const count = VISIBLE_GLYPH_COUNT; // 28 glyphes répartis sur l'anneau unique
 
         for (let i = 0; i < count; i++) {
             const angle = (i / count) * Math.PI * 2;
@@ -240,10 +240,10 @@ const sealRenderer = {
         }
         ctx.restore();
 
-        // Rendu de l'anneau unique de glyphes avec effet relief 2D
+        // Rendu de l'anneau unique à 28 glyphes avec effet relief 2D
         const positions = this.getVisiblePositions();
-        const glyphScale = 1.45; // Glyphes bien larges et bien espacés pour une lecture APK infaillible à 2cm
-        const strokeWidth = 4.5;
+        const glyphScale = 1.35; // Échelle ajustée pour 28 glyphes afin d'éviter la fusion des bordures
+        const strokeWidth = 4.2;
 
         ctx.save();
         ctx.strokeStyle = GEOMETRY_COLOR;

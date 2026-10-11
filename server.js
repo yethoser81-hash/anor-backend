@@ -61,8 +61,8 @@ function formatDateOnly(dateValue) {
 }
 
 function normalizeVisualBits(bits) {
-    if (typeof bits === "string" && /^[01]{28}$/.test(bits)) {
-        return bits;
+    if (typeof bits === "string" && /^[01]{28}$/.test(bits.trim())) {
+        return bits.trim();
     }
     return null;
 }
