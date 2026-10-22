@@ -1,7 +1,7 @@
 /**
  * ====================================================================
  * ANOR CHECK
- * SEAL RENDERER V28.0 - ALIGNEMENT PARFAIT, ZÉRO CHEVAUCHEMENT (28 BITS)
+ * SEAL RENDERER V38.0 - GLYPHES ALLONGÉES VERS LE CENTRE, LOGO AGRANDI, SÉRIE AGRANDIE, RELIEF 2D
  * ====================================================================
  */
 
@@ -11,9 +11,9 @@ const fs = require('fs');
 const crypto = require('crypto');
 const GlyphsLibrary = require('../library/glyphsLibrary');
 
-const VISUAL_VERSION = 2;
-const VISIBLE_GLYPH_COUNT = 28; // 28 bits (268 435 456 combinaisons uniques)
-const CANONICAL_OUTER_RADIUS = 375;
+const VISUAL_VERSION = 3;
+const VISIBLE_GLYPH_COUNT = 28; // 28 bits
+const CANONICAL_OUTER_RADIUS = 500;
 
 const sealRenderer = {
 
@@ -48,9 +48,7 @@ const sealRenderer = {
         ) {
             return GlyphsLibrary.resolveGlyph(visibleIndex);
         }
-
-        const types = ['square', 'rect', 'circle', 'diamond', 'plus'];
-        return types[visibleIndex % types.length];
+        return 'square';
     },
 
     getGeometry(width, height) {
@@ -58,28 +56,25 @@ const sealRenderer = {
         const centerX = width / 2;
         const centerY = height / 2;
         
-        // Taille équilibrée pour combler l'espace sans étouffer les glyphes
-        const logoSize = 350; 
+        // 2 - Logo agrandi (passé de 350 à 420 ou proportionnel à ~44%)
+        const logoSize = Math.round(width * 0.44); 
         const logoRadius = logoSize / 2;
 
-        const outerRingRadius = outerRadius - 25;
-        // Rayon ajusté pour resserrer le cercle de glyphes autour du logo
-        const singleRingRadius = outerRingRadius - 48; 
-
+        const outerRingRadius = outerRadius - 15;
+        
         return {
             centerX,
             centerY,
             outerRadius,
             logoSize,
             logoRadius,
-            singleRingRadius,
             outerRingRadius
         };
     },
 
     getFinderAngles() {
         return [
-            -Math.PI / 2, // Nord (Mire de départ)
+            -Math.PI / 2, // Nord
             0,            // Est
             Math.PI / 2,  // Sud
             Math.PI       // Ouest
@@ -89,8 +84,6 @@ const sealRenderer = {
     getVisiblePositions() {
         const positions = [];
         const count = VISIBLE_GLYPH_COUNT;
-        
-        // Décalage angulaire d'un demi-pas pour éviter que les glyphes ne touchent les mires
         const angleOffset = Math.PI / count;
 
         for (let i = 0; i < count; i++) {
@@ -106,15 +99,18 @@ const sealRenderer = {
     },
 
     async renderSealToBuffer(payload = {}, options = {}) {
-        const width = Math.max(400, Math.round(options.width || 800));
-        const height = Math.max(400, Math.round(options.height || 800));
+        const width = Math.max(1080, Math.round(options.width || 1080));
+        const height = Math.max(1080, Math.round(options.height || 1080));
 
         const canvas = createCanvas(width, height);
         const ctx = canvas.getContext('2d');
 
+        ctx.imageSmoothingEnabled = true;
+        ctx.imageSmoothingQuality = 'high';
+
         const GEOMETRY_COLOR = options.geometryColor || '#000000';
         const TEXT_PRIMARY_COLOR = options.textColor || '#000000';
-        const TEXT_SECONDARY_COLOR = options.subTextColor || '#000000';
+        const TEXT_SECONDARY_COLOR = options.subTextColor || '#111111';
         const backgroundColor = options.backgroundColor || '#FFFFFF';
 
         const geometry = this.getGeometry(width, height);
@@ -124,7 +120,6 @@ const sealRenderer = {
             outerRadius,
             logoSize,
             logoRadius,
-            singleRingRadius,
             outerRingRadius
         } = geometry;
 
@@ -140,13 +135,11 @@ const sealRenderer = {
             payload.productName ||
             payload.name ||
             options.batchNumber ||
-            options.lot;
-
-        if (!rawBatchName) {
-            throw new Error('[sealRenderer] Aucun lot fourni.');
-        }
+            options.lot ||
+            'H54 125 450';
 
         const normalizedBatchName = String(rawBatchName).trim().toUpperCase();
+        // 3 - "LOT" retiré, on conserve uniquement le numéro du lot
         const batchText = normalizedBatchName.replace(/^LOT\s*/i, '');
 
         const rawMasterLabel = options.masterSerialLabel || '000000';
@@ -158,6 +151,7 @@ const sealRenderer = {
             payload.serialNumber ??
             options.serial;
 
+        // 3 - "SÉRIE" retiré, on conserve uniquement les chiffres de la série
         const itemText =
             rawItemNumber !== undefined &&
             rawItemNumber !== null &&
@@ -183,22 +177,22 @@ const sealRenderer = {
             throw new Error(`[sealRenderer] Matrice visuelle invalide : ${VISIBLE_GLYPH_COUNT} bits requis.`);
         }
 
-        // Cercle extérieur global
+        // Cercle extérieur unique propre
         ctx.save();
         ctx.strokeStyle = GEOMETRY_COLOR;
-        ctx.lineWidth = 6 * scale;
+        ctx.lineWidth = Math.round(6 * scale);
         ctx.beginPath();
-        ctx.arc(centerX, centerY, outerRingRadius + 18 * scale, 0, Math.PI * 2);
+        ctx.arc(centerX, centerY, outerRingRadius, 0, Math.PI * 2);
         ctx.stroke();
         ctx.restore();
 
-        // Logo central positionné plus haut pour isoler le texte
+        // 2 - Logo central agrandi et positionné pour ne pas croiser les textes
         const logoPath =
             options.logoPath ||
             payload.logoPath ||
             path.join(__dirname, '../assets/logo_anor_master.png');
 
-        const logoCenterY = centerY - 65 * scale;
+        const logoCenterY = centerY - 75 * scale;
 
         if (fs.existsSync(logoPath)) {
             try {
@@ -230,77 +224,74 @@ const sealRenderer = {
             ctx.save();
             ctx.translate(px, py);
 
-            if (i === 0) {
-                ctx.lineWidth = 5 * scale;
-                ctx.strokeRect(-16, -16, 32, 32);
-                ctx.fillRect(-7, -7, 14, 14);
-            } else {
-                ctx.lineWidth = 4 * scale;
-                ctx.strokeRect(-14, -14, 28, 28);
-                ctx.fillRect(-5, -5, 10, 10);
-            }
+            ctx.lineWidth = Math.round(5 * scale);
+            ctx.strokeRect(-16 * scale, -16 * scale, 32 * scale, 32 * scale);
+            ctx.fillRect(-6 * scale, -6 * scale, 12 * scale, 12 * scale);
+
             ctx.restore();
         }
         ctx.restore();
 
-        // Rendu des glyphes (parfaitement décalés des mires)
+        // 1 - Glyphes ancrées au cercle externe et ALLONGÉES VERS LE CENTRE + 6 - Effet 2D visible
         const positions = this.getVisiblePositions();
-        const glyphScale = 1.35; 
-        const strokeWidth = 4.5;
+        const glyphWidth = 22 * scale;
+        const glyphLength = 55 * scale; // Allongement radial prononcé vers le centre
+        const strokeWidth = Math.round(4.5 * scale);
+        const glyphOuterAnchorRadius = outerRingRadius - (4 * scale);
 
         ctx.save();
 
         for (let visibleIndex = 0; visibleIndex < positions.length; visibleIndex++) {
             const pos = positions[visibleIndex];
-            const radius = singleRingRadius;
             const angle = pos.angle;
 
-            const px = centerX + radius * Math.cos(angle);
-            const py = centerY + radius * Math.sin(angle);
+            const anchorX = centerX + glyphOuterAnchorRadius * Math.cos(angle);
+            const anchorY = centerY + glyphOuterAnchorRadius * Math.sin(angle);
 
             const glyphType = this.resolveProtocolGlyph(visibleIndex);
             const glyphDef = GlyphsLibrary.getGlyphDefinition(glyphType);
             const isFilled = visualBits[visibleIndex] === '1';
 
             ctx.save();
-            ctx.translate(px, py);
-            ctx.rotate(angle);
+            ctx.translate(anchorX, anchorY);
+            ctx.rotate(angle + Math.PI / 2);
 
-            ctx.shadowColor = 'rgba(0, 0, 0, 0.40)';
-            ctx.shadowBlur = 3.5 * scale;
-            ctx.shadowOffsetX = 1.2 * scale;
-            ctx.shadowOffsetY = 1.2 * scale;
+            // Effet 2D prononcé (ombrage / relief)
+            ctx.shadowColor = 'rgba(0, 0, 0, 0.45)';
+            ctx.shadowBlur = 6 * scale;
+            ctx.shadowOffsetX = 2 * scale;
+            ctx.shadowOffsetY = 3 * scale;
 
-            drawGlyphWithRelief2D(
+            drawGlyphInwardStretched2D(
                 ctx,
                 glyphType,
                 glyphDef,
                 isFilled,
-                glyphScale,
-                strokeWidth,
-                scale
+                glyphWidth,
+                glyphLength,
+                strokeWidth
             );
 
             ctx.restore();
         }
         ctx.restore();
 
-        // Texte placé plus bas avec une marge dégagée nette sous le logo
+        // 3 & 4 - Lot et série sans les libellés textuels, avec une série grandement agrandie
         ctx.save();
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
 
-        const textY = centerY + 148 * scale;
+        const textY = centerY + 175 * scale;
 
-        // Numéro de Lot très net et lisible
-        ctx.font = `900 ${Math.max(28, Math.round(38 * scale))}px sans-serif`;
+        // Numéro du lot
+        ctx.font = `900 ${Math.round(48 * scale)}px sans-serif`;
         ctx.fillStyle = TEXT_PRIMARY_COLOR;
-        ctx.fillText(`LOT ${batchText}`, centerX, textY - 14 * scale);
+        ctx.fillText(`${batchText}`, centerX, textY - 15 * scale);
 
-        // Numéro de Série
-        ctx.font = `bold ${Math.max(16, Math.round(22 * scale))}px sans-serif`;
+        // 4 - Taille de la série agrandie (presque de la taille du lot pour une visibilité parfaite)
+        ctx.font = `900 ${Math.round(44 * scale)}px sans-serif`;
         ctx.fillStyle = TEXT_SECONDARY_COLOR;
-        ctx.fillText(`SÉRIE : ${itemText}`, centerX, textY + 18 * scale);
+        ctx.fillText(`${itemText}`, centerX, textY + 35 * scale);
 
         ctx.restore();
 
@@ -308,71 +299,114 @@ const sealRenderer = {
     }
 };
 
-function drawGlyphWithRelief2D(ctx, type, def, isFilled, glyphScale = 1, strokeWidth = 4, scale = 1) {
-    const width = (def.width || 18) * glyphScale;
-    const height = (def.height || 18) * glyphScale;
-
+/**
+ * Moteur de rendu : Glyphes étirées vers le centre avec relief 2D complet pour les 12 types
+ */
+function drawGlyphInwardStretched2D(ctx, type, def, isFilled, w, h, strokeWidth) {
     ctx.lineWidth = strokeWidth;
-
     ctx.strokeStyle = '#000000';
-    ctx.fillStyle = '#000000';
+    ctx.fillStyle = isFilled ? '#000000' : '#FFFFFF';
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'miter';
 
     switch (type) {
         case 'square':
+        case 'bar':
         case 'rect':
             if (isFilled) {
-                ctx.fillRect(-width / 2, -height / 2, width, height);
-                ctx.fillStyle = '#333333';
-                ctx.fillRect(-width / 2 + 2, -height / 2 + 2, width - 4, height - 4);
+                ctx.fillRect(-w / 2, 0, w, h);
+                ctx.fillStyle = '#222222';
+                ctx.fillRect(-w / 2 + 2, 2, w - 4, h - 4);
             } else {
-                ctx.strokeRect(-width / 2, -height / 2, width, height);
+                ctx.strokeRect(-w / 2, 0, w, h);
             }
             break;
 
-        case 'circle': {
+        case 'square_dot':
+            ctx.strokeRect(-w / 2, 0, w, h);
+            ctx.fillStyle = '#000000';
+            ctx.fillRect(-w / 4, h * 0.35, w / 2, h * 0.3);
+            break;
+
+        case 'square_inner':
+            ctx.strokeRect(-w / 2, 0, w, h);
+            if (isFilled) {
+                ctx.fillStyle = '#000000';
+                ctx.fillRect(-w / 3, h * 0.2, (2 * w) / 3, h * 0.6);
+            } else {
+                ctx.strokeRect(-w / 4, h * 0.25, w / 2, h * 0.5);
+            }
+            break;
+
+        case 'rect_half':
+            ctx.strokeRect(-w / 2, 0, w, h);
+            ctx.fillStyle = '#000000';
+            ctx.fillRect(-w / 2, 0, w / 2, h);
+            break;
+
+        case 'rect_double':
+            ctx.strokeRect(-w / 2, 0, w, h);
+            ctx.strokeRect(-w / 4, h * 0.2, w / 2, h * 0.6);
+            break;
+
+        case 'circle':
             ctx.beginPath();
-            ctx.arc(0, 0, (def.radius || width / 2) * glyphScale, 0, Math.PI * 2);
+            ctx.ellipse(0, h / 2, w / 2, h / 2, 0, 0, Math.PI * 2);
             if (isFilled) {
+                ctx.fillStyle = '#000000';
                 ctx.fill();
-            } else {
-                ctx.stroke();
             }
+            ctx.stroke();
             break;
-        }
 
-        case 'diamond': {
-            ctx.save();
-            ctx.rotate((def.rotation || 45) * Math.PI / 180);
-            if (isFilled) {
-                ctx.fillRect(-width / 2, -height / 2, width, height);
-            } else {
-                ctx.strokeRect(-width / 2, -height / 2, width, height);
-            }
-            ctx.restore();
+        case 'circle_dot':
+            ctx.beginPath();
+            ctx.ellipse(0, h / 2, w / 2, h / 2, 0, 0, Math.PI * 2);
+            ctx.stroke();
+            ctx.beginPath();
+            ctx.ellipse(0, h / 2, w / 4, h / 4, 0, 0, Math.PI * 2);
+            ctx.fillStyle = '#000000';
+            ctx.fill();
             break;
-        }
 
-        case 'plus': {
-            const arm = Math.max(strokeWidth * 1.35, width * 0.18);
+        case 'diamond':
+            ctx.beginPath();
+            ctx.moveTo(0, 0);
+            ctx.lineTo(w / 2, h / 2);
+            ctx.lineTo(0, h);
+            ctx.lineTo(-w / 2, h / 2);
+            ctx.closePath();
             if (isFilled) {
-                ctx.fillRect(-width / 2, -arm / 2, width, arm);
-                ctx.fillRect(-arm / 2, -height / 2, arm, height);
-            } else {
-                ctx.beginPath();
-                ctx.moveTo(-width / 2, 0);
-                ctx.lineTo(width / 2, 0);
-                ctx.moveTo(0, -height / 2);
-                ctx.lineTo(0, height / 2);
-                ctx.stroke();
+                ctx.fillStyle = '#000000';
+                ctx.fill();
             }
+            ctx.stroke();
             break;
-        }
+
+        case 'diamond_inner':
+            ctx.beginPath();
+            ctx.moveTo(0, 0);
+            ctx.lineTo(w / 2, h / 2);
+            ctx.lineTo(0, h);
+            ctx.lineTo(-w / 2, h / 2);
+            ctx.closePath();
+            ctx.stroke();
+            ctx.fillStyle = '#000000';
+            ctx.fillRect(-w / 5, h * 0.35, (2 * w) / 5, h * 0.3);
+            break;
+
+        case 'plus':
+            ctx.beginPath();
+            ctx.moveTo(-w / 2, h / 2); ctx.lineTo(w / 2, h / 2);
+            ctx.moveTo(0, 0); ctx.lineTo(0, h);
+            ctx.stroke();
+            break;
 
         default:
             if (isFilled) {
-                ctx.fillRect(-width / 2, -height / 2, width, height);
+                ctx.fillRect(-w / 2, 0, w, h);
             } else {
-                ctx.strokeRect(-width / 2, -height / 2, width, height);
+                ctx.strokeRect(-w / 2, 0, w, h);
             }
     }
 }
