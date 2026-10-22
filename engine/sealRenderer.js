@@ -9,7 +9,7 @@ const { createCanvas, loadImage } = require('canvas');
 const path = require('path');
 const fs = require('fs');
 const crypto = require('crypto');
-const GlyphsLibrary = require('./glyphsLibrary');
+const GlyphsLibrary = require('../library/glyphsLibrary');
 
 const VISUAL_VERSION = 3;
 const VISIBLE_GLYPH_COUNT = 24; // 24 glyphes sur anneau unique
