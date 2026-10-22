@@ -1,7 +1,7 @@
 /**
  * ====================================================================
  * ANOR CHECK
- * SEAL RENDERER V30.0 - RENDU VECTORIEL HAUTE DÉFINITION (HD)
+ * SEAL RENDERER V30.0 - RENDU VECTORIEL HAUTE DÉFINITION (28 BITS)
  * ====================================================================
  */
 
@@ -12,7 +12,7 @@ const crypto = require('crypto');
 const GlyphsLibrary = require('../library/glyphsLibrary');
 
 const VISUAL_VERSION = 3;
-const VISIBLE_GLYPH_COUNT = 24; // 24 glyphes sur anneau unique
+const VISIBLE_GLYPH_COUNT = 28; // 28 bits réalignés
 const CANONICAL_OUTER_RADIUS = 500;
 
 const sealRenderer = {
@@ -94,14 +94,12 @@ const sealRenderer = {
     },
 
     async renderSealToBuffer(payload = {}, options = {}) {
-        // Rendu en 1080x1080 pour une netteté vectorielle parfaite
         const width = Math.max(1080, Math.round(options.width || 1080));
         const height = Math.max(1080, Math.round(options.height || 1080));
 
         const canvas = createCanvas(width, height);
         const ctx = canvas.getContext('2d');
 
-        // Optimisations anti-aliasing
         ctx.imageSmoothingEnabled = true;
         ctx.imageSmoothingQuality = 'high';
 
@@ -160,7 +158,7 @@ const sealRenderer = {
             this.normalizeVisualBits(suppliedVisualBits) ||
             this.deriveVisualBits(secureSignature || rawBatchName);
 
-        // 1. Cercle extérieur noir net
+        // 1. Cercle extérieur
         ctx.save();
         ctx.strokeStyle = GEOMETRY_COLOR;
         ctx.lineWidth = Math.round(7 * scale);
@@ -188,7 +186,7 @@ const sealRenderer = {
             }
         }
 
-        // 3. Mires cardinales (Nord, Sud, Est, Ouest)
+        // 3. Mires cardinales
         const finderAngles = this.getFinderAngles();
 
         ctx.save();
@@ -211,7 +209,7 @@ const sealRenderer = {
         }
         ctx.restore();
 
-        // 4. Rendu net des Glyphes
+        // 4. Rendu des 28 Glyphes
         const positions = this.getVisiblePositions();
         const glyphScale = 1.8 * scale; 
         const strokeWidth = Math.round(5.5 * scale);
@@ -247,7 +245,7 @@ const sealRenderer = {
         }
         ctx.restore();
 
-        // 5. Textes (Lot et Série)
+        // 5. Affichage des chiffres uniquement (sans les mots "LOT" ni "SÉRIE")
         ctx.save();
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
@@ -256,11 +254,11 @@ const sealRenderer = {
 
         ctx.font = `900 ${Math.round(48 * scale)}px sans-serif`;
         ctx.fillStyle = TEXT_PRIMARY_COLOR;
-        ctx.fillText(`LOT ${batchText}`, centerX, textY - 18 * scale);
+        ctx.fillText(`${batchText}`, centerX, textY - 18 * scale);
 
         ctx.font = `bold ${Math.round(28 * scale)}px sans-serif`;
         ctx.fillStyle = TEXT_SECONDARY_COLOR;
-        ctx.fillText(`SÉRIE : ${itemText}`, centerX, textY + 22 * scale);
+        ctx.fillText(`${itemText}`, centerX, textY + 22 * scale);
 
         ctx.restore();
 
@@ -268,9 +266,6 @@ const sealRenderer = {
     }
 };
 
-/**
- * MOTEUR DU RENDU VECTORIEL DES 16 TYPES DE GLYPHES
- */
 function drawGlyphVectorHD(ctx, type, def, isFilled, glyphScale = 1, strokeWidth = 4) {
     const w = (def.width || 18) * glyphScale;
     const h = (def.height || 18) * glyphScale;
