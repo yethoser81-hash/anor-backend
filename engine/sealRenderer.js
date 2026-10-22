@@ -1,7 +1,7 @@
 /**
  * ====================================================================
  * ANOR CHECK
- * SEAL RENDERER V39.0 - GÉOMÉTRIE INTERNE PARFAITE & RELIEF 2D
+ * SEAL RENDERER V40.0 - FIX ESPACEMENT ORBITAL & DISTRIBUTION UNIFORME
  * ====================================================================
  */
 
@@ -12,7 +12,7 @@ const crypto = require('crypto');
 const GlyphsLibrary = require('../library/glyphsLibrary');
 
 const VISUAL_VERSION = 3;
-const VISIBLE_GLYPH_COUNT = 28; // 28 bits
+const VISIBLE_GLYPH_COUNT = 28;
 const CANONICAL_OUTER_RADIUS = 500;
 
 const sealRenderer = {
@@ -56,13 +56,11 @@ const sealRenderer = {
         const centerX = width / 2;
         const centerY = height / 2;
         
-        // Logo agrandi harmonieusement au centre
         const logoSize = Math.round(width * 0.42); 
         const logoRadius = logoSize / 2;
 
         const outerRingRadius = outerRadius - 10;
-        // Rayon du cercle sur lequel reposent les glyphes (bien à l'intérieur du cercle externe)
-        const glyphOrbitRadius = outerRingRadius - 45;
+        const glyphOrbitRadius = outerRingRadius - 48;
 
         return {
             centerX,
@@ -88,7 +86,7 @@ const sealRenderer = {
         const positions = [];
         const count = VISIBLE_GLYPH_COUNT;
         const finderAngles = this.getFinderAngles();
-        const safetyMargin = (15 * Math.PI) / 180; // Marge de protection autour des mires
+        const safetyMargin = (12 * Math.PI) / 180;
 
         let validAngles = [];
         const totalSteps = 360;
@@ -163,10 +161,9 @@ const sealRenderer = {
             payload.name ||
             options.batchNumber ||
             options.lot ||
-            'P5822 014';
+            'P65 854 751';
 
         const normalizedBatchName = String(rawBatchName).trim().toUpperCase();
-        // Libellé "LOT" retiré
         const batchText = normalizedBatchName.replace(/^LOT\s*/i, '');
 
         const rawMasterLabel = options.masterSerialLabel || '000000';
@@ -178,7 +175,6 @@ const sealRenderer = {
             payload.serialNumber ??
             options.serial;
 
-        // Libellé "SÉRIE" retiré
         const itemText =
             rawItemNumber !== undefined &&
             rawItemNumber !== null &&
@@ -204,7 +200,6 @@ const sealRenderer = {
             throw new Error(`[sealRenderer] Matrice visuelle invalide : ${VISIBLE_GLYPH_COUNT} bits requis.`);
         }
 
-        // 1. Cercle extérieur unique
         ctx.save();
         ctx.strokeStyle = GEOMETRY_COLOR;
         ctx.lineWidth = Math.round(6 * scale);
@@ -213,7 +208,6 @@ const sealRenderer = {
         ctx.stroke();
         ctx.restore();
 
-        // 2. Logo central agrandi et bien positionné
         const logoPath =
             options.logoPath ||
             payload.logoPath ||
@@ -232,11 +226,10 @@ const sealRenderer = {
                     logoSize
                 );
             } catch (error) {
-                console.error('[sealRenderer] Erreur lors du chargement du logo :', error);
+                console.error('[sealRenderer] Erreur chargement logo :', error);
             }
         }
 
-        // 3. Mires cardinales (Nord, Sud, Est, Ouest)
         const finderAngles = this.getFinderAngles();
 
         ctx.save();
@@ -263,10 +256,9 @@ const sealRenderer = {
         }
         ctx.restore();
 
-        // 4. Rendu des glyphes : Allongées vers le centre avec espacement et relief 2D
         const positions = this.getVisiblePositions();
-        const glyphWidth = 20 * scale;
-        const glyphLength = 45 * scale; // Étirées vers le centre
+        const glyphWidth = 18 * scale;
+        const glyphLength = 48 * scale;
         const strokeWidth = Math.round(4 * scale);
 
         ctx.save();
@@ -275,7 +267,6 @@ const sealRenderer = {
             const pos = positions[visibleIndex];
             const angle = pos.angle;
 
-            // Position exacte sur l'orbite interne pointant vers le centre
             const px = centerX + glyphOrbitRadius * Math.cos(angle);
             const py = centerY + glyphOrbitRadius * Math.sin(angle);
 
@@ -286,7 +277,6 @@ const sealRenderer = {
             ctx.translate(px, py);
             ctx.rotate(angle + Math.PI / 2);
 
-            // Effet 2D prononcé (ombrage / relief)
             ctx.shadowColor = 'rgba(0, 0, 0, 0.40)';
             ctx.shadowBlur = 5 * scale;
             ctx.shadowOffsetX = 2 * scale;
@@ -305,19 +295,16 @@ const sealRenderer = {
         }
         ctx.restore();
 
-        // 5. Textes du Lot et de la Série (sans libellés, série grandement agrandie)
         ctx.save();
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
 
         const textY = centerY + 175 * scale;
 
-        // Numéro du lot
         ctx.font = `900 ${Math.round(48 * scale)}px sans-serif`;
         ctx.fillStyle = TEXT_PRIMARY_COLOR;
         ctx.fillText(`${batchText}`, centerX, textY - 15 * scale);
 
-        // Numéro de série grandement agrandi
         ctx.font = `900 ${Math.round(44 * scale)}px sans-serif`;
         ctx.fillStyle = TEXT_SECONDARY_COLOR;
         ctx.fillText(`${itemText}`, centerX, textY + 35 * scale);
@@ -328,9 +315,6 @@ const sealRenderer = {
     }
 };
 
-/**
- * Dessin des glyphes étirées vers le centre avec relief 2D
- */
 function drawGlyphStretchedTowardCenter2D(ctx, type, isFilled, w, h, strokeWidth) {
     ctx.lineWidth = strokeWidth;
     ctx.strokeStyle = '#000000';
