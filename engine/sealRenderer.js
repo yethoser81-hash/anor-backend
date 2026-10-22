@@ -1,7 +1,7 @@
 /**
  * ====================================================================
  * ANOR CHECK
- * SEAL RENDERER V30.0 - RENDU VECTORIEL HAUTE DÉFINITION (28 BITS)
+ * SEAL RENDERER V31.0 - GLYPHES & TEXTES AGRANDIS POUR 2CM
  * ====================================================================
  */
 
@@ -12,7 +12,7 @@ const crypto = require('crypto');
 const GlyphsLibrary = require('../library/glyphsLibrary');
 
 const VISUAL_VERSION = 3;
-const VISIBLE_GLYPH_COUNT = 28; // 28 bits réalignés
+const VISIBLE_GLYPH_COUNT = 28;
 const CANONICAL_OUTER_RADIUS = 500;
 
 const sealRenderer = {
@@ -46,15 +46,16 @@ const sealRenderer = {
     },
 
     getGeometry(width, height) {
-        const outerRadius = Math.min(width, height) / 2 - 20;
+        const outerRadius = Math.min(width, height) / 2 - 10;
         const centerX = width / 2;
         const centerY = height / 2;
         
-        const logoSize = Math.round(width * 0.42); 
+        // Taille du logo légèrement ajustée pour laisser respirer les glyphes agrandis
+        const logoSize = Math.round(width * 0.38); 
         const logoRadius = logoSize / 2;
 
-        const outerRingRadius = outerRadius - 30;
-        const singleRingRadius = outerRingRadius - 65; 
+        const outerRingRadius = outerRadius - 25;
+        const singleRingRadius = outerRingRadius - 70; 
 
         return {
             centerX,
@@ -132,7 +133,7 @@ const sealRenderer = {
             payload.name ||
             options.batchNumber ||
             options.lot ||
-            'M10 120 520';
+            'M52 450 210';
 
         const normalizedBatchName = String(rawBatchName).trim().toUpperCase();
         const batchText = normalizedBatchName.replace(/^LOT\s*/i, '');
@@ -158,10 +159,10 @@ const sealRenderer = {
             this.normalizeVisualBits(suppliedVisualBits) ||
             this.deriveVisualBits(secureSignature || rawBatchName);
 
-        // 1. Cercle extérieur
+        // 1. Cercle extérieur noir renforcé
         ctx.save();
         ctx.strokeStyle = GEOMETRY_COLOR;
-        ctx.lineWidth = Math.round(7 * scale);
+        ctx.lineWidth = Math.round(9 * scale);
         ctx.beginPath();
         ctx.arc(centerX, centerY, outerRingRadius + 20 * scale, 0, Math.PI * 2);
         ctx.stroke();
@@ -169,7 +170,7 @@ const sealRenderer = {
 
         // 2. Logo central
         const logoPath = options.logoPath || payload.logoPath || path.join(__dirname, '../assets/logo_anor_master.png');
-        const logoCenterY = centerY - 70 * scale;
+        const logoCenterY = centerY - 75 * scale;
 
         if (fs.existsSync(logoPath)) {
             try {
@@ -186,7 +187,7 @@ const sealRenderer = {
             }
         }
 
-        // 3. Mires cardinales
+        // 3. Mires cardinales renforcées
         const finderAngles = this.getFinderAngles();
 
         ctx.save();
@@ -201,18 +202,18 @@ const sealRenderer = {
             ctx.save();
             ctx.translate(px, py);
 
-            ctx.lineWidth = Math.round(6 * scale);
-            ctx.strokeRect(-20 * scale, -20 * scale, 40 * scale, 40 * scale);
-            ctx.fillRect(-8 * scale, -8 * scale, 16 * scale, 16 * scale);
+            ctx.lineWidth = Math.round(7 * scale);
+            ctx.strokeRect(-22 * scale, -22 * scale, 44 * scale, 44 * scale);
+            ctx.fillRect(-9 * scale, -9 * scale, 18 * scale, 18 * scale);
 
             ctx.restore();
         }
         ctx.restore();
 
-        // 4. Rendu des 28 Glyphes
+        // 4. Glyphes AGRANDIS (glyphScale à 2.3 et strokeWidth à 8.0 pour visibilité parfaite)
         const positions = this.getVisiblePositions();
-        const glyphScale = 1.8 * scale; 
-        const strokeWidth = Math.round(5.5 * scale);
+        const glyphScale = 2.3 * scale; 
+        const strokeWidth = Math.round(8.0 * scale);
 
         ctx.save();
 
@@ -245,20 +246,22 @@ const sealRenderer = {
         }
         ctx.restore();
 
-        // 5. Affichage des chiffres uniquement (sans les mots "LOT" ni "SÉRIE")
+        // 5. Numéro de LOT et SÉRIE agrandis pour lisibilité optimale
         ctx.save();
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
 
-        const textY = centerY + 185 * scale;
+        const textY = centerY + 175 * scale;
 
-        ctx.font = `900 ${Math.round(48 * scale)}px sans-serif`;
+        // Numéro du lot
+        ctx.font = `900 ${Math.round(52 * scale)}px sans-serif`;
         ctx.fillStyle = TEXT_PRIMARY_COLOR;
-        ctx.fillText(`${batchText}`, centerX, textY - 18 * scale);
+        ctx.fillText(`${batchText}`, centerX, textY - 20 * scale);
 
-        ctx.font = `bold ${Math.round(28 * scale)}px sans-serif`;
+        // Numéro de Série nettement plus grand et lisible
+        ctx.font = `900 ${Math.round(40 * scale)}px sans-serif`;
         ctx.fillStyle = TEXT_SECONDARY_COLOR;
-        ctx.fillText(`${itemText}`, centerX, textY + 22 * scale);
+        ctx.fillText(`${itemText}`, centerX, textY + 30 * scale);
 
         ctx.restore();
 
@@ -284,7 +287,7 @@ function drawGlyphVectorHD(ctx, type, def, isFilled, glyphScale = 1, strokeWidth
 
         case 'square_dot':
             ctx.strokeRect(-w / 2, -h / 2, w, h);
-            ctx.fillRect(-w / 6, -h / 6, w / 3, h / 3);
+            ctx.fillRect(-w / 5, -h / 5, (2 * w) / 5, (2 * h) / 5);
             break;
 
         case 'square_inner':
@@ -320,7 +323,7 @@ function drawGlyphVectorHD(ctx, type, def, isFilled, glyphScale = 1, strokeWidth
             ctx.arc(0, 0, w / 2, 0, Math.PI * 2);
             ctx.stroke();
             ctx.beginPath();
-            ctx.arc(0, 0, w / 5, 0, Math.PI * 2);
+            ctx.arc(0, 0, w / 4, 0, Math.PI * 2);
             ctx.fill();
             break;
 
@@ -336,7 +339,7 @@ function drawGlyphVectorHD(ctx, type, def, isFilled, glyphScale = 1, strokeWidth
             ctx.save();
             ctx.rotate(Math.PI / 4);
             ctx.strokeRect(-w / 2, -h / 2, w, h);
-            ctx.fillRect(-w / 5, -h / 5, (2 * w) / 5, (2 * h) / 5);
+            ctx.fillRect(-w / 4, -h / 4, w / 2, h / 2);
             ctx.restore();
             break;
 
@@ -352,7 +355,7 @@ function drawGlyphVectorHD(ctx, type, def, isFilled, glyphScale = 1, strokeWidth
             ctx.moveTo(-w / 2, 0); ctx.lineTo(w / 2, 0);
             ctx.moveTo(0, -h / 2); ctx.lineTo(0, h / 2);
             ctx.stroke();
-            ctx.fillRect(-w / 6, -h / 6, w / 3, h / 3);
+            ctx.fillRect(-w / 5, -h / 5, (2 * w) / 5, (2 * h) / 5);
             break;
 
         case 'triangle':
