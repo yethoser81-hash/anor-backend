@@ -1,7 +1,7 @@
 /**
  * ====================================================================
  * ANOR CHECK
- * SEAL RENDERER V38.0 - GLYPHES ALLONGÉES VERS LE CENTRE, LOGO AGRANDI, SÉRIE AGRANDIE, RELIEF 2D
+ * SEAL RENDERER V39.0 - GÉOMÉTRIE INTERNE PARFAITE & RELIEF 2D
  * ====================================================================
  */
 
@@ -52,23 +52,26 @@ const sealRenderer = {
     },
 
     getGeometry(width, height) {
-        const outerRadius = Math.min(width, height) / 2 - 15;
+        const outerRadius = Math.min(width, height) / 2 - 20;
         const centerX = width / 2;
         const centerY = height / 2;
         
-        // 2 - Logo agrandi (passé de 350 à 420 ou proportionnel à ~44%)
-        const logoSize = Math.round(width * 0.44); 
+        // Logo agrandi harmonieusement au centre
+        const logoSize = Math.round(width * 0.42); 
         const logoRadius = logoSize / 2;
 
-        const outerRingRadius = outerRadius - 15;
-        
+        const outerRingRadius = outerRadius - 10;
+        // Rayon du cercle sur lequel reposent les glyphes (bien à l'intérieur du cercle externe)
+        const glyphOrbitRadius = outerRingRadius - 45;
+
         return {
             centerX,
             centerY,
             outerRadius,
             logoSize,
             logoRadius,
-            outerRingRadius
+            outerRingRadius,
+            glyphOrbitRadius
         };
     },
 
@@ -84,13 +87,36 @@ const sealRenderer = {
     getVisiblePositions() {
         const positions = [];
         const count = VISIBLE_GLYPH_COUNT;
-        const angleOffset = Math.PI / count;
+        const finderAngles = this.getFinderAngles();
+        const safetyMargin = (15 * Math.PI) / 180; // Marge de protection autour des mires
 
+        let validAngles = [];
+        const totalSteps = 360;
+
+        for (let i = 0; i < totalSteps; i++) {
+            const angle = (i / totalSteps) * Math.PI * 2;
+            let isNearFinder = false;
+
+            for (const fAngle of finderAngles) {
+                let diff = Math.abs(angle - fAngle);
+                while (diff > Math.PI) diff = Math.abs(diff - 2 * Math.PI);
+                if (diff < safetyMargin) {
+                    isNearFinder = true;
+                    break;
+                }
+            }
+
+            if (!isNearFinder) {
+                validAngles.push(angle);
+            }
+        }
+
+        const step = validAngles.length / count;
         for (let i = 0; i < count; i++) {
-            const angle = (i / count) * Math.PI * 2 + angleOffset;
+            const index = Math.min(Math.floor(i * step), validAngles.length - 1);
             positions.push({
                 ring: 'single',
-                angle,
+                angle: validAngles[index],
                 index: i
             });
         }
@@ -120,7 +146,8 @@ const sealRenderer = {
             outerRadius,
             logoSize,
             logoRadius,
-            outerRingRadius
+            outerRingRadius,
+            glyphOrbitRadius
         } = geometry;
 
         const scale = outerRadius / CANONICAL_OUTER_RADIUS;
@@ -136,10 +163,10 @@ const sealRenderer = {
             payload.name ||
             options.batchNumber ||
             options.lot ||
-            'H54 125 450';
+            'P5822 014';
 
         const normalizedBatchName = String(rawBatchName).trim().toUpperCase();
-        // 3 - "LOT" retiré, on conserve uniquement le numéro du lot
+        // Libellé "LOT" retiré
         const batchText = normalizedBatchName.replace(/^LOT\s*/i, '');
 
         const rawMasterLabel = options.masterSerialLabel || '000000';
@@ -151,7 +178,7 @@ const sealRenderer = {
             payload.serialNumber ??
             options.serial;
 
-        // 3 - "SÉRIE" retiré, on conserve uniquement les chiffres de la série
+        // Libellé "SÉRIE" retiré
         const itemText =
             rawItemNumber !== undefined &&
             rawItemNumber !== null &&
@@ -177,7 +204,7 @@ const sealRenderer = {
             throw new Error(`[sealRenderer] Matrice visuelle invalide : ${VISIBLE_GLYPH_COUNT} bits requis.`);
         }
 
-        // Cercle extérieur unique propre
+        // 1. Cercle extérieur unique
         ctx.save();
         ctx.strokeStyle = GEOMETRY_COLOR;
         ctx.lineWidth = Math.round(6 * scale);
@@ -186,13 +213,13 @@ const sealRenderer = {
         ctx.stroke();
         ctx.restore();
 
-        // 2 - Logo central agrandi et positionné pour ne pas croiser les textes
+        // 2. Logo central agrandi et bien positionné
         const logoPath =
             options.logoPath ||
             payload.logoPath ||
             path.join(__dirname, '../assets/logo_anor_master.png');
 
-        const logoCenterY = centerY - 75 * scale;
+        const logoCenterY = centerY - 70 * scale;
 
         if (fs.existsSync(logoPath)) {
             try {
@@ -209,7 +236,7 @@ const sealRenderer = {
             }
         }
 
-        // Mires cardinales (Nord, Sud, Est, Ouest)
+        // 3. Mires cardinales (Nord, Sud, Est, Ouest)
         const finderAngles = this.getFinderAngles();
 
         ctx.save();
@@ -225,19 +252,22 @@ const sealRenderer = {
             ctx.translate(px, py);
 
             ctx.lineWidth = Math.round(5 * scale);
-            ctx.strokeRect(-16 * scale, -16 * scale, 32 * scale, 32 * scale);
+            ctx.fillStyle = backgroundColor;
+            ctx.fillRect(-18 * scale, -18 * scale, 36 * scale, 36 * scale);
+
+            ctx.fillStyle = GEOMETRY_COLOR;
+            ctx.strokeRect(-15 * scale, -15 * scale, 30 * scale, 30 * scale);
             ctx.fillRect(-6 * scale, -6 * scale, 12 * scale, 12 * scale);
 
             ctx.restore();
         }
         ctx.restore();
 
-        // 1 - Glyphes ancrées au cercle externe et ALLONGÉES VERS LE CENTRE + 6 - Effet 2D visible
+        // 4. Rendu des glyphes : Allongées vers le centre avec espacement et relief 2D
         const positions = this.getVisiblePositions();
-        const glyphWidth = 22 * scale;
-        const glyphLength = 55 * scale; // Allongement radial prononcé vers le centre
-        const strokeWidth = Math.round(4.5 * scale);
-        const glyphOuterAnchorRadius = outerRingRadius - (4 * scale);
+        const glyphWidth = 20 * scale;
+        const glyphLength = 45 * scale; // Étirées vers le centre
+        const strokeWidth = Math.round(4 * scale);
 
         ctx.save();
 
@@ -245,27 +275,26 @@ const sealRenderer = {
             const pos = positions[visibleIndex];
             const angle = pos.angle;
 
-            const anchorX = centerX + glyphOuterAnchorRadius * Math.cos(angle);
-            const anchorY = centerY + glyphOuterAnchorRadius * Math.sin(angle);
+            // Position exacte sur l'orbite interne pointant vers le centre
+            const px = centerX + glyphOrbitRadius * Math.cos(angle);
+            const py = centerY + glyphOrbitRadius * Math.sin(angle);
 
             const glyphType = this.resolveProtocolGlyph(visibleIndex);
-            const glyphDef = GlyphsLibrary.getGlyphDefinition(glyphType);
             const isFilled = visualBits[visibleIndex] === '1';
 
             ctx.save();
-            ctx.translate(anchorX, anchorY);
+            ctx.translate(px, py);
             ctx.rotate(angle + Math.PI / 2);
 
             // Effet 2D prononcé (ombrage / relief)
-            ctx.shadowColor = 'rgba(0, 0, 0, 0.45)';
-            ctx.shadowBlur = 6 * scale;
+            ctx.shadowColor = 'rgba(0, 0, 0, 0.40)';
+            ctx.shadowBlur = 5 * scale;
             ctx.shadowOffsetX = 2 * scale;
-            ctx.shadowOffsetY = 3 * scale;
+            ctx.shadowOffsetY = 2 * scale;
 
-            drawGlyphInwardStretched2D(
+            drawGlyphStretchedTowardCenter2D(
                 ctx,
                 glyphType,
-                glyphDef,
                 isFilled,
                 glyphWidth,
                 glyphLength,
@@ -276,7 +305,7 @@ const sealRenderer = {
         }
         ctx.restore();
 
-        // 3 & 4 - Lot et série sans les libellés textuels, avec une série grandement agrandie
+        // 5. Textes du Lot et de la Série (sans libellés, série grandement agrandie)
         ctx.save();
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
@@ -288,7 +317,7 @@ const sealRenderer = {
         ctx.fillStyle = TEXT_PRIMARY_COLOR;
         ctx.fillText(`${batchText}`, centerX, textY - 15 * scale);
 
-        // 4 - Taille de la série agrandie (presque de la taille du lot pour une visibilité parfaite)
+        // Numéro de série grandement agrandi
         ctx.font = `900 ${Math.round(44 * scale)}px sans-serif`;
         ctx.fillStyle = TEXT_SECONDARY_COLOR;
         ctx.fillText(`${itemText}`, centerX, textY + 35 * scale);
@@ -300,9 +329,9 @@ const sealRenderer = {
 };
 
 /**
- * Moteur de rendu : Glyphes étirées vers le centre avec relief 2D complet pour les 12 types
+ * Dessin des glyphes étirées vers le centre avec relief 2D
  */
-function drawGlyphInwardStretched2D(ctx, type, def, isFilled, w, h, strokeWidth) {
+function drawGlyphStretchedTowardCenter2D(ctx, type, isFilled, w, h, strokeWidth) {
     ctx.lineWidth = strokeWidth;
     ctx.strokeStyle = '#000000';
     ctx.fillStyle = isFilled ? '#000000' : '#FFFFFF';
@@ -314,44 +343,44 @@ function drawGlyphInwardStretched2D(ctx, type, def, isFilled, w, h, strokeWidth)
         case 'bar':
         case 'rect':
             if (isFilled) {
-                ctx.fillRect(-w / 2, 0, w, h);
+                ctx.fillRect(-w / 2, -h / 2, w, h);
                 ctx.fillStyle = '#222222';
-                ctx.fillRect(-w / 2 + 2, 2, w - 4, h - 4);
+                ctx.fillRect(-w / 2 + 2, -h / 2 + 2, w - 4, h - 4);
             } else {
-                ctx.strokeRect(-w / 2, 0, w, h);
+                ctx.strokeRect(-w / 2, -h / 2, w, h);
             }
             break;
 
         case 'square_dot':
-            ctx.strokeRect(-w / 2, 0, w, h);
+            ctx.strokeRect(-w / 2, -h / 2, w, h);
             ctx.fillStyle = '#000000';
-            ctx.fillRect(-w / 4, h * 0.35, w / 2, h * 0.3);
+            ctx.fillRect(-w / 4, -h / 4, w / 2, h / 2);
             break;
 
         case 'square_inner':
-            ctx.strokeRect(-w / 2, 0, w, h);
+            ctx.strokeRect(-w / 2, -h / 2, w, h);
             if (isFilled) {
                 ctx.fillStyle = '#000000';
-                ctx.fillRect(-w / 3, h * 0.2, (2 * w) / 3, h * 0.6);
+                ctx.fillRect(-w / 3, -h / 3, (2 * w) / 3, (2 * h) / 3);
             } else {
-                ctx.strokeRect(-w / 4, h * 0.25, w / 2, h * 0.5);
+                ctx.strokeRect(-w / 4, -h / 4, w / 2, h / 2);
             }
             break;
 
         case 'rect_half':
-            ctx.strokeRect(-w / 2, 0, w, h);
+            ctx.strokeRect(-w / 2, -h / 2, w, h);
             ctx.fillStyle = '#000000';
-            ctx.fillRect(-w / 2, 0, w / 2, h);
+            ctx.fillRect(-w / 2, -h / 2, w / 2, h);
             break;
 
         case 'rect_double':
-            ctx.strokeRect(-w / 2, 0, w, h);
-            ctx.strokeRect(-w / 4, h * 0.2, w / 2, h * 0.6);
+            ctx.strokeRect(-w / 2, -h / 2, w, h);
+            ctx.strokeRect(-w / 4, -h / 4, w / 2, h / 2);
             break;
 
         case 'circle':
             ctx.beginPath();
-            ctx.ellipse(0, h / 2, w / 2, h / 2, 0, 0, Math.PI * 2);
+            ctx.ellipse(0, 0, w / 2, h / 2, 0, 0, Math.PI * 2);
             if (isFilled) {
                 ctx.fillStyle = '#000000';
                 ctx.fill();
@@ -361,20 +390,20 @@ function drawGlyphInwardStretched2D(ctx, type, def, isFilled, w, h, strokeWidth)
 
         case 'circle_dot':
             ctx.beginPath();
-            ctx.ellipse(0, h / 2, w / 2, h / 2, 0, 0, Math.PI * 2);
+            ctx.ellipse(0, 0, w / 2, h / 2, 0, 0, Math.PI * 2);
             ctx.stroke();
             ctx.beginPath();
-            ctx.ellipse(0, h / 2, w / 4, h / 4, 0, 0, Math.PI * 2);
+            ctx.ellipse(0, 0, w / 4, h / 4, 0, 0, Math.PI * 2);
             ctx.fillStyle = '#000000';
             ctx.fill();
             break;
 
         case 'diamond':
             ctx.beginPath();
-            ctx.moveTo(0, 0);
-            ctx.lineTo(w / 2, h / 2);
-            ctx.lineTo(0, h);
-            ctx.lineTo(-w / 2, h / 2);
+            ctx.moveTo(0, -h / 2);
+            ctx.lineTo(w / 2, 0);
+            ctx.lineTo(0, h / 2);
+            ctx.lineTo(-w / 2, 0);
             ctx.closePath();
             if (isFilled) {
                 ctx.fillStyle = '#000000';
@@ -385,28 +414,28 @@ function drawGlyphInwardStretched2D(ctx, type, def, isFilled, w, h, strokeWidth)
 
         case 'diamond_inner':
             ctx.beginPath();
-            ctx.moveTo(0, 0);
-            ctx.lineTo(w / 2, h / 2);
-            ctx.lineTo(0, h);
-            ctx.lineTo(-w / 2, h / 2);
+            ctx.moveTo(0, -h / 2);
+            ctx.lineTo(w / 2, 0);
+            ctx.lineTo(0, h / 2);
+            ctx.lineTo(-w / 2, 0);
             ctx.closePath();
             ctx.stroke();
             ctx.fillStyle = '#000000';
-            ctx.fillRect(-w / 5, h * 0.35, (2 * w) / 5, h * 0.3);
+            ctx.fillRect(-w / 5, -h / 5, (2 * w) / 5, h * 0.4);
             break;
 
         case 'plus':
             ctx.beginPath();
-            ctx.moveTo(-w / 2, h / 2); ctx.lineTo(w / 2, h / 2);
-            ctx.moveTo(0, 0); ctx.lineTo(0, h);
+            ctx.moveTo(-w / 2, 0); ctx.lineTo(w / 2, 0);
+            ctx.moveTo(0, -h / 2); ctx.lineTo(0, h / 2);
             ctx.stroke();
             break;
 
         default:
             if (isFilled) {
-                ctx.fillRect(-w / 2, 0, w, h);
+                ctx.fillRect(-w / 2, -h / 2, w, h);
             } else {
-                ctx.strokeRect(-w / 2, 0, w, h);
+                ctx.strokeRect(-w / 2, -h / 2, w, h);
             }
     }
 }
