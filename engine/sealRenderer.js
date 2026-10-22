@@ -1,7 +1,7 @@
 /**
  * ====================================================================
  * ANOR CHECK
- * SEAL RENDERER V33.0 - GEOMETRIE PRECISION IMPRESSION (ANTI-BAVURE)
+ * SEAL RENDERER V34.0 - GEOMETRIE CIRCULAIRE EQUILIBREE (28 BITS)
  * ====================================================================
  */
 
@@ -50,14 +50,12 @@ const sealRenderer = {
         const centerX = width / 2;
         const centerY = height / 2;
         
-        // Taille équilibrée du logo central pour ne jamais toucher le texte
-        const logoSize = Math.round(width * 0.38); 
+        const logoSize = Math.round(width * 0.36); 
         const logoRadius = logoSize / 2;
 
         const outerRingRadius = outerRadius - 15;
-        
-        // Rayon positionnant le centre des glyphes étirés vers l'intérieur
-        const singleRingRadius = outerRingRadius - 70; 
+        // Le rayon d'ancrage colle les glyphes juste sous l'anneau extérieur
+        const singleRingRadius = outerRingRadius - 38; 
 
         return {
             centerX,
@@ -72,7 +70,7 @@ const sealRenderer = {
 
     getFinderAngles() {
         return [
-            -Math.PI / 2, // Nord (0 rad)
+            -Math.PI / 2, // Nord
             0,            // Est
             Math.PI / 2,  // Sud
             Math.PI       // Ouest
@@ -80,44 +78,18 @@ const sealRenderer = {
     },
 
     /**
-     * Calcul des angles en évitant STRICTEMENT les zones des 4 mires
+     * Répartition angulaire régulière à 100% sur tout le pourtour
      */
     getVisiblePositions() {
         const positions = [];
         const count = VISIBLE_GLYPH_COUNT;
-        const finderAngles = this.getFinderAngles();
-        
-        // Marge de protection autour de chaque mire (22 degrés)
-        const safetyMargin = (22 * Math.PI) / 180; 
+        const step = (Math.PI * 2) / count;
+        const offset = step / 2;
 
-        let validAngles = [];
-        let totalSteps = 120; // Discrétisation fine du cercle
-
-        for (let i = 0; i < totalSteps; i++) {
-            const angle = (i / totalSteps) * Math.PI * 2;
-            let isNearFinder = false;
-
-            for (const fAngle of finderAngles) {
-                let diff = Math.abs(angle - fAngle);
-                while (diff > Math.PI) diff = Math.abs(diff - 2 * Math.PI);
-                if (diff < safetyMargin) {
-                    isNearFinder = true;
-                    break;
-                }
-            }
-
-            if (!isNearFinder) {
-                validAngles.push(angle);
-            }
-        }
-
-        // Distribution uniforme des 28 glyphes dans les zones autorisées
-        const step = validAngles.length / count;
         for (let i = 0; i < count; i++) {
-            const index = Math.floor(i * step);
             positions.push({
                 ring: 'single',
-                angle: validAngles[index],
+                angle: i * step + offset,
                 index: i
             });
         }
@@ -153,7 +125,6 @@ const sealRenderer = {
 
         const scale = outerRadius / CANONICAL_OUTER_RADIUS;
 
-        // Fond blanc propre
         ctx.fillStyle = backgroundColor;
         ctx.fillRect(0, 0, width, height);
 
@@ -165,7 +136,7 @@ const sealRenderer = {
             payload.name ||
             options.batchNumber ||
             options.lot ||
-            'T57 421 0125';
+            'F45 7854 120';
 
         const normalizedBatchName = String(rawBatchName).trim().toUpperCase();
         const batchText = normalizedBatchName.replace(/^LOT\s*/i, '');
@@ -191,7 +162,7 @@ const sealRenderer = {
             this.normalizeVisualBits(suppliedVisualBits) ||
             this.deriveVisualBits(secureSignature || rawBatchName);
 
-        // 1. Cercle Extérieur Noir Unique et Propre (Pas de double cercle parasite)
+        // 1. Cercle Extérieur Noir
         ctx.save();
         ctx.strokeStyle = GEOMETRY_COLOR;
         ctx.lineWidth = Math.round(6 * scale);
@@ -200,9 +171,9 @@ const sealRenderer = {
         ctx.stroke();
         ctx.restore();
 
-        // 2. Logo Central Remonté pour dégager complètement le texte du lot
+        // 2. Logo Central
         const logoPath = options.logoPath || payload.logoPath || path.join(__dirname, '../assets/logo_anor_master.png');
-        const logoCenterY = centerY - 95 * scale; // Remonté pour libérer l'espace bas
+        const logoCenterY = centerY - 80 * scale;
 
         if (fs.existsSync(logoPath)) {
             try {
@@ -219,34 +190,10 @@ const sealRenderer = {
             }
         }
 
-        // 3. Mires Cardinales Isoler et Parfaitement Dégagées
-        const finderAngles = this.getFinderAngles();
-
-        ctx.save();
-        ctx.strokeStyle = GEOMETRY_COLOR;
-        ctx.fillStyle = GEOMETRY_COLOR;
-
-        for (let i = 0; i < finderAngles.length; i++) {
-            const angle = finderAngles[i];
-            const px = centerX + outerRingRadius * Math.cos(angle);
-            const py = centerY + outerRingRadius * Math.sin(angle);
-
-            ctx.save();
-            ctx.translate(px, py);
-
-            ctx.lineWidth = Math.round(5 * scale);
-            // Mire carrée nette à cheval sur la ligne extérieure
-            ctx.strokeRect(-18 * scale, -18 * scale, 36 * scale, 36 * scale);
-            ctx.fillRect(-7 * scale, -7 * scale, 14 * scale, 14 * scale);
-
-            ctx.restore();
-        }
-        ctx.restore();
-
-        // 4. Glyphes Affinées, Espacées et Rallongées vers l'INTÉRIEUR
+        // 3. Glyphes Répartis Régulièrement et Allongés vers l'Intérieur
         const positions = this.getVisiblePositions();
-        const glyphScale = 1.6 * scale; 
-        const strokeWidth = Math.round(4.0 * scale); // Trait affiné pour éviter les pâtés d'impression
+        const glyphScale = 1.4 * scale; 
+        const strokeWidth = Math.round(4.5 * scale);
 
         ctx.save();
 
@@ -264,10 +211,9 @@ const sealRenderer = {
 
             ctx.save();
             ctx.translate(px, py);
-            // Orientation radiale dirigée vers le centre
             ctx.rotate(angle + Math.PI / 2);
 
-            drawGlyphVectorInward(
+            drawGlyphVectorEqually(
                 ctx,
                 glyphType,
                 glyphDef,
@@ -280,23 +226,45 @@ const sealRenderer = {
         }
         ctx.restore();
 
-        // 5. Textes Dégagés et Parfaitement Lisibles
+        // 4. Mires Cardinales Propres sur l'Anneau
+        const finderAngles = this.getFinderAngles();
+
+        ctx.save();
+        ctx.strokeStyle = GEOMETRY_COLOR;
+        ctx.fillStyle = GEOMETRY_COLOR;
+
+        for (let i = 0; i < finderAngles.length; i++) {
+            const angle = finderAngles[i];
+            const px = centerX + outerRingRadius * Math.cos(angle);
+            const py = centerY + outerRingRadius * Math.sin(angle);
+
+            ctx.save();
+            ctx.translate(px, py);
+
+            ctx.lineWidth = Math.round(5 * scale);
+            ctx.strokeRect(-16 * scale, -16 * scale, 32 * scale, 32 * scale);
+            ctx.fillRect(-6 * scale, -6 * scale, 12 * scale, 12 * scale);
+
+            ctx.restore();
+        }
+        ctx.restore();
+
+        // 5. Textes Lisibles et Dégagés
         ctx.save();
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
 
-        // Positionnement bas aéré
-        const textY = centerY + 185 * scale;
+        const textY = centerY + 180 * scale;
 
-        // Numéro du Lot (Net, sans toucher le logo)
-        ctx.font = `900 ${Math.round(46 * scale)}px sans-serif`;
+        // Numéro de Lot
+        ctx.font = `900 ${Math.round(48 * scale)}px sans-serif`;
         ctx.fillStyle = TEXT_PRIMARY_COLOR;
-        ctx.fillText(`${batchText}`, centerX, textY - 10 * scale);
+        ctx.fillText(`${batchText}`, centerX, textY - 12 * scale);
 
-        // Numéro de Série (Taille équilibrée et lisible)
-        ctx.font = `bold ${Math.round(36 * scale)}px sans-serif`;
+        // Numéro de Série
+        ctx.font = `bold ${Math.round(38 * scale)}px sans-serif`;
         ctx.fillStyle = TEXT_SECONDARY_COLOR;
-        ctx.fillText(`${itemText}`, centerX, textY + 38 * scale);
+        ctx.fillText(`${itemText}`, centerX, textY + 35 * scale);
 
         ctx.restore();
 
@@ -305,12 +273,11 @@ const sealRenderer = {
 };
 
 /**
- * MOTEUR VECTORIEL : Rallonge la forme vers L'INTÉRIEUR et affine la largeur
+ * Dessin des glyphes allongé radialement sans bavure
  */
-function drawGlyphVectorInward(ctx, type, def, isFilled, glyphScale = 1, strokeWidth = 3) {
-    // Largeur affinée (w) pour garder l'espace anti-bavure, Hauteur (h) rallongée vers l'intérieur
-    const w = (def.width || 16) * glyphScale * 0.85; 
-    const h = (def.height || 16) * glyphScale * 1.50; // +50% d'allongement radial vers le centre
+function drawGlyphVectorEqually(ctx, type, def, isFilled, glyphScale = 1, strokeWidth = 3) {
+    const w = (def.width || 16) * glyphScale * 0.9; 
+    const h = (def.height || 16) * glyphScale * 1.55; // Allongement vers l'intérieur
 
     ctx.lineWidth = strokeWidth;
     ctx.strokeStyle = '#000000';
@@ -335,11 +302,6 @@ function drawGlyphVectorInward(ctx, type, def, isFilled, glyphScale = 1, strokeW
             ctx.strokeRect(-w / 2, -h / 2, w, h);
             if (isFilled) ctx.fillRect(-w / 3, -h / 3, (2 * w) / 3, (2 * h) / 3);
             else ctx.strokeRect(-w / 4, -h / 4, w / 2, h / 2);
-            break;
-
-        case 'rect_half':
-            ctx.strokeRect(-w / 2, -h / 2, w, h);
-            ctx.fillRect(-w / 2, -h / 2, w / 2, h);
             break;
 
         case 'circle':
@@ -367,17 +329,6 @@ function drawGlyphVectorInward(ctx, type, def, isFilled, glyphScale = 1, strokeW
             ctx.closePath();
             if (isFilled) ctx.fill();
             else ctx.stroke();
-            break;
-
-        case 'diamond_inner':
-            ctx.beginPath();
-            ctx.moveTo(0, -h / 2);
-            ctx.lineTo(w / 2, 0);
-            ctx.lineTo(0, h / 2);
-            ctx.lineTo(-w / 2, 0);
-            ctx.closePath();
-            ctx.stroke();
-            ctx.fillRect(-w / 5, -h / 5, (2 * w) / 5, (2 * h) / 5);
             break;
 
         case 'plus':
