@@ -1,7 +1,7 @@
 /**
  * ====================================================================
  * ANOR CHECK
- * SEAL RENDERER V41.0 - SYNCHRONISATION TOTALE, 12 GLYPHES & RELIEF 2D
+ * SEAL RENDERER V42.0 - CORRECTIONS EXACTES DES FORMES ET DE L'ORBITE
  * ====================================================================
  */
 
@@ -60,7 +60,8 @@ const sealRenderer = {
         const logoRadius = logoSize / 2;
 
         const outerRingRadius = outerRadius - 20;
-        const glyphOrbitRadius = outerRingRadius - 42; 
+        // Orbite rapprochée du centre et dégagée des mires
+        const glyphOrbitRadius = outerRingRadius - 62; 
 
         return {
             centerX,
@@ -85,13 +86,36 @@ const sealRenderer = {
     getVisiblePositions() {
         const positions = [];
         const count = VISIBLE_GLYPH_COUNT;
-        const angleOffset = Math.PI / count;
+        const finderAngles = this.getFinderAngles();
+        const safetyMargin = (16 * Math.PI) / 180; // Écartement accru des mires
 
+        let validAngles = [];
+        const totalSteps = 360;
+
+        for (let i = 0; i < totalSteps; i++) {
+            const angle = (i / totalSteps) * Math.PI * 2;
+            let isNearFinder = false;
+
+            for (const fAngle of finderAngles) {
+                let diff = Math.abs(angle - fAngle);
+                while (diff > Math.PI) diff = Math.abs(diff - 2 * Math.PI);
+                if (diff < safetyMargin) {
+                    isNearFinder = true;
+                    break;
+                }
+            }
+
+            if (!isNearFinder) {
+                validAngles.push(angle);
+            }
+        }
+
+        const step = validAngles.length / count;
         for (let i = 0; i < count; i++) {
-            const angle = (i / count) * Math.PI * 2 + angleOffset;
+            const index = Math.min(Math.floor(i * step), validAngles.length - 1);
             positions.push({
                 ring: 'single',
-                angle,
+                angle: validAngles[index],
                 index: i
             });
         }
@@ -244,8 +268,8 @@ const sealRenderer = {
         ctx.restore();
 
         const positions = this.getVisiblePositions();
-        const glyphWidth = 20 * scale;
-        const glyphLength = 46 * scale; 
+        const glyphWidth = 18 * scale;
+        const glyphLength = 58 * scale; // Allongement longitudinal important
         const strokeWidth = 4.5;
 
         ctx.save();
@@ -271,7 +295,7 @@ const sealRenderer = {
             ctx.shadowOffsetX = 1.5 * scale;
             ctx.shadowOffsetY = 1.5 * scale;
 
-            drawGlyphStretched2D(
+            drawGlyphExactCorrected2D(
                 ctx,
                 glyphType,
                 glyphDef,
@@ -305,7 +329,7 @@ const sealRenderer = {
     }
 };
 
-function drawGlyphStretched2D(ctx, type, def, isFilled, w, h, strokeWidth) {
+function drawGlyphExactCorrected2D(ctx, type, def, isFilled, w, h, strokeWidth) {
     ctx.lineWidth = strokeWidth;
     ctx.strokeStyle = '#000000';
     ctx.fillStyle = isFilled ? '#000000' : '#FFFFFF';
@@ -344,7 +368,8 @@ function drawGlyphStretched2D(ctx, type, def, isFilled, w, h, strokeWidth) {
         case 'rect_half':
             ctx.strokeRect(-w / 2, -h / 2, w, h);
             ctx.fillStyle = '#000000';
-            ctx.fillRect(-w / 2, -h / 2, w / 2, h);
+            // Remplissage à moitié dans le sens de la longueur (axe vertical h)
+            ctx.fillRect(-w / 2, -h / 2, w, h / 2);
             break;
 
         case 'rect_double':
@@ -353,8 +378,9 @@ function drawGlyphStretched2D(ctx, type, def, isFilled, w, h, strokeWidth) {
             break;
 
         case 'circle':
+            // Cercle parfait (largeur et hauteur égales à w)
             ctx.beginPath();
-            ctx.ellipse(0, 0, w / 2, h / 2, 0, 0, Math.PI * 2);
+            ctx.arc(0, 0, w / 2, 0, Math.PI * 2);
             if (isFilled) {
                 ctx.fillStyle = '#000000';
                 ctx.fill();
@@ -363,11 +389,12 @@ function drawGlyphStretched2D(ctx, type, def, isFilled, w, h, strokeWidth) {
             break;
 
         case 'circle_dot':
+            // Cercle parfait avec point central
             ctx.beginPath();
-            ctx.ellipse(0, 0, w / 2, h / 2, 0, 0, Math.PI * 2);
+            ctx.arc(0, 0, w / 2, 0, Math.PI * 2);
             ctx.stroke();
             ctx.beginPath();
-            ctx.ellipse(0, 0, w / 4, h / 4, 0, 0, Math.PI * 2);
+            ctx.arc(0, 0, w / 4, 0, Math.PI * 2);
             ctx.fillStyle = '#000000';
             ctx.fill();
             break;
