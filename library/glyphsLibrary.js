@@ -1,14 +1,14 @@
 /**
  * ====================================================================
  * ANOR CHECK
- * GLYPHS LIBRARY V7.0 - 12 TYPES OFFICIELS & SYNCHRONISÉS
+ * GLYPHS LIBRARY V8.0 - 12 TYPES OFFICIELS & SYNCHRONISÉS
  * SOURCE DE VÉRITÉ DES GLYPHES & PALETTE VECTORIELLE
  * ====================================================================
  */
 
 const GlyphsLibrary = {
 
-    VERSION: "7.0.0",
+    VERSION: "8.0.0",
 
     /**
      * ALPHABET OFFICIEL : 12 TYPES DE GLYPHES REQUIS

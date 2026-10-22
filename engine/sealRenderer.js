@@ -1,7 +1,7 @@
 /**
  * ====================================================================
  * ANOR CHECK
- * SEAL RENDERER V40.0 - FIX ESPACEMENT ORBITAL & DISTRIBUTION UNIFORME
+ * SEAL RENDERER V41.0 - SYNCHRONISATION TOTALE, 12 GLYPHES & RELIEF 2D
  * ====================================================================
  */
 
@@ -11,9 +11,9 @@ const fs = require('fs');
 const crypto = require('crypto');
 const GlyphsLibrary = require('../library/glyphsLibrary');
 
-const VISUAL_VERSION = 3;
+const VISUAL_VERSION = 2;
 const VISIBLE_GLYPH_COUNT = 28;
-const CANONICAL_OUTER_RADIUS = 500;
+const CANONICAL_OUTER_RADIUS = 375;
 
 const sealRenderer = {
 
@@ -52,15 +52,15 @@ const sealRenderer = {
     },
 
     getGeometry(width, height) {
-        const outerRadius = Math.min(width, height) / 2 - 20;
+        const outerRadius = Math.min(width, height) / 2 - 15;
         const centerX = width / 2;
         const centerY = height / 2;
         
-        const logoSize = Math.round(width * 0.42); 
+        const logoSize = 390; 
         const logoRadius = logoSize / 2;
 
-        const outerRingRadius = outerRadius - 10;
-        const glyphOrbitRadius = outerRingRadius - 48;
+        const outerRingRadius = outerRadius - 20;
+        const glyphOrbitRadius = outerRingRadius - 42; 
 
         return {
             centerX,
@@ -68,8 +68,8 @@ const sealRenderer = {
             outerRadius,
             logoSize,
             logoRadius,
-            outerRingRadius,
-            glyphOrbitRadius
+            singleRingRadius: glyphOrbitRadius,
+            outerRingRadius
         };
     },
 
@@ -85,36 +85,13 @@ const sealRenderer = {
     getVisiblePositions() {
         const positions = [];
         const count = VISIBLE_GLYPH_COUNT;
-        const finderAngles = this.getFinderAngles();
-        const safetyMargin = (12 * Math.PI) / 180;
+        const angleOffset = Math.PI / count;
 
-        let validAngles = [];
-        const totalSteps = 360;
-
-        for (let i = 0; i < totalSteps; i++) {
-            const angle = (i / totalSteps) * Math.PI * 2;
-            let isNearFinder = false;
-
-            for (const fAngle of finderAngles) {
-                let diff = Math.abs(angle - fAngle);
-                while (diff > Math.PI) diff = Math.abs(diff - 2 * Math.PI);
-                if (diff < safetyMargin) {
-                    isNearFinder = true;
-                    break;
-                }
-            }
-
-            if (!isNearFinder) {
-                validAngles.push(angle);
-            }
-        }
-
-        const step = validAngles.length / count;
         for (let i = 0; i < count; i++) {
-            const index = Math.min(Math.floor(i * step), validAngles.length - 1);
+            const angle = (i / count) * Math.PI * 2 + angleOffset;
             positions.push({
                 ring: 'single',
-                angle: validAngles[index],
+                angle,
                 index: i
             });
         }
@@ -123,8 +100,8 @@ const sealRenderer = {
     },
 
     async renderSealToBuffer(payload = {}, options = {}) {
-        const width = Math.max(1080, Math.round(options.width || 1080));
-        const height = Math.max(1080, Math.round(options.height || 1080));
+        const width = Math.max(400, Math.round(options.width || 800));
+        const height = Math.max(400, Math.round(options.height || 800));
 
         const canvas = createCanvas(width, height);
         const ctx = canvas.getContext('2d');
@@ -144,8 +121,8 @@ const sealRenderer = {
             outerRadius,
             logoSize,
             logoRadius,
-            outerRingRadius,
-            glyphOrbitRadius
+            singleRingRadius,
+            outerRingRadius
         } = geometry;
 
         const scale = outerRadius / CANONICAL_OUTER_RADIUS;
@@ -160,8 +137,11 @@ const sealRenderer = {
             payload.productName ||
             payload.name ||
             options.batchNumber ||
-            options.lot ||
-            'P65 854 751';
+            options.lot;
+
+        if (!rawBatchName) {
+            throw new Error('[sealRenderer] Aucun lot fourni.');
+        }
 
         const normalizedBatchName = String(rawBatchName).trim().toUpperCase();
         const batchText = normalizedBatchName.replace(/^LOT\s*/i, '');
@@ -202,9 +182,9 @@ const sealRenderer = {
 
         ctx.save();
         ctx.strokeStyle = GEOMETRY_COLOR;
-        ctx.lineWidth = Math.round(6 * scale);
+        ctx.lineWidth = 6 * scale;
         ctx.beginPath();
-        ctx.arc(centerX, centerY, outerRingRadius, 0, Math.PI * 2);
+        ctx.arc(centerX, centerY, outerRingRadius + 18 * scale, 0, Math.PI * 2);
         ctx.stroke();
         ctx.restore();
 
@@ -213,7 +193,7 @@ const sealRenderer = {
             payload.logoPath ||
             path.join(__dirname, '../assets/logo_anor_master.png');
 
-        const logoCenterY = centerY - 70 * scale;
+        const logoCenterY = centerY - 55 * scale;
 
         if (fs.existsSync(logoPath)) {
             try {
@@ -226,7 +206,7 @@ const sealRenderer = {
                     logoSize
                 );
             } catch (error) {
-                console.error('[sealRenderer] Erreur chargement logo :', error);
+                console.error('[sealRenderer] Erreur lors du chargement du logo :', error);
             }
         }
 
@@ -244,47 +224,57 @@ const sealRenderer = {
             ctx.save();
             ctx.translate(px, py);
 
-            ctx.lineWidth = Math.round(5 * scale);
-            ctx.fillStyle = backgroundColor;
-            ctx.fillRect(-18 * scale, -18 * scale, 36 * scale, 36 * scale);
-
-            ctx.fillStyle = GEOMETRY_COLOR;
-            ctx.strokeRect(-15 * scale, -15 * scale, 30 * scale, 30 * scale);
-            ctx.fillRect(-6 * scale, -6 * scale, 12 * scale, 12 * scale);
-
+            if (i === 0) {
+                ctx.lineWidth = 5 * scale;
+                ctx.fillStyle = backgroundColor;
+                ctx.fillRect(-18, -18, 36, 36);
+                ctx.fillStyle = GEOMETRY_COLOR;
+                ctx.strokeRect(-16, -16, 32, 32);
+                ctx.fillRect(-7, -7, 14, 14);
+            } else {
+                ctx.lineWidth = 4 * scale;
+                ctx.fillStyle = backgroundColor;
+                ctx.fillRect(-16, -16, 32, 32);
+                ctx.fillStyle = GEOMETRY_COLOR;
+                ctx.strokeRect(-14, -14, 28, 28);
+                ctx.fillRect(-5, -5, 10, 10);
+            }
             ctx.restore();
         }
         ctx.restore();
 
         const positions = this.getVisiblePositions();
-        const glyphWidth = 18 * scale;
-        const glyphLength = 48 * scale;
-        const strokeWidth = Math.round(4 * scale);
+        const glyphWidth = 20 * scale;
+        const glyphLength = 46 * scale; 
+        const strokeWidth = 4.5;
 
         ctx.save();
 
         for (let visibleIndex = 0; visibleIndex < positions.length; visibleIndex++) {
             const pos = positions[visibleIndex];
+            const radius = singleRingRadius;
             const angle = pos.angle;
 
-            const px = centerX + glyphOrbitRadius * Math.cos(angle);
-            const py = centerY + glyphOrbitRadius * Math.sin(angle);
+            const px = centerX + radius * Math.cos(angle);
+            const py = centerY + radius * Math.sin(angle);
 
             const glyphType = this.resolveProtocolGlyph(visibleIndex);
+            const glyphDef = GlyphsLibrary.getGlyphDefinition(glyphType);
             const isFilled = visualBits[visibleIndex] === '1';
 
             ctx.save();
             ctx.translate(px, py);
             ctx.rotate(angle + Math.PI / 2);
 
-            ctx.shadowColor = 'rgba(0, 0, 0, 0.40)';
-            ctx.shadowBlur = 5 * scale;
-            ctx.shadowOffsetX = 2 * scale;
-            ctx.shadowOffsetY = 2 * scale;
+            ctx.shadowColor = 'rgba(0, 0, 0, 0.45)';
+            ctx.shadowBlur = 4 * scale;
+            ctx.shadowOffsetX = 1.5 * scale;
+            ctx.shadowOffsetY = 1.5 * scale;
 
-            drawGlyphStretchedTowardCenter2D(
+            drawGlyphStretched2D(
                 ctx,
                 glyphType,
+                glyphDef,
                 isFilled,
                 glyphWidth,
                 glyphLength,
@@ -299,15 +289,15 @@ const sealRenderer = {
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
 
-        const textY = centerY + 175 * scale;
+        const textY = centerY + 155 * scale;
 
-        ctx.font = `900 ${Math.round(48 * scale)}px sans-serif`;
+        ctx.font = `900 ${Math.max(30, Math.round(42 * scale))}px sans-serif`;
         ctx.fillStyle = TEXT_PRIMARY_COLOR;
-        ctx.fillText(`${batchText}`, centerX, textY - 15 * scale);
+        ctx.fillText(`${batchText}`, centerX, textY - 14 * scale);
 
-        ctx.font = `900 ${Math.round(44 * scale)}px sans-serif`;
+        ctx.font = `900 ${Math.max(26, Math.round(38 * scale))}px sans-serif`;
         ctx.fillStyle = TEXT_SECONDARY_COLOR;
-        ctx.fillText(`${itemText}`, centerX, textY + 35 * scale);
+        ctx.fillText(`${itemText}`, centerX, textY + 30 * scale);
 
         ctx.restore();
 
@@ -315,7 +305,7 @@ const sealRenderer = {
     }
 };
 
-function drawGlyphStretchedTowardCenter2D(ctx, type, isFilled, w, h, strokeWidth) {
+function drawGlyphStretched2D(ctx, type, def, isFilled, w, h, strokeWidth) {
     ctx.lineWidth = strokeWidth;
     ctx.strokeStyle = '#000000';
     ctx.fillStyle = isFilled ? '#000000' : '#FFFFFF';
