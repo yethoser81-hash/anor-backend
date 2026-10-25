@@ -480,39 +480,13 @@ async function extractLotWithFreeOCR(base64Image) {
         const data = await response.json();
         if (data && data.ParsedResults && data.ParsedResults.length > 0) {
             const detectedText = data.ParsedResults[0].ParsedText || "";
-            
-            // Recherche directe du motif "LOT" suivi de caractères alphanumériques (ex: LOT : H54 ou LOT H54)
             const lotMatch = detectedText.match(/LOT\s*[:\-]?\s*([A-Z0-9\-]{2,15})/i);
             if (lotMatch && lotMatch[1]) {
-                const cleanLot = lotMatch[1].toUpperCase().trim();
-                console.log("[OCR SUCCESS] Lot extrait avec succès :", cleanLot);
-                return cleanLot;
-            }
-
-            // Fallback de secours si le mot LOT n'est pas collé mais présent sur les lignes
-            const lines = detectedText.split("\n").map(l => l.trim()).filter(Boolean);
-            for (let i = 0; i < lines.length; i++) {
-                const upperLine = lines[i].toUpperCase();
-                if (upperLine.includes("LOT")) {
-                    // Si la ligne contient LOT, on regarde s'il y a un mot juste après ou sur la même ligne
-                    const parts = upperLine.split(/[\s:\-]+/).filter(Boolean);
-                    const lotIndex = parts.indexOf("LOT");
-                    if (lotIndex !== -1 && parts[lotIndex + 1]) {
-                        return parts[lotIndex + 1].trim();
-                    }
-                    // Ou si la ligne d'en dessous contient le code du lot
-                    if (i + 1 < lines.length) {
-                        const nextLine = lines[i + 1].trim().toUpperCase();
-                        if (/^[A-Z0-9\-]{2,15}$/.test(nextLine) && !nextLine.includes("000000")) {
-                            return nextLine;
-                        }
-                    }
-                }
+                return lotMatch[1].toUpperCase().trim();
             }
         }
         return null;
     } catch (err) {
-        console.error("[OCR ERROR]", err.message);
         return null;
     }
 }
