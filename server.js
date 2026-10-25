@@ -480,43 +480,33 @@ async function extractLotWithFreeOCR(base64Image) {
         const data = await response.json();
         if (data && data.ParsedResults && data.ParsedResults.length > 0) {
             const detectedText = data.ParsedResults[0].ParsedText || "";
+            
+            // Recherche directe du motif "LOT" suivi de caractères alphanumériques (ex: LOT : H54 ou LOT H54)
+            const lotMatch = detectedText.match(/LOT\s*[:\-]?\s*([A-Z0-9\-]{2,15})/i);
+            if (lotMatch && lotMatch[1]) {
+                const cleanLot = lotMatch[1].toUpperCase().trim();
+                console.log("[OCR SUCCESS] Lot extrait avec succès :", cleanLot);
+                return cleanLot;
+            }
+
+            // Fallback de secours si le mot LOT n'est pas collé mais présent sur les lignes
             const lines = detectedText.split("\n").map(l => l.trim()).filter(Boolean);
-
-            const forbiddenWords = ["ANOR", "CERTIFIED", "NC", "INC", "SÉRIE", "SERIE", "SRV"];
-
-            // 1. Recherche prioritaire d'une ligne contenant explicitement "LOT"
-            for (const currentLine of lines) {
-                const upperLine = currentLine.toUpperCase();
-                if (upperLine.includes("LOT")) {
-                    const cleanLot = upperLine.replace(/^LOT\s*[:\-]*/i, "").trim();
-                    if (cleanLot && !forbiddenWords.some(w => cleanLot.includes(w))) {
-                        return cleanLot;
-                    }
-                }
-            }
-
-            // 2. Analyse ligne par ligne pour repérer un code épuré si "LOT" n'est pas préfixé textuellement
             for (let i = 0; i < lines.length; i++) {
-                const currentLine = lines[i];
-                const upperLine = currentLine.toUpperCase();
-
-                if (forbiddenWords.some(word => upperLine.includes(word))) {
-                    continue;
-                }
-
-                if (/^[A-Z0-9]{1,6}[-\/]?[A-Z0-9]{1,6}$/i.test(currentLine)) {
-                    if (!/^[0-9]{5,}$/.test(currentLine)) {
-                        return currentLine.toUpperCase();
+                const upperLine = lines[i].toUpperCase();
+                if (upperLine.includes("LOT")) {
+                    // Si la ligne contient LOT, on regarde s'il y a un mot juste après ou sur la même ligne
+                    const parts = upperLine.split(/[\s:\-]+/).filter(Boolean);
+                    const lotIndex = parts.indexOf("LOT");
+                    if (lotIndex !== -1 && parts[lotIndex + 1]) {
+                        return parts[lotIndex + 1].trim();
                     }
-                }
-            }
-
-            // 3. Fallback expression régulière globale propre
-            const matchLot = detectedText.match(/LOT\s*[:\-]?\s*([A-Z0-9\-\/]{2,15})/i);
-            if (matchLot && matchLot[1]) {
-                const cleanMatch = matchLot[1].toUpperCase().trim();
-                if (!forbiddenWords.some(w => cleanMatch.includes(w))) {
-                    return cleanMatch;
+                    // Ou si la ligne d'en dessous contient le code du lot
+                    if (i + 1 < lines.length) {
+                        const nextLine = lines[i + 1].trim().toUpperCase();
+                        if (/^[A-Z0-9\-]{2,15}$/.test(nextLine) && !nextLine.includes("000000")) {
+                            return nextLine;
+                        }
+                    }
                 }
             }
         }
