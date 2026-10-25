@@ -67,6 +67,17 @@ async function deconvolveAndEnhanceSealImage(base64OrBuffer) {
 
         ctx.drawImage(img, 0, 0);
 
+        // --- CREATION DE LA ZONE D'EXCLUSION / MASQUAGE (MASKING) DU LOGO CENTRAL ---
+        const centerX = img.width / 2;
+        const centerY = img.height / 2;
+        const maskRadius = Math.min(img.width, img.height) * 0.28; // Zone centrale contenant ANOR / CERTIFIED / NC
+
+        ctx.beginPath();
+        ctx.arc(centerX, centerY, maskRadius, 0, Math.PI * 2);
+        ctx.fillStyle = "#FFFFFF"; // Effacement en blanc pur pour bloquer les parasites OCR
+        ctx.fill();
+        // --------------------------------------------------------------------------
+
         const imgData = ctx.getImageData(0, 0, img.width, img.height);
         const data = imgData.data;
         const w = img.width;
@@ -446,6 +457,7 @@ async function intelligentVisualAnalysis(scannedMatrix) {
     return { lot: null, signature: null, bits: null, confidence: 0 };
 }
 
+// --- LECTURE STRICTE ET FILTRE ANTI-FAUX POSITIFS ---
 async function extractLotWithFreeOCR(base64Image) {
     try {
         if (!base64Image || typeof base64Image !== "string") return null;
@@ -470,45 +482,44 @@ async function extractLotWithFreeOCR(base64Image) {
             const detectedText = data.ParsedResults[0].ParsedText || "";
             const lines = detectedText.split("\n").map(l => l.trim()).filter(Boolean);
 
-            // Analyse ligne par ligne pour repérer le code du lot et la série nus
+            const forbiddenWords = ["ANOR", "CERTIFIED", "NC", "INC", "SÉRIE", "SERIE"];
+
+            // Analyse ligne par ligne pour repérer les chiffres/lettres épurés (lot et série)
             for (let i = 0; i < lines.length; i++) {
                 const currentLine = lines[i];
+                const upperLine = currentLine.toUpperCase();
 
-                // Ignore les textes parasites du sceau ou du logo
-                if (
-                    currentLine.includes("ANOR") || 
-                    currentLine.includes("CERTIFIED") || 
-                    currentLine.includes("SÉRIE") || 
-                    currentLine.includes("SERIE") ||
-                    currentLine.toUpperCase() === "NC"
-                ) {
+                // Filtre anti-mots interdits / faux positifs institutionnels
+                if (forbiddenWords.some(word => upperLine.includes(word))) {
                     continue;
                 }
 
-                // Si la ligne correspond à un format de série pure (ex: 000000), 
-                // le numéro de lot se trouve très probablement juste sur la ligne précédente !
+                // Si la ligne correspond à un format de série pure (ex: 000000), le lot est juste au-dessus
                 if (/^[0-9]{4,8}$/.test(currentLine)) {
                     if (i > 0) {
                         const candidateLot = lines[i - 1].replace(/^(?:LOT|N°|NO)\s*/i, "").trim();
-                        if (candidateLot && !candidateLot.includes("ANOR") && !candidateLot.includes("CERTIFIED")) {
-                            return candidateLot.toUpperCase();
+                        const upperCandidate = candidateLot.toUpperCase();
+                        if (candidateLot && !forbiddenWords.some(w => upperCandidate.includes(w))) {
+                            return upperCandidate;
                         }
                     }
                 }
 
-                // Détection directe d'un code alphanumérique court et pur (ex: M54, H54, etc.)
+                // Détection directe d'un code alphanumérique court et pur (ex: M54, H54)
                 if (/^[A-Z0-9]{1,6}[-\/]?[A-Z0-9]{1,6}$/i.test(currentLine)) {
-                    // S'assure qu'il ne s'agit pas de la série numérique pure de fin
                     if (!/^[0-9]{5,}$/.test(currentLine)) {
                         return currentLine.toUpperCase();
                     }
                 }
             }
 
-            // Fallback générique si aucune ligne n'isole clairement le lot
+            // Fallback de secours nettoyé
             const fallbackMatch = detectedText.match(/([A-Z0-9]{1,6}[-\/][A-Z0-9]{1,6})/i);
             if (fallbackMatch) {
-                return fallbackMatch[0].toUpperCase().trim();
+                const cleanMatch = fallbackMatch[0].toUpperCase().trim();
+                if (!forbiddenWords.some(w => cleanMatch.includes(w))) {
+                    return cleanMatch;
+                }
             }
         }
         return null;
@@ -517,6 +528,7 @@ async function extractLotWithFreeOCR(base64Image) {
         return null;
     }
 }
+// ----------------------------------------------------
 
 async function generateUnitSerialsAndManifest(lotCode, totalQuantity, masterSignature) {
     const batchSize = 5000;
