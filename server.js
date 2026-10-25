@@ -468,15 +468,47 @@ async function extractLotWithFreeOCR(base64Image) {
         const data = await response.json();
         if (data && data.ParsedResults && data.ParsedResults.length > 0) {
             const detectedText = data.ParsedResults[0].ParsedText || "";
-            
-            const directCodeMatch = detectedText.match(/([A-Z0-9]{2,6}[-\/][A-Z0-9]{2,6})/i);
-            if (directCodeMatch) {
-                return directCodeMatch[0].toUpperCase().trim();
+            const lines = detectedText.split("\n").map(l => l.trim()).filter(Boolean);
+
+            // Analyse ligne par ligne pour repérer le code du lot et la série nus
+            for (let i = 0; i < lines.length; i++) {
+                const currentLine = lines[i];
+
+                // Ignore les textes parasites du sceau ou du logo
+                if (
+                    currentLine.includes("ANOR") || 
+                    currentLine.includes("CERTIFIED") || 
+                    currentLine.includes("SÉRIE") || 
+                    currentLine.includes("SERIE") ||
+                    currentLine.toUpperCase() === "NC"
+                ) {
+                    continue;
+                }
+
+                // Si la ligne correspond à un format de série pure (ex: 000000), 
+                // le numéro de lot se trouve très probablement juste sur la ligne précédente !
+                if (/^[0-9]{4,8}$/.test(currentLine)) {
+                    if (i > 0) {
+                        const candidateLot = lines[i - 1].replace(/^(?:LOT|N°|NO)\s*/i, "").trim();
+                        if (candidateLot && !candidateLot.includes("ANOR") && !candidateLot.includes("CERTIFIED")) {
+                            return candidateLot.toUpperCase();
+                        }
+                    }
+                }
+
+                // Détection directe d'un code alphanumérique court et pur (ex: M54, H54, etc.)
+                if (/^[A-Z0-9]{1,6}[-\/]?[A-Z0-9]{1,6}$/i.test(currentLine)) {
+                    // S'assure qu'il ne s'agit pas de la série numérique pure de fin
+                    if (!/^[0-9]{5,}$/.test(currentLine)) {
+                        return currentLine.toUpperCase();
+                    }
+                }
             }
 
-            const lotMatch = detectedText.match(/LOT\s*([A-Z0-9\-]+)/i);
-            if (lotMatch && lotMatch[1]) {
-                return lotMatch[1].toUpperCase().trim();
+            // Fallback générique si aucune ligne n'isole clairement le lot
+            const fallbackMatch = detectedText.match(/([A-Z0-9]{1,6}[-\/][A-Z0-9]{1,6})/i);
+            if (fallbackMatch) {
+                return fallbackMatch[0].toUpperCase().trim();
             }
         }
         return null;
