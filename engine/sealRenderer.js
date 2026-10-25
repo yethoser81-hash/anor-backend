@@ -1,7 +1,7 @@
 /**
  * ====================================================================
  * ANOR CHECK
- * SEAL RENDERER V43.0 - CORRECTION PROPORTIONNELLE DES CERCLES ET ESPACEMENT
+ * SEAL RENDERER V43.1 - INTEGRATION DU PREFIXE "LOT" SOUS LE LOGO
  * ====================================================================
  */
 
@@ -145,7 +145,9 @@ const sealRenderer = {
         }
 
         const normalizedBatchName = String(rawBatchName).trim().toUpperCase();
-        const batchText = normalizedBatchName.replace(/^LOT\s*/i, '');
+        // Intégration propre du préfixe "LOT :" pour que l'OCR et l'humain le lisent instantanément
+        const cleanLotValue = normalizedBatchName.replace(/^LOT\s*[:\-]*/i, '');
+        const batchText = `LOT : ${cleanLotValue}`;
 
         const rawMasterLabel = options.masterSerialLabel || '000000';
         const cleanSerialNum = rawMasterLabel.split('/')[0].trim();
@@ -292,13 +294,15 @@ const sealRenderer = {
 
         const textY = centerY + 155 * scale;
 
-        ctx.font = `900 ${Math.max(30, Math.round(42 * scale))}px sans-serif`;
+        // Affichage du Lot avec son préfixe bien aligné sous le logo
+        ctx.font = `900 ${Math.max(26, Math.round(36 * scale))}px sans-serif`;
         ctx.fillStyle = TEXT_PRIMARY_COLOR;
-        ctx.fillText(`${batchText}`, centerX, textY - 14 * scale);
+        ctx.fillText(batchText, centerX, textY - 14 * scale);
 
-        ctx.font = `900 ${Math.max(26, Math.round(38 * scale))}px sans-serif`;
+        // Affichage de la série / index unitaire en dessous
+        ctx.font = `900 ${Math.max(24, Math.round(34 * scale))}px sans-serif`;
         ctx.fillStyle = TEXT_SECONDARY_COLOR;
-        ctx.fillText(`${itemText}`, centerX, textY + 30 * scale);
+        ctx.fillText(itemText, centerX, textY + 30 * scale);
 
         ctx.restore();
 

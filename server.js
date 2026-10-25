@@ -457,7 +457,7 @@ async function intelligentVisualAnalysis(scannedMatrix) {
     return { lot: null, signature: null, bits: null, confidence: 0 };
 }
 
-// --- LECTURE STRICTE ET FILTRE ANTI-FAUX POSITIFS ---
+// --- LECTURE OPTIMISÉE AVEC RECONNAISSANCE EXPLICITE DU MOT "LOT" ---
 async function extractLotWithFreeOCR(base64Image) {
     try {
         if (!base64Image || typeof base64Image !== "string") return null;
@@ -482,30 +482,28 @@ async function extractLotWithFreeOCR(base64Image) {
             const detectedText = data.ParsedResults[0].ParsedText || "";
             const lines = detectedText.split("\n").map(l => l.trim()).filter(Boolean);
 
-            const forbiddenWords = ["ANOR", "CERTIFIED", "NC", "INC", "SÉRIE", "SERIE"];
+            const forbiddenWords = ["ANOR", "CERTIFIED", "NC", "INC", "SÉRIE", "SERIE", "SRV"];
 
-            // Analyse ligne par ligne pour repérer les chiffres/lettres épurés (lot et série)
+            // 1. Recherche prioritaire d'une ligne contenant explicitement "LOT"
+            for (const currentLine of lines) {
+                const upperLine = currentLine.toUpperCase();
+                if (upperLine.includes("LOT")) {
+                    const cleanLot = upperLine.replace(/^LOT\s*[:\-]*/i, "").trim();
+                    if (cleanLot && !forbiddenWords.some(w => cleanLot.includes(w))) {
+                        return cleanLot;
+                    }
+                }
+            }
+
+            // 2. Analyse ligne par ligne pour repérer un code épuré si "LOT" n'est pas préfixé textuellement
             for (let i = 0; i < lines.length; i++) {
                 const currentLine = lines[i];
                 const upperLine = currentLine.toUpperCase();
 
-                // Filtre anti-mots interdits / faux positifs institutionnels
                 if (forbiddenWords.some(word => upperLine.includes(word))) {
                     continue;
                 }
 
-                // Si la ligne correspond à un format de série pure (ex: 000000), le lot est juste au-dessus
-                if (/^[0-9]{4,8}$/.test(currentLine)) {
-                    if (i > 0) {
-                        const candidateLot = lines[i - 1].replace(/^(?:LOT|N°|NO)\s*/i, "").trim();
-                        const upperCandidate = candidateLot.toUpperCase();
-                        if (candidateLot && !forbiddenWords.some(w => upperCandidate.includes(w))) {
-                            return upperCandidate;
-                        }
-                    }
-                }
-
-                // Détection directe d'un code alphanumérique court et pur (ex: M54, H54)
                 if (/^[A-Z0-9]{1,6}[-\/]?[A-Z0-9]{1,6}$/i.test(currentLine)) {
                     if (!/^[0-9]{5,}$/.test(currentLine)) {
                         return currentLine.toUpperCase();
@@ -513,10 +511,10 @@ async function extractLotWithFreeOCR(base64Image) {
                 }
             }
 
-            // Fallback de secours nettoyé
-            const fallbackMatch = detectedText.match(/([A-Z0-9]{1,6}[-\/][A-Z0-9]{1,6})/i);
-            if (fallbackMatch) {
-                const cleanMatch = fallbackMatch[0].toUpperCase().trim();
+            // 3. Fallback expression régulière globale propre
+            const matchLot = detectedText.match(/LOT\s*[:\-]?\s*([A-Z0-9\-\/]{2,15})/i);
+            if (matchLot && matchLot[1]) {
+                const cleanMatch = matchLot[1].toUpperCase().trim();
                 if (!forbiddenWords.some(w => cleanMatch.includes(w))) {
                     return cleanMatch;
                 }
@@ -528,7 +526,7 @@ async function extractLotWithFreeOCR(base64Image) {
         return null;
     }
 }
-// ----------------------------------------------------
+// ------------------------------------------------------------------
 
 async function generateUnitSerialsAndManifest(lotCode, totalQuantity, masterSignature) {
     const batchSize = 5000;
