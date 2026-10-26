@@ -1151,90 +1151,70 @@ app.post(
             let matchConfidence = 1.0;
             let detectedLot = targetLot;
 
-            if (!detectedLot && scannedMatrix) {
-                detectedLot = await extractLotWithFreeOCR(scannedMatrix);
-                if (detectedLot) {
-                    verificationMode = "OCR_FREE_LOT_EXTRACTED";
-                }
-            }
-
-            if (detectedLot) {
-                const rawLot = String(detectedLot).trim();
-                const cleanCode = rawLot.replace(/^LOT\s+/i, "").trim();
-
-                const { data, error } = await supabase
+            // 1. CORRECTION : Priorité absolue à la correspondance exacte des 28 bits visuels
+            if (normalizedRequestBits) {
+                const { data: exactMatch } = await supabase
                     .from("produits_certifies")
                     .select("*")
-                    .or(`lot.eq.${rawLot},lot.eq.${cleanCode},lot.ilike.%${cleanCode}%,certificate_code.eq.${rawLot},certificate_code.eq.${cleanCode},certificate_code.ilike.%${cleanCode}%`)
-                    .limit(1);
+                    .eq("visual_bits", normalizedRequestBits)
+                    .maybeSingle();
 
-                if (!error && data && data.length > 0) { 
-                    row = data[0]; 
-                    if (verificationMode !== "OCR_FREE_LOT_EXTRACTED") {
-                        verificationMode = "FAST_LOT_DIRECT_MATCH";
-                    }
+                if (exactMatch) {
+                    row = exactMatch;
+                    verificationMode = "VISUAL_BITS_STRICT_EXACT";
                     matchConfidence = 1.0;
                 }
             }
 
-            if (!row && scannedMatrix) {
-                verificationMode = "INTELLIGENT_VISUAL_SCAN";
-
-                const analysis = await intelligentVisualAnalysis(
-                    scannedMatrix || { bits: normalizedRequestBits, visualBits: normalizedRequestBits, signature: requestSignature }
-                );
-
-                if (analysis.lot) {
-                    const analysisCleanLot = String(analysis.lot).trim().replace(/^LOT\s+/i, "");
-                    const { data } = await supabase
-                        .from("produits_certifies")
-                        .select("*")
-                        .or(`lot.ilike.%${analysisCleanLot}%,certificate_code.ilike.%${analysisCleanLot}%`)
-                        .limit(1);
-
-                    if (data && data.length > 0) {
-                        row = data[0];
-                        verificationMode = "VISUAL_LOT_EXACT";
-                        matchConfidence = Math.max(0, Math.min(1, analysis.confidence || 0));
+            // 2. Si aucun match par les bits, recherche par lot (OCR ou direct) de manière STRICTE (.eq)
+            if (!row) {
+                if (!detectedLot && scannedMatrix) {
+                    detectedLot = await extractLotWithFreeOCR(scannedMatrix);
+                    if (detectedLot) {
+                        verificationMode = "OCR_FREE_LOT_EXTRACTED";
                     }
                 }
 
-                if (!row && (analysis.signature || normalizedRequestBits)) {
-                    const signatureToMatch = analysis.signature || requestSignature;
-                    const bitsToMatch = normalizeVisualBits(analysis.bits || normalizedRequestBits);
+                if (detectedLot) {
+                    const rawLot = String(detectedLot).trim();
+                    const cleanCode = rawLot.replace(/^LOT\s*[:\-]*/i, "").trim();
 
-                    if (signatureToMatch) {
-                        const { data } = await supabase.from("produits_certifies").select("*").eq("visual_signature", signatureToMatch).maybeSingle();
-                        if (data) {
-                            row = data;
-                            matchConfidence = 0.99;
-                            verificationMode = "VISUAL_SIGNATURE_EXACT";
-                        }
+                    // Recherche STRICTE (.eq) uniquement pour éviter d'aller chercher d'autres lots partiels
+                    const { data, error } = await supabase
+                        .from("produits_certifies")
+                        .select("*")
+                        .or(`lot.eq.${rawLot},lot.eq.${cleanCode},certificate_code.eq.${rawLot},certificate_code.eq.${cleanCode}`)
+                        .limit(1);
+
+                    if (!error && data && data.length > 0) { 
+                        row = data[0]; 
+                        verificationMode = "STRICT_LOT_EXACT_MATCH";
+                        matchConfidence = 1.0;
+                    }
+                }
+            }
+
+            // 3. Fallback de tolérance par distance de Hamming si le scan visuel présente de légers parasites
+            if (!row && normalizedRequestBits) {
+                verificationMode = "VISUAL_HAMMING_MATCH";
+                const { data: candidates, error } = await supabase.from("produits_certifies").select("*").limit(300);
+                if (!error && Array.isArray(candidates)) {
+                    let bestMatch = null;
+                    let bestDistance = Infinity;
+
+                    for (const candidate of candidates) {
+                        const storedBits = normalizeVisualBits(candidate.visual_bits || candidate.glyph_payload?.visualBits);
+                        if (!storedBits) continue;
+                        if (storedBits === normalizedRequestBits) { bestMatch = candidate; bestDistance = 0; break; }
+
+                        const distance = calculateHammingDistance(normalizedRequestBits, storedBits);
+                        if (distance < bestDistance) { bestDistance = distance; bestMatch = candidate; }
                     }
 
-                    if (!row && bitsToMatch) {
-                        const { data: candidates, error } = await supabase.from("produits_certifies").select("*").limit(200);
-                        if (!error && Array.isArray(candidates)) {
-                            let bestMatch = null;
-                            let bestDistance = Infinity;
-
-                            for (const candidate of candidates) {
-                                const storedSignature = typeof candidate.visual_signature === "string" ? candidate.visual_signature : candidate.glyph_payload?.visualSignature;
-                                const storedBits = normalizeVisualBits(candidate.visual_bits || candidate.glyph_payload?.visualBits || (typeof storedSignature === "string" && storedSignature.startsWith("ANOR28:") ? storedSignature.substring(7) : null));
-
-                                if (!storedBits) continue;
-                                if (storedBits === bitsToMatch) { bestMatch = candidate; bestDistance = 0; break; }
-
-                                const distance = calculateHammingDistance(bitsToMatch, storedBits);
-                                if (distance < bestDistance) { bestDistance = distance; bestMatch = candidate; }
-                            }
-
-                            if (bestMatch && bestDistance <= 4) {
-                                row = bestMatch;
-                                matchConfidence = Number((1 - bestDistance / VISUAL_BITS_LENGTH).toFixed(3));
-                                verificationMode = bestDistance === 0 ? "VISUAL_BITS_EXACT_COMPAT" : "VISUAL_HAMMING_MATCH_COMPAT";
-                            }
-                        }
+                    if (bestMatch && bestDistance <= 4) {
+                        row = bestMatch;
+                        matchConfidence = Number((1 - bestDistance / VISUAL_BITS_LENGTH).toFixed(3));
+                        verificationMode = bestDistance === 0 ? "VISUAL_BITS_EXACT" : "VISUAL_HAMMING_TOLERANCE";
                     }
                 }
             }
