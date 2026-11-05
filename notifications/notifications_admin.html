@@ -1,0 +1,476 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ANOR - Centre de Diffusion des Notifications</title>
+    <link rel="icon" href="../assets/logo_anor.png">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        :root {
+            --bg-main: #070d1b;
+            --bg-panel: #0f172a;
+            --bg-card: #1e293b;
+            --border-color: rgba(74, 144, 226, 0.2);
+            --text-main: #f8fafc;
+            --text-muted: #94a3b8;
+            --accent-blue: #3b82f6;
+            --accent-green: #10b981;
+            --accent-red: #ef4444;
+            --anor-green: #007a3d;
+            --anor-green-dark: #004d26;
+            --anor-yellow: #fecb00;
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+            font-family: 'Segoe UI', system-ui, sans-serif;
+        }
+
+        body {
+            background-color: var(--bg-main);
+            color: var(--text-main);
+            min-height: 100vh;
+            display: flex;
+            overflow-x: hidden;
+        }
+
+        /* Sidebar Navigation Standardisée ANOR */
+        .sidebar {
+            width: 260px;
+            background: var(--bg-panel);
+            border-right: 1px solid var(--border-color);
+            display: flex;
+            flex-direction: column;
+            padding: 20px;
+            position: fixed;
+            height: 100vh;
+            z-index: 1000;
+        }
+
+        .sidebar-brand {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            text-align: center;
+            padding-bottom: 20px;
+            border-bottom: 1px solid rgba(255,255,255,0.05);
+            margin-bottom: 20px;
+        }
+
+        .sidebar-brand img {
+            height: 45px;
+            background: #fff;
+            padding: 4px;
+            border-radius: 6px;
+            margin-bottom: 10px;
+        }
+
+        .sidebar-brand h2 {
+            font-size: 16px;
+            font-weight: 700;
+            color: #fff;
+            letter-spacing: 0.5px;
+        }
+
+        .sidebar-brand span {
+            font-size: 10px;
+            color: var(--text-muted);
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+
+        .sidebar-nav {
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+            flex: 1;
+        }
+
+        .sidebar-nav a {
+            color: var(--text-muted);
+            text-decoration: none;
+            padding: 10px 14px;
+            border-radius: 8px;
+            font-size: 13px;
+            font-weight: 500;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            transition: all 0.2s;
+        }
+
+        .sidebar-nav a:hover {
+            color: #fff;
+            background: rgba(59, 130, 246, 0.1);
+        }
+
+        .sidebar-nav a.active {
+            color: #fff;
+            background: var(--accent-blue);
+            box-shadow: 0 0 12px rgba(59, 130, 246, 0.4);
+        }
+
+        /* Main Content Layout */
+        .main-content {
+            margin-left: 260px;
+            flex: 1;
+            padding: 25px;
+            display: flex;
+            flex-direction: column;
+            gap: 20px;
+            width: calc(100% - 260px);
+            align-items: center;
+        }
+
+        .container {
+            width: 100%;
+            max-width: 900px;
+            display: flex;
+            flex-direction: column;
+            gap: 20px;
+        }
+
+        .header-card {
+            background: linear-gradient(135deg, var(--anor-green-dark), var(--anor-green));
+            padding: 24px;
+            border-radius: 16px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            box-shadow: 0 10px 25px rgba(0,0,0,0.3);
+        }
+
+        .header-title h1 {
+            font-size: 20px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            color: #fff;
+        }
+
+        .header-title p {
+            font-size: 13px;
+            opacity: 0.9;
+            margin-top: 4px;
+            color: #e2e8f0;
+        }
+
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 15px;
+        }
+
+        .stat-card {
+            background: var(--bg-panel);
+            border: 1px solid var(--border-color);
+            padding: 16px;
+            border-radius: 12px;
+            text-align: center;
+        }
+
+        .stat-value {
+            font-size: 24px;
+            font-weight: 800;
+            color: var(--anor-yellow);
+            margin-top: 6px;
+        }
+
+        .stat-label {
+            font-size: 11px;
+            color: var(--text-muted);
+            text-transform: uppercase;
+            font-weight: 700;
+        }
+
+        .form-card {
+            background: var(--bg-panel);
+            border: 1px solid var(--border-color);
+            padding: 24px;
+            border-radius: 16px;
+            display: flex;
+            flex-direction: column;
+            gap: 16px;
+        }
+
+        .form-group {
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+        }
+
+        label {
+            font-size: 12px;
+            font-weight: 700;
+            color: #cbd5e1;
+            text-transform: uppercase;
+        }
+
+        input[type="text"], select, textarea {
+            width: 100%;
+            padding: 12px;
+            border-radius: 8px;
+            border: 1px solid #475569;
+            background: var(--bg-main);
+            color: white;
+            font-size: 14px;
+            outline: none;
+        }
+
+        textarea {
+            resize: vertical;
+            min-height: 90px;
+        }
+
+        .btn-send {
+            background: var(--anor-green);
+            color: white;
+            border: none;
+            padding: 14px;
+            border-radius: 10px;
+            font-weight: 800;
+            font-size: 14px;
+            cursor: pointer;
+            transition: background 0.2s;
+            text-transform: uppercase;
+        }
+
+        .btn-send:hover {
+            background: #00994d;
+        }
+
+        .history-card {
+            background: var(--bg-panel);
+            border: 1px solid var(--border-color);
+            padding: 20px;
+            border-radius: 16px;
+        }
+
+        .history-title {
+            font-size: 14px;
+            font-weight: 800;
+            margin-bottom: 12px;
+            text-transform: uppercase;
+            color: #cbd5e1;
+        }
+
+        .history-list {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+
+        .history-item {
+            background: var(--bg-main);
+            border-left: 4px solid var(--anor-green);
+            padding: 12px;
+            border-radius: 6px;
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+        }
+
+        .history-item.ALERTE { border-color: var(--accent-red); }
+        .history-item.ACTU { border-color: var(--anor-yellow); }
+
+        .history-item-header {
+            display: flex;
+            justify-content: space-between;
+            font-size: 11px;
+            color: var(--text-muted);
+            font-weight: 700;
+        }
+
+        .history-item-title {
+            font-size: 13px;
+            font-weight: 800;
+            color: white;
+        }
+
+        .history-item-body {
+            font-size: 12px;
+            color: #cbd5e1;
+        }
+
+        .status-msg {
+            padding: 10px;
+            border-radius: 8px;
+            font-size: 12px;
+            display: none;
+        }
+        .status-msg.success { background: #064e3b; color: #6ee7b7; border: 1px solid #047857; }
+        .status-msg.error { background: #7f1d1d; color: #fca5a5; border: 1px solid #b91c1c; }
+
+        .footer-credit {
+            text-align: center;
+            font-size: 11px;
+            color: var(--text-muted);
+            padding: 10px 0;
+            margin-top: 10px;
+        }
+    </style>
+</head>
+<body>
+
+<!-- BARRE LATÉRALE DE NAVIGATION (SIDEBAR) -->
+<aside class="sidebar">
+    <div class="sidebar-brand">
+        <img src="../assets/logo_anor.png" alt="ANOR" onerror="this.style.display='none'">
+        <h2>ANOR</h2>
+        <span>Tour de Contrôle</span>
+    </div>
+    <nav class="sidebar-nav">
+        <a href="../dashboard/index.html"><i class="fa-solid fa-chart-pie"></i> Tableau de bord</a>
+        <a href="../forge/index.html"><i class="fa-solid fa-industry"></i> Forge & Lot</a>
+        <a href="../registry/index.html"><i class="fa-solid fa-database"></i> Registry</a>
+        <a href="../map_surveillance/index.html"><i class="fa-solid fa-map-location-dot"></i> Surveillance</a>
+        <a href="../product_audit/index.html"><i class="fa-solid fa-box-open"></i> Product Audit</a>
+        <a href="../intelligence/index.html"><i class="fa-solid fa-brain"></i> Intelligence</a>
+        <a class="active" href="notifications_admin.html"><i class="fa-solid fa-bell"></i> Notifications & Push</a>
+    </nav>
+</aside>
+
+<!-- CONTENU PRINCIPAL DE DIFFUSION -->
+<main class="main-content">
+    <div class="container">
+        <div class="header-card">
+            <div class="header-title">
+                <h1>🏛️ ANOR - Diffusion Push</h1>
+                <p>Panneau d'administration et d'alerte citoyenne</p>
+            </div>
+        </div>
+
+        <div class="stats-grid">
+            <div class="stat-card">
+                <div class="stat-label">Appareils Enregistrés</div>
+                <div class="stat-value" id="deviceCount">0</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-label">Messages Diffusés</div>
+                <div class="stat-value" id="totalSent">0</div>
+            </div>
+        </div>
+
+        <div class="form-card">
+            <h2 style="font-size: 15px; font-weight: 800; text-transform: uppercase; color: #e2e8f0;">Rédiger une nouvelle notification</h2>
+            
+            <div id="statusAlert" class="status-msg"></div>
+
+            <div class="form-group">
+                <label>Catégorie du message</label>
+                <select id="msgCategory">
+                    <option value="CONSEIL">💡 CONSEIL QUALITÉ & CONSOMMATEUR</option>
+                    <option value="ALERTE">🚨 ALERTE SANITAIRE / CONTREFAÇON</option>
+                    <option value="ACTU">📢 ACTUALITÉ & NORMES EN VIGUEUR</option>
+                </select>
+            </div>
+
+            <div class="form-group">
+                <label>Titre de la notification</label>
+                <input type="text" id="msgTitle" placeholder="Ex: Risque de contrefaçon sur le Lot H54...">
+            </div>
+
+            <div class="form-group">
+                <label>Contenu du message</label>
+                <textarea id="msgBody" placeholder="Saisissez le texte complet qui sera affiché sur les téléphones des citoyens..."></textarea>
+            </div>
+
+            <button class="btn-send" onclick="sendPushNotification()">🚀 Envoyer la notification à tous les appareils</button>
+        </div>
+
+        <div class="history-card">
+            <div class="history-title">📜 Historique des messages envoyés</div>
+            <div class="history-list" id="historyContainer">
+                <div style="font-size: 12px; color: #64748b; text-align: center;">Chargement de l'historique...</div>
+            </div>
+        </div>
+
+        <div class="footer-credit">
+            ANOR Intelligence Core © 2026 • Centre de Diffusion Push
+        </div>
+    </div>
+</main>
+
+<script>
+    const API_BASE = "https://anor-backend.onrender.com/api";
+
+    async function loadStatsAndHistory() {
+        try {
+            const res = await fetch(`${API_BASE}/admin/notifications/history`);
+            const data = await res.json();
+            
+            if (res.ok && data.success) {
+                document.getElementById('deviceCount').innerText = data.stats.totalDevices || 0;
+                document.getElementById('totalSent').innerText = data.stats.totalSent || 0;
+
+                const container = document.getElementById('historyContainer');
+                if (!data.history || data.history.length === 0) {
+                    container.innerHTML = '<div style="font-size: 12px; color: #64748b; text-align: center;">Aucun message envoyé pour le moment.</div>';
+                    return;
+                }
+
+                container.innerHTML = data.history.map(item => `
+                    <div class="history-item ${item.category}">
+                        <div class="history-item-header">
+                            <span>[${item.category}]</span>
+                            <span>${new Date(item.sent_at).toLocaleString('fr-FR')}</span>
+                        </div>
+                        <div class="history-item-title">${item.title}</div>
+                        <div class="history-item-body">${item.body}</div>
+                    </div>
+                `).join('');
+            }
+        } catch (err) {
+            console.error("Erreur chargement admin:", err);
+        }
+    }
+
+    async function sendPushNotification() {
+        const title = document.getElementById('msgTitle').value.trim();
+        const body = document.getElementById('msgBody').value.trim();
+        const category = document.getElementById('msgCategory').value;
+        const statusAlert = document.getElementById('statusAlert');
+
+        if (!title || !body) {
+            statusAlert.className = "status-msg error";
+            statusAlert.innerText = "Veuillez remplir le titre et le corps du message.";
+            statusAlert.style.display = "block";
+            return;
+        }
+
+        try {
+            statusAlert.className = "status-msg";
+            statusAlert.style.display = "none";
+
+            const res = await fetch(`${API_BASE}/admin/notifications/send`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ title, body, category })
+            });
+
+            const data = await res.json();
+
+            if (res.ok && data.success) {
+                statusAlert.className = "status-msg success";
+                statusAlert.innerText = `Notification diffusée avec succès auprès de ${data.deliveredCount || 0} appareils !`;
+                statusAlert.style.display = "block";
+                
+                document.getElementById('msgTitle').value = "";
+                document.getElementById('msgBody').value = "";
+                loadStatsAndHistory();
+            } else {
+                throw new Error(data.error?.message || "Échec de l'envoi.");
+            }
+        } catch (err) {
+            statusAlert.className = "status-msg error";
+            statusAlert.innerText = "Erreur : " + err.message;
+            statusAlert.style.display = "block";
+        }
+    }
+
+    loadStatsAndHistory();
+</script>
+</body>
+</html>

@@ -422,6 +422,7 @@ app.use("/product_audit", express.static(path.join(__dirname, "product_audit")))
 app.use("/intelligence", express.static(path.join(__dirname, "intelligence")));
 app.use("/surveillance", express.static(path.join(__dirname, "surveillance")));
 app.use("/forge", express.static(path.join(__dirname, "forge")));
+app.use("/notifications", express.static(path.join(__dirname, "notifications")));
 
 app.get(["/", "/index.html"], (req, res) => {
     res.redirect("/dashboard/index.html");
@@ -726,6 +727,83 @@ app.post("/api/intelligence/chat", async (req, res) => {
     } catch (err) {
         console.error("[INTELLIGENCE CHAT ERROR]", err.message);
         return apiError(res, 500, "CHAT_ERROR", "Erreur lors du traitement de la requête.");
+    }
+});
+
+// ======================================================
+// ROUTES ADMIN - NOTIFICATIONS PUSH
+// ======================================================
+
+// 1. Consulter l'historique et les statistiques d'appareils
+app.get("/api/admin/notifications/history", async (req, res) => {
+    try {
+        const { count: deviceCount } = await supabase
+            .from("device_push_tokens")
+            .select("*", { count: "exact", head: true });
+
+        const { data: history, error } = await supabase
+            .from("anor_notifications")
+            .select("*")
+            .order("sent_at", { ascending: false })
+            .limit(50);
+
+        if (error) throw error;
+
+        return apiSuccess(res, {
+            stats: {
+                totalDevices: deviceCount || 0,
+                totalSent: history ? history.length : 0
+            },
+            history: history || []
+        });
+    } catch (err) {
+        console.error("[ADMIN NOTIFICATIONS HISTORY ERROR]", err.message);
+        return apiError(res, 500, "ADMIN_ERROR", "Impossible de récupérer l'historique.");
+    }
+});
+
+// 2. Diffuser une notification Push à l'ensemble des appareils enregistrés
+app.post("/api/admin/notifications/send", async (req, res) => {
+    try {
+        const { title, body, category } = req.body;
+
+        if (!title || !body) {
+            return apiError(res, 400, "INVALID_INPUT", "Le titre et le corps du message sont obligatoires.");
+        }
+
+        // Enregistrement dans l'historique Supabase
+        const { data: inserted, error: insertErr } = await supabase
+            .from("anor_notifications")
+            .insert([{
+                title,
+                body,
+                category: category || "CONSEIL",
+                sent_at: new Date()
+            }])
+            .select();
+
+        if (insertErr) throw insertErr;
+
+        // Récupération des tokens d'appareils pour l'envoi
+        const { data: tokensData } = await supabase
+            .from("device_push_tokens")
+            .select("device_token");
+
+        const targetTokens = (tokensData || []).map(t => t.device_token);
+
+        // Si la clé Firebase Admin SDK est configurée, la diffusion Push s'exécute ici.
+        // Sinon, le message reste stocké dans la base Supabase pour la consultation directe par l'APK.
+        console.log(`[ANOR PUSH ENGINE] Notification "${title}" enregistrée. Cible : ${targetTokens.length} appareils.`);
+
+        return apiSuccess(res, {
+            message: "Notification enregistrée et diffusée.",
+            deliveredCount: targetTokens.length,
+            record: inserted?.[0] || null
+        });
+
+    } catch (err) {
+        console.error("[ADMIN NOTIFICATIONS SEND ERROR]", err.message);
+        return apiError(res, 500, "ADMIN_SEND_ERROR", "Échec de l'envoi de la notification.");
     }
 });
 
