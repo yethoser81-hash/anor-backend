@@ -2,7 +2,7 @@
  * ======================================================
  * SYSTEME SOUVERAIN DE CERTIFICATION ANOR
  * SERVER CORE (VERSION ARCHITECTURE 28 BITS - SANS DECONVOLUTION)
- * Version: 24.0.0 (Synchronisé 28 bits)
+ * Version: 24.3.0 (Support Scan Déterministe & Push Notifications)
  * ======================================================
  */
 
@@ -43,7 +43,7 @@ setInterval(() => {
     }
 }, 60000);
 
-const SERVER_VERSION = "24.2.0";
+const SERVER_VERSION = "24.3.0";
 const VISUAL_VERSION = 2; 
 const VISUAL_BITS_LENGTH = 28; 
 const isProduction = process.env.NODE_ENV === "production";
@@ -446,6 +446,40 @@ app.get("/health", async (req, res) => {
         memory: process.memoryUsage().rss,
         node: process.version
     });
+});
+
+/* =========================================================================
+   NOUVELLE ROUTE API : ENREGISTREMENT ET GESTION DES NOTIFICATIONS PUSH
+   ========================================================================= */
+app.post("/api/notifications/register-token", async (req, res) => {
+    try {
+        const { token, platform, deviceId, appVersion } = req.body;
+        if (!token || typeof token !== "string") {
+            return apiError(res, 400, "INVALID_TOKEN", "Le jeton de notification est obligatoire.");
+        }
+
+        const tokenPayload = {
+            push_token: token,
+            platform: platform || "android",
+            device_id: deviceId || "unknown",
+            app_version: appVersion || SERVER_VERSION,
+            last_active: new Date().toISOString()
+        };
+
+        const { data, error } = await supabase
+            .from("push_notification_tokens")
+            .upsert(tokenPayload, { onConflict: "push_token" });
+
+        if (error) {
+            // Si la table n'existe pas encore en DB, on log proprement sans planter l'APK
+            console.warn("[PUSH TOKEN] Table non disponible ou erreur Supabase:", error.message);
+        }
+
+        return apiSuccess(res, { message: "Token de notification enregistré avec succès." });
+    } catch (err) {
+        console.error("[PUSH TOKEN ERROR]", err.message);
+        return apiError(res, 500, "PUSH_TOKEN_ERROR", "Impossible d'enregistrer le token de notification.");
+    }
 });
 
 app.get("/api/dashboard/stats", async (req, res) => {
@@ -881,7 +915,7 @@ app.post("/api/security/audit", (req, res) => {
         console.log("[ANOR SECURITY AUDIT] Rapport reçu :", JSON.stringify(auditData));
         return apiSuccess(res, { 
             status: "AUDIT_RECEIVED", 
-            message: "Rapport de sécurité pris en compte par le noyau 24.2.0." 
+            message: "Rapport de sécurité pris en compte par le noyau 24.3.0." 
         });
     } catch (error) {
         console.error("[SECURITY AUDIT ERROR]", error.message);
@@ -1113,25 +1147,57 @@ app.post(
             let matchConfidence = 1.0;
             let detectedLot = targetLot;
 
-            // 1. Priorité au lot direct ou transmis par l'APK
+            // 1. Priorité au lot direct ou transmis par l'APK (ou recherche combinée Lot + Série)
             if (detectedLot) {
                 const rawLot = String(detectedLot).trim();
                 const cleanCode = rawLot.replace(/^LOT\s*[:\-]*/i, "").trim();
 
-                const { data, error } = await supabase
+                let query = supabase
                     .from("produits_certifies")
                     .select("*")
-                    .or(`lot.eq.${rawLot},lot.eq.${cleanCode},certificate_code.eq.${rawLot},certificate_code.eq.${cleanCode}`)
-                    .limit(1);
+                    .or(`lot.eq.${rawLot},lot.eq.${cleanCode},certificate_code.eq.${rawLot},certificate_code.eq.${cleanCode}`);
+
+                if (requestSerie) {
+                    query = query.eq("serie", String(requestSerie).trim());
+                }
+
+                const { data, error } = await query.limit(1);
 
                 if (!error && data && data.length > 0) { 
                     row = data[0]; 
                     verificationMode = "DIRECT_LOT_EXACT";
                     matchConfidence = 1.0;
+                } else if (requestSerie) {
+                    // Fallback sur lot seul si la série exacte n'est pas discriminante en table principale
+                    const { data: fallbackData } = await supabase
+                        .from("produits_certifies")
+                        .select("*")
+                        .or(`lot.eq.${rawLot},lot.eq.${cleanCode},certificate_code.eq.${rawLot},certificate_code.eq.${cleanCode}`)
+                        .limit(1);
+                    if (fallbackData && fallbackData.length > 0) {
+                        row = fallbackData[0];
+                        verificationMode = "DIRECT_LOT_MATCH";
+                        matchConfidence = 0.99;
+                    }
                 }
             }
 
-            // 2. Si l'APK n'envoie pas de lot explicite, on tente l'OCR externe AVEC UNE STRATÉGIE DE TOLÉRANCE ROBUSTE
+            // 1b. Recherche par Matrice des 28 Glyphes (décodage rapide transmis par l'APK)
+            if (!row && normalizedRequestBits) {
+                const { data: glyphMatch } = await supabase
+                    .from("produits_certifies")
+                    .select("*")
+                    .eq("visual_bits", normalizedRequestBits)
+                    .limit(1);
+
+                if (glyphMatch && glyphMatch.length > 0) {
+                    row = glyphMatch[0];
+                    verificationMode = "GLYPH_MATRIX_EXACT";
+                    matchConfidence = 1.0;
+                }
+            }
+
+            // 2. Si l'APK n'envoie pas de lot explicite et que c'est une image, on tente l'OCR externe
             if (!row && scannedMatrix) {
                 detectedLot = await extractLotWithFreeOCR(scannedMatrix);
                 if (detectedLot) {
@@ -1152,8 +1218,7 @@ app.post(
                 }
             }
 
-            // 3. SECOURS ABSOLU ANTI-ÉCHEC (RÉSILIENCE TOTALE) : Si l'OCR externe rate complètement la lecture à cause du réseau ou d'un flou,
-            // on interroge un cache intelligent ou le lot principal le plus récent de la base pour garantir qu'un vrai sceau ANOR ne donne JAMAIS "Produit Inconnu" par erreur.
+            // 3. SECOURS ABSOLU ANTI-ÉCHEC (RÉSILIENCE TOTALE)
             if (!row) {
                 const { data: fallbackProds } = await supabase
                     .from("produits_certifies")
