@@ -422,7 +422,7 @@ app.use("/product_audit", express.static(path.join(__dirname, "product_audit")))
 app.use("/intelligence", express.static(path.join(__dirname, "intelligence")));
 app.use("/surveillance", express.static(path.join(__dirname, "surveillance")));
 app.use("/forge", express.static(path.join(__dirname, "forge")));
-app.use("/notifications", express.static(path.join(__dirname, "notifications")));
+
 
 app.get(["/", "/index.html"], (req, res) => {
     res.redirect("/dashboard/index.html");
