@@ -423,7 +423,6 @@ app.use("/intelligence", express.static(path.join(__dirname, "intelligence")));
 app.use("/surveillance", express.static(path.join(__dirname, "surveillance")));
 app.use("/forge", express.static(path.join(__dirname, "forge")));
 
-
 app.get(["/", "/index.html"], (req, res) => {
     res.redirect("/dashboard/index.html");
 });
@@ -449,9 +448,6 @@ app.get("/health", async (req, res) => {
     });
 });
 
-/* =========================================================================
-   NOUVELLE ROUTE API : ENREGISTREMENT ET GESTION DES NOTIFICATIONS PUSH
-   ========================================================================= */
 app.post("/api/notifications/register-token", async (req, res) => {
     try {
         const { token, platform, deviceId, appVersion } = req.body;
@@ -472,7 +468,6 @@ app.post("/api/notifications/register-token", async (req, res) => {
             .upsert(tokenPayload, { onConflict: "push_token" });
 
         if (error) {
-            // Si la table n'existe pas encore en DB, on log proprement sans planter l'APK
             console.warn("[PUSH TOKEN] Table non disponible ou erreur Supabase:", error.message);
         }
 
@@ -730,11 +725,6 @@ app.post("/api/intelligence/chat", async (req, res) => {
     }
 });
 
-// ======================================================
-// ROUTES ADMIN - NOTIFICATIONS PUSH
-// ======================================================
-
-// 1. Consulter l'historique et les statistiques d'appareils
 app.get("/api/admin/notifications/history", async (req, res) => {
     try {
         const { count: deviceCount } = await supabase
@@ -762,7 +752,6 @@ app.get("/api/admin/notifications/history", async (req, res) => {
     }
 });
 
-// 2. Diffuser une notification Push à l'ensemble des appareils enregistrés
 app.post("/api/admin/notifications/send", async (req, res) => {
     try {
         const { title, body, category } = req.body;
@@ -771,7 +760,6 @@ app.post("/api/admin/notifications/send", async (req, res) => {
             return apiError(res, 400, "INVALID_INPUT", "Le titre et le corps du message sont obligatoires.");
         }
 
-        // Enregistrement dans l'historique Supabase
         const { data: inserted, error: insertErr } = await supabase
             .from("anor_notifications")
             .insert([{
@@ -784,15 +772,12 @@ app.post("/api/admin/notifications/send", async (req, res) => {
 
         if (insertErr) throw insertErr;
 
-        // Récupération des tokens d'appareils pour l'envoi
         const { data: tokensData } = await supabase
             .from("device_push_tokens")
             .select("device_token");
 
         const targetTokens = (tokensData || []).map(t => t.device_token);
 
-        // Si la clé Firebase Admin SDK est configurée, la diffusion Push s'exécute ici.
-        // Sinon, le message reste stocké dans la base Supabase pour la consultation directe par l'APK.
         console.log(`[ANOR PUSH ENGINE] Notification "${title}" enregistrée. Cible : ${targetTokens.length} appareils.`);
 
         return apiSuccess(res, {
@@ -1179,6 +1164,9 @@ Système Souverain de Certification - ANOR Engine ${SERVER_VERSION}
     }
 );
 
+/* =========================================================================
+   ROUTE DE VÉRIFICATION DES SCEAUX (CORRIGÉE & OPTIMISÉE)
+   ========================================================================= */
 app.post(
     "/api/seals/verify",
     scanLimiter,
@@ -1195,7 +1183,7 @@ app.post(
                 deviceMetadata
             } = req.body;
 
-            const targetLot = lot || numero_lot;
+            let targetLot = lot || numero_lot;
 
             const geoResolved = resolveScanCoordinates(req.body);
             const currentLat = geoResolved.latitude;
@@ -1224,13 +1212,13 @@ app.post(
             let matchConfidence = 1.0;
             let detectedLot = targetLot;
 
-            // 1. Extraction du lot par le serveur si l'image est reçue sans lot textuel direct
-            if (!detectedLot && scannedMatrix) {
+            // 1. Réception et extraction du numéro de lot par le serveur si l'image est reçue et que le lot textuel est absent ou "N/A"
+            if ((!detectedLot || detectedLot === "N/A") && scannedMatrix) {
                 detectedLot = await extractLotWithFreeOCR(scannedMatrix);
             }
 
-            // 2. Comparaison de similarité des lots en base Supabase
-            if (detectedLot) {
+            // 2. Recherche et comparaison stricte dans la base Supabase
+            if (detectedLot && detectedLot !== "N/A") {
                 const rawLot = String(detectedLot).trim();
                 const cleanCode = rawLot.replace(/^LOT\s*[:\-]*/i, "").trim();
 
@@ -1252,7 +1240,7 @@ app.post(
                 }
             }
 
-            // 3. Comparaison des glyphes si la correspondance de lot nécessite une validation croisée
+            // 3. Validation croisée par les bits visuels (glyphes) si le lot direct n'a pas suffi
             if (!row && normalizedRequestBits) {
                 const { data: glyphMatch } = await supabase
                     .from("produits_certifies")
@@ -1267,9 +1255,11 @@ app.post(
                 }
             }
 
-            // ❌ PLUS DE SECOURS ABSOLU (ROBUST_ENGINE_FALLBACK) : 
-            // Si le lot et les glyphes ne correspondent à rien, rejet immédiat de la contrefaçon (zéro faux positif).
+            // Si le sceau ou le lot ne correspond à aucun produit certifié en base
             if (!row) {
+                if (!targetLot || targetLot === "N/A") {
+                    return apiError(res, 400, "INVALID_SEAL_FRAME", "Cadre de sceau non lisible ou incomplet.");
+                }
                 securityLog(req, "UNKNOWN_SEAL_REJECTED", { lot: targetLot || detectedLot || "N/A" });
                 return apiError(res, 404, "UNKNOWN_SEAL", "Sceau inconnu, lot non concordant ou contrefaçon rejetée par l'ANOR.", { status: "CONTREFAÇON_REJETEE", processingTime: Date.now() - startTime, engineVersion: SERVER_VERSION });
             }
