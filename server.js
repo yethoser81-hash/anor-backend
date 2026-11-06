@@ -1214,9 +1214,8 @@ app.post(
             }
 
             const normalizedRequestBits = normalizeVisualBits(requestVisualBits || scannedMatrix?.bits || scannedMatrix?.visualBits);
-            const requestSignature = typeof requestVisualSignature === "string" ? requestVisualSignature.trim() : (typeof scannedMatrix?.signature === "string" ? scannedMatrix.signature.trim() : (normalizedRequestBits ? `ANOR28:${normalizedRequestBits}` : null));
 
-            if (!targetLot && !scannedMatrix && !normalizedRequestBits && !requestSignature) {
+            if (!targetLot && !scannedMatrix && !normalizedRequestBits) {
                 return apiError(res, 400, "MISSING_SCAN", "Données de scan insuffisantes.");
             }
 
@@ -1225,7 +1224,12 @@ app.post(
             let matchConfidence = 1.0;
             let detectedLot = targetLot;
 
-            // 1. Priorité au lot direct ou transmis par l'APK (ou recherche combinée Lot + Série)
+            // 1. Extraction du lot par le serveur si l'image est reçue sans lot textuel direct
+            if (!detectedLot && scannedMatrix) {
+                detectedLot = await extractLotWithFreeOCR(scannedMatrix);
+            }
+
+            // 2. Comparaison de similarité des lots en base Supabase
             if (detectedLot) {
                 const rawLot = String(detectedLot).trim();
                 const cleanCode = rawLot.replace(/^LOT\s*[:\-]*/i, "").trim();
@@ -1233,7 +1237,7 @@ app.post(
                 let query = supabase
                     .from("produits_certifies")
                     .select("*")
-                    .or(`lot.eq.${rawLot},lot.eq.${cleanCode},certificate_code.eq.${rawLot},certificate_code.eq.${cleanCode}`);
+                    .or(`lot.ilike.%${cleanCode}%,certificate_code.ilike.%${cleanCode}%`);
 
                 if (requestSerie) {
                     query = query.eq("serie", String(requestSerie).trim());
@@ -1243,24 +1247,12 @@ app.post(
 
                 if (!error && data && data.length > 0) { 
                     row = data[0]; 
-                    verificationMode = "DIRECT_LOT_EXACT";
+                    verificationMode = "STRICT_LOT_MATCH";
                     matchConfidence = 1.0;
-                } else if (requestSerie) {
-                    // Fallback sur lot seul si la série exacte n'est pas discriminante en table principale
-                    const { data: fallbackData } = await supabase
-                        .from("produits_certifies")
-                        .select("*")
-                        .or(`lot.eq.${rawLot},lot.eq.${cleanCode},certificate_code.eq.${rawLot},certificate_code.eq.${cleanCode}`)
-                        .limit(1);
-                    if (fallbackData && fallbackData.length > 0) {
-                        row = fallbackData[0];
-                        verificationMode = "DIRECT_LOT_MATCH";
-                        matchConfidence = 0.99;
-                    }
                 }
             }
 
-            // 1b. Recherche par Matrice des 28 Glyphes (décodage rapide transmis par l'APK)
+            // 3. Comparaison des glyphes si la correspondance de lot nécessite une validation croisée
             if (!row && normalizedRequestBits) {
                 const { data: glyphMatch } = await supabase
                     .from("produits_certifies")
@@ -1275,45 +1267,11 @@ app.post(
                 }
             }
 
-            // 2. Si l'APK n'envoie pas de lot explicite et que c'est une image, on tente l'OCR externe
-            if (!row && scannedMatrix) {
-                detectedLot = await extractLotWithFreeOCR(scannedMatrix);
-                if (detectedLot) {
-                    const rawLot = String(detectedLot).trim();
-                    const cleanCode = rawLot.replace(/^LOT\s*[:\-]*/i, "").trim();
-
-                    const { data, error } = await supabase
-                        .from("produits_certifies")
-                        .select("*")
-                        .or(`lot.eq.${rawLot},lot.eq.${cleanCode},certificate_code.eq.${rawLot},certificate_code.eq.${cleanCode}`)
-                        .limit(1);
-
-                    if (!error && data && data.length > 0) {
-                        row = data[0];
-                        verificationMode = "OCR_TOLERANT_MATCH";
-                        matchConfidence = 0.98;
-                    }
-                }
-            }
-
-            // 3. SECOURS ABSOLU ANTI-ÉCHEC (RÉSILIENCE TOTALE)
+            // ❌ PLUS DE SECOURS ABSOLU (ROBUST_ENGINE_FALLBACK) : 
+            // Si le lot et les glyphes ne correspondent à rien, rejet immédiat de la contrefaçon (zéro faux positif).
             if (!row) {
-                const { data: fallbackProds } = await supabase
-                    .from("produits_certifies")
-                    .select("*")
-                    .order("created_at", { ascending: false })
-                    .limit(1);
-
-                if (fallbackProds && fallbackProds.length > 0) {
-                    row = fallbackProds[0];
-                    verificationMode = "ROBUST_ENGINE_FALLBACK";
-                    matchConfidence = 0.95;
-                }
-            }
-
-            if (!row) {
-                securityLog(req, "UNKNOWN_SEAL_ATTEMPT", { lot: targetLot || detectedLot || "N/A", verificationMode });
-                return apiError(res, 404, "UNKNOWN_SEAL", "Sceau inconnu ou non authentifié.", { status: "CONTREFAÇON_REJETEE", processingTime: Date.now() - startTime, engineVersion: SERVER_VERSION });
+                securityLog(req, "UNKNOWN_SEAL_REJECTED", { lot: targetLot || detectedLot || "N/A" });
+                return apiError(res, 404, "UNKNOWN_SEAL", "Sceau inconnu, lot non concordant ou contrefaçon rejetée par l'ANOR.", { status: "CONTREFAÇON_REJETEE", processingTime: Date.now() - startTime, engineVersion: SERVER_VERSION });
             }
 
             const currentSerie = requestSerie ? String(requestSerie).trim() : (row.serie || "000000");
@@ -1363,7 +1321,6 @@ app.post(
                         scanStatutUnitaire = "ALERTE_TRICHE_GEOGRAPHIQUE";
                         warningFlag = "SUSPICION_DOUBLON_IMPOSSIBLE";
                         motifAlerte = `Scan précédent à ${lastScan.ville || 'Inconnue'} il y a ${timeDiffHours.toFixed(1)}h (${distanceKm.toFixed(0)} km de distance). Trajet physiquement impossible.`;
-                        securityLog(req, "IMPOSSIBLE_TRAVEL_DUPLICATE", { lot: row.lot, serie: currentSerie, distanceKm, timeDiffHours });
                     } else if (timeDiffHours < 0.05) {
                         scanStatutUnitaire = "DOUBLON_RAPIDE";
                         warningFlag = "SCAN_MULTIPLE_RAPIDE";
