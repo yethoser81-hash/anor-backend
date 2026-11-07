@@ -421,6 +421,20 @@ function drawGlyphProportional2D(ctx, type, def, isFilled, w, h, strokeWidth) {
                 ctx.strokeRect(-w / 2, -h / 2, w, h);
             }
     }
+    
+    ctx.save();
+    ctx.shadowColor = 'transparent';
+    ctx.shadowBlur = 0;
+    ctx.shadowOffsetX = 0;
+    ctx.shadowOffsetY = 0;
+    ctx.beginPath();
+    ctx.arc(0, 0, 8 * (h / 48), 0, Math.PI * 2);
+    ctx.fillStyle = isFilled ? '#000000' : '#FFFFFF';
+    ctx.fill();
+    ctx.lineWidth = 2.2 * (h / 48);
+    ctx.strokeStyle = '#000000';
+    ctx.stroke();
+    ctx.restore();
 }
 
 module.exports = sealRenderer;
