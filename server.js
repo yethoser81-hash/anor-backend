@@ -43,7 +43,7 @@ setInterval(() => {
     }
 }, 60000);
 
-const SERVER_VERSION = "24.4.0";
+const SERVER_VERSION = "24.6.0-PARTIAL28";
 const VISUAL_VERSION = 2; 
 const VISUAL_BITS_LENGTH = 28; 
 const isProduction = process.env.NODE_ENV === "production";
@@ -62,10 +62,9 @@ function formatDateOnly(dateValue) {
 }
 
 function normalizeVisualBits(bits) {
-    if (typeof bits === "string" && /^[01]{28}$/.test(bits.trim())) {
-        return bits.trim();
-    }
-    return null;
+    if (typeof bits !== "string") return null;
+    const value = bits.trim();
+    return /^[01?]{28}$/.test(value) ? value : null;
 }
 
 function sha256Hex(value) {
@@ -1262,32 +1261,18 @@ app.post("/api/seals/verify", scanLimiter, async (req, res) => {
             );
         }
 
-        // Le lot seul permet d'identifier une fiche, mais jamais d'authentifier
-        // un sceau physique. Refus explicite tant que le décodage des 28 bits
-        // n'est pas réellement effectué et transmis par l'APK.
+        // ANOR28 partial protocol: unknown positions stay '?'. Minimum 19
+        // actually-read bits; never infer or fill missing bits from the database.
         if (!normalizedRequestBits) {
-            securityLog(req, "SEAL_GLYPHS_MISSING", {
-                lot: cleanCode,
-                clientProtocol: body.clientProtocol || null
-            });
-            return apiError(
-                res, 428, "GLYPH_DATA_REQUIRED",
-                "Lot reconnu, mais sceau non authentifié : le décodage local des 28 glyphes est absent."
-            );
+            return apiError(res, 422, "GLYPH_DATA_INVALID", "Lecture visuelle insuffisante.");
         }
-
+        const observedCount = (normalizedRequestBits.match(/[01]/g) || []).length;
+        if (observedCount < 19) {
+            return apiError(res, 422, "GLYPH_COUNT_TOO_LOW", "Au moins 19 glyphes lisibles sont nécessaires.");
+        }
         const expectedSignature = `ANOR28:${normalizedRequestBits}`;
-        if (
-            suppliedVisualSignature &&
-            suppliedVisualSignature !== expectedSignature
-        ) {
-            securityLog(req, "VISUAL_SIGNATURE_INCONSISTENT", {
-                lot: cleanCode
-            });
-            return apiError(
-                res, 422, "VISUAL_SIGNATURE_INCONSISTENT",
-                "La signature visuelle ne correspond pas aux 28 bits transmis."
-            );
+        if (suppliedVisualSignature && suppliedVisualSignature !== expectedSignature) {
+            return apiError(res, 422, "VISUAL_SIGNATURE_INCONSISTENT", "La signature visuelle transmise est incohérente.");
         }
 
         const geoResolved = resolveScanCoordinates(body);
@@ -1374,40 +1359,29 @@ app.post("/api/seals/verify", scanLimiter, async (req, res) => {
         }
 
         const storedBits = normalizeVisualBits(row.visual_bits);
-        if (!storedBits) {
+        if (!storedBits || !/^[01]{28}$/.test(storedBits)) {
             securityLog(req, "DATABASE_VISUAL_BITS_INVALID", { lot: cleanCode });
-            return apiError(
-                res, 503, "DATABASE_SEAL_DATA_INVALID",
-                "La fiche certifiée ne contient pas une matrice visuelle ANOR28 valide."
-            );
+            return apiError(res, 503, "DATABASE_SEAL_DATA_INVALID", "La fiche ne contient pas les 28 bits officiels.");
         }
 
-        // Authentification stricte : 28/28 bits identiques.
-        const distance = calculateHammingDistance(
-            normalizedRequestBits,
-            storedBits
-        );
-
-        if (distance !== 0) {
-            securityLog(req, "VISUAL_GLYPHS_MISMATCH", {
-                lot: cleanCode,
-                hammingDistance: distance
-            });
-            return apiError(
-                res, 403, "VISUAL_GLYPHS_MISMATCH",
-                "Le numéro de lot existe, mais les glyphes du sceau ne correspondent pas au sceau officiel."
-            );
+        let compared = 0, mismatches = 0;
+        for (let i=0; i<28; i++) {
+            const observed = normalizedRequestBits[i];
+            if (observed === '?') continue;
+            compared++;
+            if (observed !== storedBits[i]) mismatches++;
+        }
+        const isFullVisualMatch = compared === 28 && mismatches === 0;
+        const isPartialVisualMatch = compared >= 19 && mismatches === 0;
+        if (!isPartialVisualMatch) {
+            securityLog(req, "VISUAL_GLYPHS_MISMATCH", { lot: cleanCode, compared, mismatches });
+            return apiError(res, 403, "VISUAL_GLYPHS_MISMATCH", "Les glyphes lus ne correspondent pas au sceau officiel.");
         }
 
         const storedSignature = row.visual_signature || `ANOR28:${storedBits}`;
         if (storedSignature !== `ANOR28:${storedBits}`) {
-            securityLog(req, "DATABASE_VISUAL_SIGNATURE_INVALID", {
-                lot: cleanCode
-            });
-            return apiError(
-                res, 503, "DATABASE_SEAL_DATA_INVALID",
-                "La signature visuelle enregistrée est incohérente."
-            );
+            securityLog(req, "DATABASE_VISUAL_SIGNATURE_INVALID", { lot: cleanCode });
+            return apiError(res, 503, "DATABASE_SEAL_DATA_INVALID", "La signature visuelle enregistrée est incohérente.");
         }
 
         const currentSerie = String(row.serie || "000000").trim();
@@ -1506,13 +1480,19 @@ app.post("/api/seals/verify", scanLimiter, async (req, res) => {
         }
 
         const responsePayload = {
-            status: warningFlag ? "ALERTE" : "AUTHENTIQUE",
-            verified: true,
-            confidence: 1,
-            score: "100.0%",
-            confidenceScore: 1,
-            visualBitsMatched: true,
-            visualBitsDistance: 0,
+            status: warningFlag ? "ALERTE" : (isFullVisualMatch ? "AUTHENTIQUE" : "CORRESPONDANCE_PARTIELLE"),
+            verified: isFullVisualMatch && !warningFlag,
+            productFound: true,
+            humanConfirmationRequired: true,
+            visualVerification: isFullVisualMatch ? "FULL_MATCH" : "PARTIAL_MATCH",
+            visualBitsCompared: compared,
+            visualBitsRequired: 19,
+            visualBitsMismatches: mismatches,
+            confidence: compared / 28,
+            score: `${compared}/28`,
+            confidenceScore: compared / 28,
+            visualBitsMatched: mismatches === 0,
+            visualBitsDistance: mismatches,
             security_alert: warningFlag || row.security_alert || null,
             securityAlert: warningFlag || row.security_alert || null,
             motif_alerte: motifAlerte,
@@ -1548,7 +1528,7 @@ app.post("/api/seals/verify", scanLimiter, async (req, res) => {
             processingTimeMs: Date.now() - startTime,
             engineVersion: SERVER_VERSION,
             visualVersion: VISUAL_VERSION,
-            verificationMode,
+            verificationMode: isFullVisualMatch ? "EXACT_LOT_AND_28_GLYPHS_MATCH" : "EXACT_LOT_AND_PARTIAL_GLYPHS_MATCH",
             serverTimestamp: Date.now()
         };
 
