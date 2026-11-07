@@ -421,7 +421,6 @@ function drawGlyphProportional2D(ctx, type, def, isFilled, w, h, strokeWidth) {
                 ctx.strokeRect(-w / 2, -h / 2, w, h);
             }
     }
-    
     ctx.save();
     ctx.shadowColor = 'transparent';
     ctx.shadowBlur = 0;
