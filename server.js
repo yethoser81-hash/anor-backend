@@ -2,7 +2,7 @@
  * ======================================================
  * SYSTEME SOUVERAIN DE CERTIFICATION ANOR
  * SERVER CORE (VERSION ARCHITECTURE 28 BITS - SANS DECONVOLUTION)
- * Version: 24.4.0 (Contrôle complet du sceau & vérification stricte du lot)
+ * Version: 24.3.0 (Support Scan Déterministe & Push Notifications)
  * ======================================================
  */
 
@@ -31,21 +31,9 @@ if (process.env.GEMINI_API_KEY) {
     console.warn("[ANOR CORE] Clé GEMINI_API_KEY absente. Module Chat Analytics passera en mode local.");
 }
 
-const scanCache = new Map();
-const SCAN_CACHE_TTL = 15 * 60 * 1000;
-
-setInterval(() => {
-    const now = Date.now();
-    for (const [key, entry] of scanCache.entries()) {
-        if (now - entry.time > SCAN_CACHE_TTL) {
-            scanCache.delete(key);
-        }
-    }
-}, 60000);
-
-const SERVER_VERSION = "24.4.0";
-const VISUAL_VERSION = 2;
-const VISUAL_BITS_LENGTH = 28;
+const SERVER_VERSION = "24.5.0";
+const VISUAL_VERSION = 2; 
+const VISUAL_BITS_LENGTH = 28; 
 const isProduction = process.env.NODE_ENV === "production";
 const PORT = process.env.PORT || 10000;
 
@@ -71,22 +59,9 @@ function normalizeVisualBits(bits) {
 function normalizeLotCode(value) {
     if (typeof value !== "string") return null;
     const cleaned = value.toUpperCase().trim()
-        .replace(/^LOT\s*[:\-]?\s*/i, "")
-        .replace(/\s+/g, "")
-        .replace(/[^A-Z0-9-]/g, "");
+        .replace(/^LOT\s*[:#-]?\s*/i, "")
+        .replace(/\s+/g, "");
     return /^[A-Z0-9][A-Z0-9-]{1,14}$/.test(cleaned) ? cleaned : null;
-}
-
-function extractLotFromOcrText(text) {
-    if (typeof text !== "string" || !text.trim()) return null;
-    const normalized = text.toUpperCase().replace(/[|]/g, "I").replace(/\s+/g, " ");
-    const match = normalized.match(/L[O0]T\s*[:\-]?\s*([A-Z0-9][A-Z0-9\-]{1,14})/);
-    return match ? normalizeLotCode(match[1]) : null;
-}
-
-function hasCompleteSealChecks(checks) {
-    return !!checks && checks.mires === true && checks.logo === true &&
-        checks.lot === true && checks.glyphs === true;
 }
 
 function sha256Hex(value) {
@@ -131,7 +106,7 @@ function resolveScanCoordinates(bodyData) {
 
     if ((!lat || !lon) && bodyData.cellTowers && Array.isArray(bodyData.cellTowers) && bodyData.cellTowers.length > 0) {
         method = "CELL_TOWER_TRIANGULATION";
-
+        
         const cameroonHubs = {
             "Yaoundé": { lat: 3.8480, lon: 11.5021, region: "Centre" },
             "Douala": { lat: 4.0511, lon: 9.7679, region: "Littoral" },
@@ -266,7 +241,7 @@ app.use(
             if (allowedOrigins.includes(origin)) { return callback(null, true); }
             if (!isProduction && isPrivateNetworkOrigin(origin)) { return callback(null, true); }
             if (!isProduction) { return callback(null, true); }
-
+            
             return callback(new Error("CORS_ORIGIN_NOT_ALLOWED"));
         },
         credentials: true,
@@ -282,7 +257,7 @@ app.use(express.urlencoded({ extended: true, limit: "50mb" }));
 app.use((req, res, next) => {
     res.setHeader(
         "Content-Security-Policy",
-        "default-src 'self' data: blob: https:; script-src 'self' 'unsafe-inline' 'unsafe-eval' https://unpkg.com https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline' https://unpkg.com https://cdnjs.cloudflare.com; img-src 'self' data: blob: https:;"
+        "default-src 'self' data: blob: https:; script-src 'self' 'unsafe-inline' 'unsafe-eval' https://unpkg.com https://cdn.jsdelivr.net; worker-src 'self' blob: https:; connect-src 'self' https:; style-src 'self' 'unsafe-inline' https://unpkg.com https://cdnjs.cloudflare.com; img-src 'self' data: blob: https:;"
     );
     res.setHeader("X-Content-Type-Options", "nosniff");
     res.setHeader("X-Frame-Options", "DENY");
@@ -293,10 +268,10 @@ app.use((req, res, next) => {
 app.use((req, res, next) => {
     const startTime = Date.now();
     const requestId = req.headers["x-request-id"] || crypto.randomUUID();
-
+    
     req.requestId = requestId;
     res.setHeader("X-Request-Id", requestId);
-
+    
     res.on("finish", () => {
         const duration = Date.now() - startTime;
         if (res.statusCode >= 400) {
@@ -335,22 +310,22 @@ setInterval(() => {
 
 app.use((req, res, next) => {
     if (["GET", "HEAD", "OPTIONS"].includes(req.method)) { return next(); }
-
+    
     const id = req.headers["x-request-id"];
     if (!id) { return next(); }
-
+    
     const replayKey = `${req.method}:${req.path}:${id}`;
-
+    
     if (recentRequests.has(replayKey)) {
         securityLog(req, "REPLAY_ATTACK_DETECTED", { replayKey });
         return apiError(res, 409, "DUPLICATE_REQUEST", "Cette requête a déjà été traitée (protection anti-replay).");
     }
-
+    
     if (recentRequests.size >= MAX_RECENT_REQUESTS) {
         const oldestKey = recentRequests.keys().next().value;
         if (oldestKey) { recentRequests.delete(oldestKey); }
     }
-
+    
     recentRequests.set(replayKey, Date.now());
     next();
 });
@@ -365,15 +340,23 @@ const upload = multer({
     }
 });
 
-async function extractLotWithFreeOCR(base64Image) {
-    try {
-        if (!base64Image || typeof base64Image !== "string") return null;
+async function extractLotWithFreeOCR(base64Image, timeoutMs = 2200) {
+    if (!base64Image || typeof base64Image !== "string") return null;
 
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), timeoutMs);
+
+    try {
         const formData = new URLSearchParams();
-        formData.append("base64Image", base64Image.startsWith("data:") ? base64Image : `data:image/jpeg;base64,${base64Image}`);
-        formData.append("language", "fre");
+        const imageData = base64Image.startsWith("data:")
+            ? base64Image
+            : `data:image/jpeg;base64,${base64Image}`;
+
+        formData.append("base64Image", imageData);
+        formData.append("language", "eng");
         formData.append("isOverlayRequired", "false");
         formData.append("OCREngine", "2");
+        formData.append("scale", "true");
 
         const response = await fetch("https://api.ocr.space/parse/image", {
             method: "POST",
@@ -381,20 +364,23 @@ async function extractLotWithFreeOCR(base64Image) {
                 "apikey": process.env.OCR_SPACE_API_KEY || "helloworld",
                 "Content-Type": "application/x-www-form-urlencoded"
             },
-            body: formData
+            body: formData,
+            signal: controller.signal
         });
 
+        if (!response.ok) return null;
         const data = await response.json();
-        if (data && data.ParsedResults && data.ParsedResults.length > 0) {
-            const detectedText = data.ParsedResults[0].ParsedText || "";
-            const lotMatch = detectedText.match(/LOT\s*[:\-]?\s*([A-Z0-9\-]{2,15})/i);
-            if (lotMatch && lotMatch[1]) {
-                return lotMatch[1].toUpperCase().trim();
-            }
+        const detectedText = data?.ParsedResults?.[0]?.ParsedText || "";
+        const normalizedText = String(detectedText).toUpperCase().replace(/[|]/g, "I");
+        const match = normalizedText.match(/\bL[O0]T\s*[:#-]?\s*([A-Z0-9][A-Z0-9-]{1,14})\b/);
+        return match ? match[1].toUpperCase() : null;
+    } catch (error) {
+        if (error.name !== "AbortError") {
+            console.warn("[ANOR OCR]", error.message);
         }
         return null;
-    } catch (err) {
-        return null;
+    } finally {
+        clearTimeout(timeout);
     }
 }
 
@@ -406,7 +392,7 @@ async function generateUnitSerialsAndManifest(lotCode, totalQuantity, masterSign
     for (let i = 1; i <= totalQuantity; i++) {
         const paddedIndex = String(i).padStart(6, "0");
         const serialNumber = `${lotCode}-${paddedIndex}`;
-
+        
         const secureUnitHash = crypto
             .createHash("sha256")
             .update(`${masterSignature}-${serialNumber}-${i}`)
@@ -447,11 +433,12 @@ app.use("/forge", express.static(path.join(__dirname, "forge")));
 app.get(["/", "/index.html"], (req, res) => {
     res.redirect("/dashboard/index.html");
 });
+
 app.get("/health", async (req, res) => {
     let database = "DOWN";
     try {
         const { error } = await supabase.from("produits_certifies").select("lot").limit(1);
-        if (!error) { database = "UP"; }
+        if (!error) { database = "UP"; } 
     } catch (error) {
         console.warn("[HEALTH] Exception:", error.message);
     }
@@ -460,7 +447,7 @@ app.get("/health", async (req, res) => {
         status: "ONLINE",
         engine: `ANOR Core ${SERVER_VERSION}`,
         database,
-        ocrEngine: "OCR.space (Gratuit)",
+        ocrEngine: "OCR serveur sur zone LOT (timeout 2.6s)",
         geminiAnalytics: ai ? "CONFIGURED" : "NOT_CONFIGURED",
         uptime: process.uptime(),
         memory: process.memoryUsage().rss,
@@ -505,7 +492,7 @@ app.get("/api/dashboard/stats", async (req, res) => {
             .select("lot, certificate_code, serie, ville, region, created_at, statut, scan_count")
             .order("created_at", { ascending: false })
             .limit(100);
-
+            
         if (error) throw error;
 
         let totalScans = 0;
@@ -547,8 +534,8 @@ app.get("/api/dashboard/stats", async (req, res) => {
             }
         }
 
-        const calculatedPrecision = totalScans > 0
-            ? ((successfulScans / totalScans) * 100).toFixed(2) + "%"
+        const calculatedPrecision = totalScans > 0 
+            ? ((successfulScans / totalScans) * 100).toFixed(2) + "%" 
             : "100.0%";
 
         return apiSuccess(res, {
@@ -578,17 +565,10 @@ app.get("/api/intelligence/data", async (req, res) => {
 
         let totalVolume = 0;
         const entreprisesMap = {};
-        const regionCounts = {
-            "Centre": 0, "Littoral": 0, "Ouest": 0, "Sud": 0,
-            "Nord": 0, "Adamaoua": 0, "Est": 0,
-            "Extrême-Nord": 0, "Nord-Ouest": 0, "Sud-Ouest": 0
-        };
+        const regionCounts = { "Centre": 0, "Littoral": 0, "Ouest": 0, "Sud": 0, "Nord": 0, "Adamaoua": 0, "Est": 0, "Extrême-Nord": 0, "Nord-Ouest": 0, "Sud-Ouest": 0 };
         const hourlyDistribution = {};
 
-        const timelineDays = {
-            "Lun": 0, "Mar": 0, "Mer": 0, "Jeu": 0,
-            "Ven": 0, "Sam": 0, "Dim": 0
-        };
+        const timelineDays = { "Lun": 0, "Mar": 0, "Mer": 0, "Jeu": 0, "Ven": 0, "Sam": 0, "Dim": 0 };
         const dayNames = ["Dim", "Lun", "Mar", "Mer", "Jeu", "Ven", "Sam"];
 
         if (products && products.length > 0) {
@@ -596,14 +576,10 @@ app.get("/api/intelligence/data", async (req, res) => {
                 const scans = Number(p.scan_count) || 0;
                 totalVolume += scans;
 
-                const ent = p.nom_producteur && p.nom_producteur.trim() !== ""
-                    ? p.nom_producteur.trim()
-                    : "Producteur Non Spécifié";
-
+                const ent = p.nom_producteur && p.nom_producteur.trim() !== "" ? p.nom_producteur.trim() : "Producteur Non Spécifié";
                 if (!entreprisesMap[ent]) {
                     entreprisesMap[ent] = { lots: 0, scans: 0, anomalies: 0 };
                 }
-
                 entreprisesMap[ent].lots += 1;
                 entreprisesMap[ent].scans += scans;
 
@@ -630,7 +606,7 @@ app.get("/api/intelligence/data", async (req, res) => {
             scansList.forEach(s => {
                 const reg = s.region && regionCounts[s.region] !== undefined ? s.region : "Centre";
                 regionCounts[reg] += 1;
-
+                
                 if (s.created_at) {
                     const d = new Date(s.created_at);
                     const dayStr = dayNames[d.getDay()];
@@ -651,20 +627,18 @@ app.get("/api/intelligence/data", async (req, res) => {
                 peakHour = Number(hour);
             }
         }
-
-        const dynamicPeakAffluence =
-            `${String(peakHour).padStart(2, '0')}h00 - ${String((peakHour + 1) % 24).padStart(2, '0')}h00`;
+        const dynamicPeakAffluence = `${String(peakHour).padStart(2, '0')}h00 - ${String((peakHour + 1) % 24).padStart(2, '0')}h00`;
 
         const comportement = Object.keys(entreprisesMap).map(ent => {
             const dataEnt = entreprisesMap[ent];
             let statutConf = "CONFORME";
             let tauxRisque = "0.0%";
-
+            
             if (dataEnt.anomalies > 0) {
                 statutConf = "SOUS SURVEILLANCE";
                 tauxRisque = ((dataEnt.anomalies / (dataEnt.lots || 1)) * 100).toFixed(2) + "%";
             }
-
+            
             return {
                 entreprise: ent,
                 lotsEmis: dataEnt.lots,
@@ -685,10 +659,8 @@ app.get("/api/intelligence/data", async (req, res) => {
 
         let totalAnomaliesCount = 0;
         Object.values(entreprisesMap).forEach(e => totalAnomaliesCount += e.anomalies);
-
         const totalProdsCount = products ? products.length : 1;
-        const indiceConformiteVal =
-            Math.max(0, 100 - ((totalAnomaliesCount / totalProdsCount) * 100)).toFixed(1) + "%";
+        const indiceConformiteVal = Math.max(0, 100 - ((totalAnomaliesCount / totalProdsCount) * 100)).toFixed(1) + "%";
 
         return apiSuccess(res, {
             volumeGlobal: totalVolume > 0 ? totalVolume.toLocaleString("fr-FR") : "0",
@@ -696,13 +668,13 @@ app.get("/api/intelligence/data", async (req, res) => {
             statPeakLocation: activeRegion,
             indiceConformite: indiceConformiteVal,
             entreprisesAuditees: String(Object.keys(entreprisesMap).length),
-            chartTimeline: {
-                labels: Object.keys(timelineDays),
-                values: Object.values(timelineDays)
+            chartTimeline: { 
+                labels: Object.keys(timelineDays), 
+                values: Object.values(timelineDays) 
             },
-            regionsDistribution: {
-                labels: Object.keys(regionCounts),
-                values: Object.values(regionCounts)
+            regionsDistribution: { 
+                labels: Object.keys(regionCounts), 
+                values: Object.values(regionCounts) 
             },
             comportement
         });
@@ -719,16 +691,9 @@ app.post("/api/intelligence/chat", async (req, res) => {
             return apiError(res, 400, "INVALID_PROMPT", "Le message de l'assistant est requis.");
         }
 
-        const { data: products } = await supabase
-            .from("produits_certifies")
-            .select("lot, nom_produit, nom_producteur, scan_count, statut")
-            .limit(20);
-
-        const { data: recentScans } = await supabase
-            .from("produits_unitaires_scans")
-            .select("lot, ville, region, statut, created_at")
-            .limit(30);
-
+        const { data: products } = await supabase.from("produits_certifies").select("lot, nom_produit, nom_producteur, scan_count, statut").limit(20);
+        const { data: recentScans } = await supabase.from("produits_unitaires_scans").select("lot, ville, region, statut, created_at").limit(30);
+        
         const contextSummary = JSON.stringify({
             produits: products || [],
             scansRecents: recentScans || []
@@ -754,12 +719,7 @@ app.post("/api/intelligence/chat", async (req, res) => {
                 });
             }
 
-            return apiSuccess(res, {
-                success: true,
-                reply: chatResponse.text
-                    ? chatResponse.text.trim()
-                    : "Analyse validée par le moteur ANOR Core."
-            });
+            return apiSuccess(res, { success: true, reply: chatResponse.text ? chatResponse.text.trim() : "Analyse validée par le moteur ANOR Core." });
         } else {
             return apiSuccess(res, {
                 success: true,
@@ -865,6 +825,7 @@ app.get("/api/registry/data", async (req, res) => {
         return apiError(res, 500, "REGISTRY_ERROR", "Impossible de charger les données du registre.");
     }
 });
+
 const VILLES_CAMEROUN_GPS = {
     "yaounde": [3.8480, 11.5021],
     "douala": [4.0511, 9.7679],
@@ -935,15 +896,13 @@ app.get("/api/surveillance/data", async (req, res) => {
             products.forEach(p => {
                 if (p.nom_producteur) producteursSet.add(p.nom_producteur);
                 const stat = p.statut || "CONFORME";
-
+                
                 if (stat === "ALERTE" || stat === "CONTREFAÇON" || stat === "ALERTE_TRICHE_GEOGRAPHIQUE") {
                     alertesCount++;
                     alerts.unshift({
                         titre: `Alerte sur le lot ${p.lot || p.certificate_code}`,
                         source: p.nom_producteur || "Producteur Agréé",
-                        temps: p.created_at
-                            ? new Date(p.created_at).toLocaleTimeString("fr-FR", { hour: '2-digit', minute: '2-digit' })
-                            : "Récemment",
+                        temps: p.created_at ? new Date(p.created_at).toLocaleTimeString("fr-FR", { hour: '2-digit', minute: '2-digit' }) : "Récemment",
                         niveau: "danger"
                     });
                 }
@@ -1009,12 +968,7 @@ app.get("/api/surveillance/data", async (req, res) => {
             },
             points,
             alerts: alerts.length > 0 ? alerts : [
-                {
-                    titre: "Réseau de surveillance synchronisé : " + totalScansCount + " scans chargés",
-                    source: "ANOR Engine",
-                    temps: "En direct",
-                    niveau: "normal"
-                }
+                { titre: "Réseau de surveillance synchronisé : " + totalScansCount + " scans chargés", source: "ANOR Engine", temps: "En direct", niveau: "normal" }
             ],
             history: history.slice(0, 30)
         });
@@ -1029,9 +983,9 @@ app.post("/api/security/audit", (req, res) => {
     try {
         const auditData = req.body || {};
         console.log("[ANOR SECURITY AUDIT] Rapport reçu :", JSON.stringify(auditData));
-        return apiSuccess(res, {
-            status: "AUDIT_RECEIVED",
-            message: "Rapport de sécurité pris en compte par le noyau 24.3.0."
+        return apiSuccess(res, { 
+            status: "AUDIT_RECEIVED", 
+            message: "Rapport de sécurité pris en compte par le noyau 24.3.0." 
         });
     } catch (error) {
         console.error("[SECURITY AUDIT ERROR]", error.message);
@@ -1070,21 +1024,13 @@ app.post(
             const pdfFile = files.certificat_pdf?.[0] || files.pdf?.[0] || null;
             const visuelFile = files.visuel_produit?.[0] || files.visuel?.[0] || files.image?.[0] || null;
 
-            const pdfBufferData = pdfFile
-                ? { buffer: pdfFile.buffer, mimetype: pdfFile.mimetype, originalname: pdfFile.originalname }
-                : null;
-
-            const visuelBufferData = visuelFile
-                ? { buffer: visuelFile.buffer, mimetype: visuelFile.mimetype, originalname: visuelFile.originalname }
-                : null;
+            const pdfBufferData = pdfFile ? { buffer: pdfFile.buffer, mimetype: pdfFile.mimetype, originalname: pdfFile.originalname } : null;
+            const visuelBufferData = visuelFile ? { buffer: visuelFile.buffer, mimetype: visuelFile.mimetype, originalname: visuelFile.originalname } : null;
 
             const certificateCode = String(lot).trim();
             const productSerie = serie ? String(serie).trim() : "000000";
 
-            const secureSignature = crypto.createHash("sha256")
-                .update(`${certificateCode}-${productSerie}-${Date.now()}-${crypto.randomUUID()}`)
-                .digest("hex");
-
+            const secureSignature = crypto.createHash("sha256").update(`${certificateCode}-${productSerie}-${Date.now()}-${crypto.randomUUID()}`).digest("hex");
             const visualBits = normalizeVisualBits(SealRenderer.deriveVisualBits(secureSignature));
 
             if (!visualBits) {
@@ -1096,20 +1042,14 @@ app.post(
             const imageBuffer = await SealRenderer.renderSealToBuffer(
                 { secureSignature, visualBits },
                 {
-                    lot: certificateCode,
-                    quantite: parsedQuantite,
-                    type_emballage,
-                    productName: nom_produit,
-                    nom_produit,
-                    nom_producteur,
+                    lot: certificateCode, quantite: parsedQuantite, type_emballage,
+                    productName: nom_produit, nom_produit, nom_producteur,
                     isMasterSeal: true,
                     masterSerialLabel: `${productSerie} / ${parsedQuantite.toLocaleString("fr-FR")}`
                 }
             );
 
-            if (!Buffer.isBuffer(imageBuffer)) {
-                throw new Error("Le renderer n'a pas renvoyé un Buffer valide.");
-            }
+            if (!Buffer.isBuffer(imageBuffer)) { throw new Error("Le renderer n'a pas renvoyé un Buffer valide."); }
 
             const rawBase64 = imageBuffer.toString("base64").replace(/\r|\n/g, "");
 
@@ -1119,51 +1059,25 @@ app.post(
             if (pdfBufferData) {
                 try {
                     const pdfPath = `${Date.now()}_${sanitizeFileName(pdfBufferData.originalname)}`;
-                    const { data: pdfData, error: pdfErr } = await supabase.storage
-                        .from("certificat-pdf")
-                        .upload(pdfPath, pdfBufferData.buffer, {
-                            contentType: pdfBufferData.mimetype,
-                            upsert: true
-                        });
-
+                    const { data: pdfData, error: pdfErr } = await supabase.storage.from("certificat-pdf").upload(pdfPath, pdfBufferData.buffer, { contentType: pdfBufferData.mimetype, upsert: true });
                     if (!pdfErr && pdfData) {
-                        const { data: publicUrlData } = supabase.storage
-                            .from("certificat-pdf")
-                            .getPublicUrl(pdfPath);
+                        const { data: publicUrlData } = supabase.storage.from("certificat-pdf").getPublicUrl(pdfPath);
                         pdfUrl = publicUrlData?.publicUrl || null;
                     }
-                } catch (storageError) {
-                    console.warn("Exception Storage PDF:", storageError.message);
-                }
-
-                if (!pdfUrl) {
-                    pdfUrl = `data:${pdfBufferData.mimetype};base64,${pdfBufferData.buffer.toString("base64")}`;
-                }
+                } catch (storageError) { console.warn("Exception Storage PDF:", storageError.message); }
+                if (!pdfUrl) { pdfUrl = `data:${pdfBufferData.mimetype};base64,${pdfBufferData.buffer.toString("base64")}`; }
             }
 
             if (visuelBufferData) {
                 try {
                     const visuelPath = `${Date.now()}_${sanitizeFileName(visuelBufferData.originalname)}`;
-                    const { data: visuelData, error: visuelErr } = await supabase.storage
-                        .from("Produits")
-                        .upload(visuelPath, visuelBufferData.buffer, {
-                            contentType: visuelBufferData.mimetype,
-                            upsert: true
-                        });
-
+                    const { data: visuelData, error: visuelErr } = await supabase.storage.from("Produits").upload(visuelPath, visuelBufferData.buffer, { contentType: visuelBufferData.mimetype, upsert: true });
                     if (!visuelErr && visuelData) {
-                        const { data: publicUrlData } = supabase.storage
-                            .from("Produits")
-                            .getPublicUrl(visuelPath);
+                        const { data: publicUrlData } = supabase.storage.from("Produits").getPublicUrl(visuelPath);
                         visuelUrl = publicUrlData?.publicUrl || null;
                     }
-                } catch (storageError) {
-                    console.warn("Exception Storage Visuel:", storageError.message);
-                }
-
-                if (!visuelUrl) {
-                    visuelUrl = `data:${visuelBufferData.mimetype};base64,${visuelBufferData.buffer.toString("base64")}`;
-                }
+                } catch (storageError) { console.warn("Exception Storage Visuel:", storageError.message); }
+                if (!visuelUrl) { visuelUrl = `data:${visuelBufferData.mimetype};base64,${visuelBufferData.buffer.toString("base64")}`; }
             }
 
             const cleanCertDate = formatDateOnly(date_certificat_conformite);
@@ -1171,55 +1085,26 @@ app.post(
             const cleanExpDate = formatDateOnly(date_peremption);
 
             const payloadDB = {
-                certificate_code: certificateCode,
-                lot: certificateCode,
-                serie: productSerie,
-                quantite: parsedQuantite,
-                type_emballage,
-                nom_produit: nom_produit || null,
-                nom_producteur: nom_producteur || null,
-                composition: composition || null,
-                pays_origine: pays_origine || null,
+                certificate_code: certificateCode, lot: certificateCode, serie: productSerie, quantite: parsedQuantite, type_emballage,
+                nom_produit: nom_produit || null, nom_producteur: nom_producteur || null,
+                composition: composition || null, pays_origine: pays_origine || null,
                 date_certificat_conformite: cleanCertDate !== "N/A" ? cleanCertDate : null,
-                date_fabrication: cleanFabDate !== "N/A" ? cleanFabDate : null,
+                date_fabrication: cleanFabDate !== "N/A" ? cleanFabDate : null, 
                 date_peremption: cleanExpDate !== "N/A" ? cleanExpDate : null,
-                certificat_pdf_url: pdfUrl,
-                visuel_produit_url: visuelUrl,
-                glyph_payload: {
-                    visualVersion: VISUAL_VERSION,
-                    secureSignature,
-                    lot: certificateCode,
-                    serie: productSerie,
-                    visualBits,
-                    visualSignature
-                },
-                visual_bits: visualBits,
-                visual_signature: visualSignature,
-                matrix_hash: sha256Hex(visualBits),
-                ai_signature_hash: secureSignature,
-                sha256_hash: secureSignature,
-                signature_ia: secureSignature,
+                certificat_pdf_url: pdfUrl, visuel_produit_url: visuelUrl,
+                glyph_payload: { visualVersion: VISUAL_VERSION, secureSignature, lot: certificateCode, serie: productSerie, visualBits, visualSignature },
+                visual_bits: visualBits, visual_signature: visualSignature,
+                matrix_hash: sha256Hex(visualBits), ai_signature_hash: secureSignature,
+                sha256_hash: secureSignature, signature_ia: secureSignature,
                 visual_geometry: { ring: "single", count: 28, total: 28 },
-                engine_version: SERVER_VERSION,
-                statut: "CERTIFIÉ",
-                scan_count: 0
+                engine_version: SERVER_VERSION, statut: "CERTIFIÉ", scan_count: 0
             };
 
-            const { data, error } = await supabase
-                .from("produits_certifies")
-                .upsert(payloadDB, { onConflict: "lot" })
-                .select();
+            const { data, error } = await supabase.from("produits_certifies").upsert(payloadDB, { onConflict: "lot" }).select();
 
-            if (error) {
-                console.error("[SUPABASE INSERT]", error);
-                throw error;
-            }
+            if (error) { console.error("[SUPABASE INSERT]", error); throw error; }
 
-            const csvManifestContent = await generateUnitSerialsAndManifest(
-                certificateCode,
-                parsedQuantite,
-                secureSignature
-            );
+            const csvManifestContent = await generateUnitSerialsAndManifest(certificateCode, parsedQuantite, secureSignature);
 
             const printNoticeContent = `
 ======================================================================
@@ -1261,35 +1146,18 @@ Système Souverain de Certification - ANOR Engine ${SERVER_VERSION}
             const zip = new JSZip();
             zip.file("NOTICE_DIMPRESSION_ET_INSTRUCTIONS.txt", printNoticeContent);
             zip.file("manifeste_serialisation_unitaire.csv", csvManifestContent);
-            zip.file("certification.json", JSON.stringify({
-                lot: certificateCode,
-                numero_lot: certificateCode,
-                serie: productSerie,
-                nom_produit,
-                nom_producteur,
-                quantite: parsedQuantite,
-                visualVersion: VISUAL_VERSION,
-                visualBits,
-                visualSignature,
-                signature_ia: secureSignature,
-                created_at: new Date().toISOString()
-            }, null, 4));
+            zip.file("certification.json", JSON.stringify({ lot: certificateCode, numero_lot: certificateCode, serie: productSerie, nom_produit, nom_producteur, quantite: parsedQuantite, visualVersion: VISUAL_VERSION, visualBits, visualSignature, signature_ia: secureSignature, created_at: new Date().toISOString() }, null, 4));
             zip.file("sceau_ANOR_MASTER.png", imageBuffer);
-
-            const zipBuffer = await zip.generateAsync({
-                type: "nodebuffer",
-                compression: "DEFLATE",
-                compressionOptions: { level: 9 }
-            });
+            const zipBuffer = await zip.generateAsync({ type: "nodebuffer", compression: "DEFLATE", compressionOptions: { level: 9 } });
 
             return apiSuccess(res, {
-                message: "Sceau et sérialisation unitaire générés avec succès.",
-                lot: certificateCode,
-                numero_lot: certificateCode,
-                serie: productSerie,
-                sha256_hash: secureSignature,
-                visualVersion: VISUAL_VERSION,
-                visualBits,
+                message: "Sceau et sérialisation unitaire générés avec succès.", 
+                lot: certificateCode, 
+                numero_lot: certificateCode, 
+                serie: productSerie, 
+                sha256_hash: secureSignature, 
+                visualVersion: VISUAL_VERSION, 
+                visualBits, 
                 visualSignature,
                 imageUrl: `data:image/png;base64,${rawBase64}`,
                 zipUrl: `data:application/zip;base64,${zipBuffer.toString("base64")}`,
@@ -1298,124 +1166,43 @@ Système Souverain de Certification - ANOR Engine ${SERVER_VERSION}
             });
         } catch (error) {
             console.error("Erreur génération sceau:", error);
-            return apiError(
-                res,
-                500,
-                "FORGE_ERROR",
-                isProduction ? "Erreur interne pendant la génération du sceau." : error.message
-            );
+            return apiError(res, 500, "FORGE_ERROR", isProduction ? "Erreur interne pendant la génération du sceau." : error.message);
         }
     }
 );
+
 /* =========================================================================
    ROUTE DE VÉRIFICATION DES SCEAUX (CORRIGÉE & OPTIMISÉE)
    ========================================================================= */
-
 app.post(
     "/api/seals/verify",
     scanLimiter,
     async (req, res) => {
         const startTime = Date.now();
-
         try {
             if (!isValidUserAgent(req.headers["user-agent"])) {
-                securityLog(req, "INVALID_USER_AGENT_BLOCKED", {
-                    agent: req.headers["user-agent"]
-                });
-
-                return apiError(
-                    res,
-                    400,
-                    "INVALID_CLIENT",
-                    "Client non valide ou rejeté par la politique de sécurité."
-                );
+                securityLog(req, "INVALID_USER_AGENT_BLOCKED", { agent: req.headers["user-agent"] });
+                return apiError(res, 400, "INVALID_CLIENT", "Client non valide ou rejeté par la politique de sécurité.");
             }
 
             let {
-                scannedMatrix,
-                lot,
-                numero_lot,
-                serie: requestSerie,
-                visualBits: requestVisualBits,
-                visualSignature: requestVisualSignature,
-                deviceMetadata,
-                sealChecks,
-                ocrText
+                scannedMatrix, lotImage, serie: requestSerie, visualBits: requestVisualBits,
+                visualSignature: requestVisualSignature, deviceMetadata
             } = req.body;
 
-            // CONTRÔLE DES ÉLÉMENTS OBLIGATOIRES
-            if (scannedMatrix && !hasCompleteSealChecks(sealChecks)) {
-                securityLog(req, "INCOMPLETE_SEAL_CHECKS", {
-                    sealChecks: sealChecks || null
-                });
+            let targetLot = null;
 
-                return apiError(
-                    res,
-                    422,
-                    "SEAL_CHECKS_REQUIRED",
-                    "Le sceau doit valider les quatre mires, le logo, le lot et les glyphes avant transmission."
-                );
-            }
-
-            // IDENTIFICATION DU NUMÉRO DE LOT
-            const providedLot = normalizeLotCode(lot || numero_lot);
-            const ocrLot = extractLotFromOcrText(ocrText);
-
-            if (scannedMatrix && providedLot && ocrLot && providedLot !== ocrLot) {
-                securityLog(req, "LOT_OCR_MISMATCH", {
-                    providedLot,
-                    ocrLot
-                });
-
-                return apiError(
-                    res,
-                    422,
-                    "LOT_OCR_MISMATCH",
-                    "Le numéro de lot transmis ne correspond pas au texte lu sur le sceau."
-                );
-            }
-
-            let targetLot = providedLot || ocrLot;
-
-            // GÉOLOCALISATION
             const geoResolved = resolveScanCoordinates(req.body);
-
             const currentLat = geoResolved.latitude;
             const currentLon = geoResolved.longitude;
             const locationMethod = geoResolved.locationMethod;
             const currentVille = geoResolved.ville;
             const currentRegion = geoResolved.region;
 
-            // CACHE DES SCANS
-            let imageCacheKey = null;
-
-            if (typeof scannedMatrix === "string" && scannedMatrix.startsWith("data:image")) {
-                imageCacheKey = sha256Hex(scannedMatrix);
-
-                if (scanCache.has(imageCacheKey)) {
-                    const cachedResult = scanCache.get(imageCacheKey);
-
-                    return apiSuccess(res, {
-                        ...cachedResult,
-                        processingTime: Date.now() - startTime,
-                        processingTimeMs: Date.now() - startTime
-                    });
-                }
-            }
-
-            const normalizedRequestBits = normalizeVisualBits(
-                requestVisualBits ||
-                scannedMatrix?.bits ||
-                scannedMatrix?.visualBits
-            );
+            const normalizedRequestBits = normalizeVisualBits(requestVisualBits || scannedMatrix?.bits || scannedMatrix?.visualBits);
 
             if (!targetLot && !scannedMatrix && !normalizedRequestBits) {
-                return apiError(
-                    res,
-                    400,
-                    "MISSING_SCAN",
-                    "Données de scan insuffisantes."
-                );
+                return apiError(res, 400, "MISSING_SCAN", "Données de scan insuffisantes.");
             }
 
             let row = null;
@@ -1423,125 +1210,123 @@ app.post(
             let matchConfidence = 1.0;
             let detectedLot = targetLot;
 
-            // OCR SERVEUR EN SECOURS
-            if (!detectedLot && scannedMatrix) {
-                detectedLot = await extractLotWithFreeOCR(scannedMatrix);
+            // Le serveur lit lui-même le numéro de lot dans le crop transmis par l'APK.
+            // Le crop est limité à la zone LOT pour réduire le temps OCR.
+            const serverReadLot = await extractLotWithFreeOCR(lotImage || scannedMatrix, 2200);
+            const cleanCode = normalizeLotCode(serverReadLot);
+
+            if (!cleanCode) {
+                securityLog(req, "SEAL_LOT_NOT_READABLE", {
+                    lot: "N/A",
+                    reason: lotImage ? "OCR_CROP_UNREADABLE_OR_TIMEOUT" : "LOT_CROP_MISSING"
+                });
+                return apiError(res, 422, "LOT_NOT_READABLE",
+                    "Le numéro de lot n'a pas pu être lu. Le scanner doit reprendre une image plus nette.");
             }
 
-            detectedLot = normalizeLotCode(detectedLot);
+            // Recherche exacte : aucun ILIKE, aucun joker %, aucune recherche par préfixe.
+            let exactLotQuery = supabase
+                .from("produits_certifies")
+                .select("*")
+                .eq("lot", cleanCode);
 
-            // RECHERCHE EXACTE DANS SUPABASE
-            if (detectedLot) {
-                let query = supabase
+            if (requestSerie) {
+                exactLotQuery = exactLotQuery.eq("serie", String(requestSerie).trim());
+            }
+
+            const lotQuery = await exactLotQuery.limit(2);
+            if (lotQuery.error) throw lotQuery.error;
+
+            if (lotQuery.data && lotQuery.data.length === 1) {
+                row = lotQuery.data[0];
+                verificationMode = "EXACT_LOT_MATCH";
+                matchConfidence = 1.0;
+            } else if (lotQuery.data && lotQuery.data.length > 1) {
+                securityLog(req, "DUPLICATE_OFFICIAL_LOT", { lot: cleanCode });
+                return apiError(res, 409, "DUPLICATE_LOT_RECORDS", "Plusieurs enregistrements portent exactement ce numéro de lot.");
+            } else {
+                // Compatibilité legacy contrôlée : certificate_code exact uniquement.
+                const codeQuery = await supabase
                     .from("produits_certifies")
                     .select("*")
-                    .eq("lot", detectedLot);
+                    .eq("certificate_code", cleanCode)
+                    .limit(2);
 
-                if (requestSerie) {
-                    query = query.eq("serie", String(requestSerie).trim());
+                if (codeQuery.error) throw codeQuery.error;
+
+                if (codeQuery.data && codeQuery.data.length === 1) {
+                    const candidate = codeQuery.data[0];
+                    const storedLot = normalizeLotCode(candidate.lot || "");
+                    if (storedLot && storedLot !== cleanCode) {
+                        securityLog(req, "LOT_RECORD_INCONSISTENT", {
+                            scannedLot: cleanCode,
+                            databaseLot: candidate.lot,
+                            certificateCode: candidate.certificate_code
+                        });
+                        return apiError(res, 409, "LOT_RECORD_INCONSISTENT",
+                            "Le code du certificat correspond, mais le numéro de lot enregistré est différent. Corrigez la fiche dans Supabase.");
+                    }
+                    row = candidate;
+                    verificationMode = "EXACT_CERTIFICATE_CODE_MATCH";
+                    matchConfidence = 1.0;
+                } else if (codeQuery.data && codeQuery.data.length > 1) {
+                    securityLog(req, "DUPLICATE_CERTIFICATE_CODE", { lot: cleanCode });
+                    return apiError(res, 409, "DUPLICATE_CERTIFICATE_CODE", "Plusieurs certificats portent exactement ce code.");
                 }
+            }
 
-                let { data, error } = await query.limit(1);
+            // Les glyphes ne peuvent jamais faire sélectionner un autre lot.
+            if (!row && normalizedRequestBits) {
+                const { data: glyphMatch, error: glyphError } = await supabase
+                    .from("produits_certifies")
+                    .select("*")
+                    .eq("visual_bits", normalizedRequestBits)
+                    .eq("lot", cleanCode)
+                    .limit(1);
 
-                if (error) {
-                    console.error("[VERIFY LOT QUERY]", error.message);
-                    throw error;
-                }
-
-                // COMPATIBILITÉ AVEC LES ANCIENS ENREGISTREMENTS
-                if ((!data || data.length === 0) && !requestSerie) {
-                    const fallback = await supabase
-                        .from("produits_certifies")
-                        .select("*")
-                        .eq("certificate_code", detectedLot)
-                        .limit(1);
-
-                    if (fallback.error) throw fallback.error;
-
-                    data = fallback.data;
-                }
-
-                if (data && data.length > 0) {
-                    row = data[0];
-                    verificationMode = "STRICT_LOT_MATCH";
+                if (glyphError) throw glyphError;
+                if (glyphMatch && glyphMatch.length === 1) {
+                    row = glyphMatch[0];
+                    verificationMode = "EXACT_LOT_AND_GLYPHS_MATCH";
                     matchConfidence = 1.0;
                 }
             }
 
-            // LOT INTROUVABLE
+            // Si le sceau ou le lot ne correspond à aucun produit certifié en base
             if (!row) {
-                if (!detectedLot) {
-                    securityLog(req, "SEAL_LOT_NOT_READABLE", {
-                        lot: "N/A"
-                    });
-
-                    return apiError(
-                        res,
-                        422,
-                        "INVALID_SEAL_FRAME",
-                        "Le numéro de lot n'a pas pu être lu. Le sceau doit rester dans le cadre pour une nouvelle lecture."
-                    );
+                if (!cleanCode) {
+                    return apiError(res, 422, "LOT_NOT_READABLE", "Numéro de lot non lisible.");
                 }
-
-                securityLog(req, "UNKNOWN_SEAL_REJECTED", {
-                    lot: detectedLot
-                });
-
-                return apiError(
-                    res,
-                    404,
-                    "UNKNOWN_SEAL",
-                    "Le lot lu ne figure pas dans la base des produits certifiés ANOR.",
-                    {
-                        lot: detectedLot,
-                        status: "LOT_INCONNU",
-                        processingTime: Date.now() - startTime,
-                        engineVersion: SERVER_VERSION
-                    }
-                );
+                securityLog(req, "UNKNOWN_SEAL_REJECTED", { lot: cleanCode });
+                return apiError(res, 404, "UNKNOWN_SEAL", "Sceau inconnu, lot non concordant ou contrefaçon rejetée par l'ANOR.", { status: "CONTREFAÇON_REJETEE", processingTime: Date.now() - startTime, engineVersion: SERVER_VERSION });
             }
 
-            // VALIDATION DE LA SÉRIE
-            const currentSerie = requestSerie
-                ? String(requestSerie).trim()
-                : (row.serie || "000000");
-
-            const isUniversalSerie =
-                currentSerie === "000000" ||
-                currentSerie.startsWith("000000");
-
+            const currentSerie = requestSerie ? String(requestSerie).trim() : (row.serie || "000000");
+            const isUniversalSerie = currentSerie === "000000" || currentSerie.startsWith("000000");
             const currentScanTime = new Date();
 
             let scanStatutUnitaire = "CONFORME";
             let warningFlag = null;
             let motifAlerte = null;
 
-            // ENREGISTREMENT DU SCAN
             try {
-                await supabase
-                    .from("produits_unitaires_scans")
-                    .insert([{
-                        lot: row.lot,
-                        serie: currentSerie,
-                        ville: currentVille,
-                        region: currentRegion,
-                        latitude: currentLat,
-                        longitude: currentLon,
-                        statut: scanStatutUnitaire,
-                        motif_alerte: null,
-                        created_at: currentScanTime
-                    }]);
-
+                await supabase.from("produits_unitaires_scans").insert([{
+                    lot: row.lot,
+                    serie: currentSerie,
+                    ville: currentVille,
+                    region: currentRegion,
+                    latitude: currentLat,
+                    longitude: currentLon,
+                    statut: scanStatutUnitaire,
+                    motif_alerte: null,
+                    created_at: currentScanTime
+                }]);
             } catch (err) {
                 console.warn("[SERIE LOG ERROR]", err.message);
             }
 
-            // DÉTECTION DES DOUBLONS ET FRAUDES GÉOGRAPHIQUES
             if (!isUniversalSerie) {
-                const {
-                    data: previousScans,
-                    error: scanErr
-                } = await supabase
+                const { data: previousScans, error: scanErr } = await supabase
                     .from("produits_unitaires_scans")
                     .select("*")
                     .eq("lot", row.lot)
@@ -1551,202 +1336,109 @@ app.post(
 
                 if (!scanErr && previousScans && previousScans.length > 1) {
                     const lastScan = previousScans[1];
-
                     const lastScanTime = new Date(lastScan.created_at);
-
-                    const timeDiffHours =
-                        (currentScanTime.getTime() - lastScanTime.getTime()) /
-                        (1000 * 60 * 60);
+                    const timeDiffHours = (currentScanTime.getTime() - lastScanTime.getTime()) / (1000 * 60 * 60);
 
                     let distanceKm = 0;
-
-                    if (
-                        currentLat &&
-                        currentLon &&
-                        lastScan.latitude &&
-                        lastScan.longitude
-                    ) {
-                        distanceKm = calculateGeographicDistanceKm(
-                            currentLat,
-                            currentLon,
-                            lastScan.latitude,
-                            lastScan.longitude
-                        );
+                    if (currentLat && currentLon && lastScan.latitude && lastScan.longitude) {
+                        distanceKm = calculateGeographicDistanceKm(currentLat, currentLon, lastScan.latitude, lastScan.longitude);
                     }
 
                     if (distanceKm > 150 && timeDiffHours < 2) {
                         scanStatutUnitaire = "ALERTE_TRICHE_GEOGRAPHIQUE";
                         warningFlag = "SUSPICION_DOUBLON_IMPOSSIBLE";
-
-                        motifAlerte =
-                            `Scan précédent à ${lastScan.ville || 'Inconnue'} il y a ${timeDiffHours.toFixed(1)}h (${distanceKm.toFixed(0)} km de distance). Trajet physiquement impossible.`;
-
+                        motifAlerte = `Scan précédent à ${lastScan.ville || 'Inconnue'} il y a ${timeDiffHours.toFixed(1)}h (${distanceKm.toFixed(0)} km de distance). Trajet physiquement impossible.`;
                     } else if (timeDiffHours < 0.05) {
                         scanStatutUnitaire = "DOUBLON_RAPIDE";
                         warningFlag = "SCAN_MULTIPLE_RAPIDE";
-
-                        motifAlerte =
-                            `Produit déjà scanné il y a moins de 3 minutes à ${lastScan.ville || 'Inconnue'}.`;
+                        motifAlerte = `Produit déjà scanné il y a moins de 3 minutes à ${lastScan.ville || 'Inconnue'}.`;
                     }
                 }
             }
 
-            // MISE À JOUR DU COMPTEUR DE SCANS
             const currentScanCount = Number(row.scan_count || 0) + 1;
 
-            const updatePayload = {
-                scan_count: currentScanCount,
-                last_scan_location: currentVille,
-                location_method: locationMethod,
+            const updatePayload = { 
+                scan_count: currentScanCount, 
+                last_scan_location: currentVille, 
+                location_method: locationMethod, 
                 last_scanned_at: currentScanTime,
                 latitude: currentLat,
                 longitude: currentLon,
                 ville: currentVille,
                 region: currentRegion
             };
+            if (deviceMetadata) { updatePayload.device_metadata = deviceMetadata; }
+            if (warningFlag) { updatePayload.statut = "ALERTE"; }
 
-            if (deviceMetadata) {
-                updatePayload.device_metadata = deviceMetadata;
-            }
-
-            if (warningFlag) {
-                updatePayload.statut = "ALERTE";
-            }
-
-            supabase
-                .from("produits_certifies")
-                .update(updatePayload)
-                .eq("lot", row.lot)
-                .then(({ error }) => {
-                    if (error) {
-                        console.warn("Mise à jour scan échouée:", error.message);
-                    }
-                })
-                .catch(error => {
-                    console.warn("Exception mise à jour scan:", error.message);
-                });
+            supabase.from("produits_certifies").update(updatePayload).eq("lot", row.lot)
+                .then(({ error }) => { if (error) { console.warn("Mise à jour scan échouée:", error.message); } })
+                .catch(error => { console.warn("Exception mise à jour scan:", error.message); });
 
             const score = `${(matchConfidence * 100).toFixed(1)}%`;
 
-            // RÉPONSE TRANSMISE À L'APK
             const responsePayload = {
                 status: warningFlag ? "ALERTE" : "AUTHENTIQUE",
-
-                verified: true,
-                confidence: matchConfidence,
-                score,
+                verified: true, 
+                confidence: matchConfidence, 
+                score, 
                 confidenceScore: matchConfidence,
-
-                security_alert: warningFlag || row.security_alert,
+                security_alert: warningFlag || row.security_alert, 
                 securityAlert: warningFlag || row.security_alert,
                 motif_alerte: motifAlerte,
-
-                lot: row.lot,
-                numero_lot: row.lot,
-                batch: row.lot,
-
+                lot: cleanCode,
+                numero_lot: cleanCode,
+                batch: cleanCode,
+                database_lot: row.lot || null,
                 serie: currentSerie,
-
-                nom_produit: row.nom_produit || "Produit Certifié Conforme",
+                nom_produit: row.nom_produit || "Produit Certifié Conforme", 
                 nomProduit: row.nom_produit || "Produit Certifié Conforme",
-
-                nom_producteur: row.nom_producteur || "Producteur Agréé",
+                nom_producteur: row.nom_producteur || "Producteur Agréé", 
                 nomProducteur: row.nom_producteur || "Producteur Agréé",
-
-                pays: row.pays_origine || "Cameroun",
+                pays: row.pays_origine || "Cameroun", 
                 pays_origine: row.pays_origine || "Cameroun",
-
-                quantite: row.quantite,
-
-                type_emballage: row.type_emballage,
+                quantite: row.quantite, 
+                type_emballage: row.type_emballage, 
                 typeEmballage: row.type_emballage,
-
-                composition: row.composition || null,
+                composition: row.composition || null, 
                 packaging: row.type_emballage || null,
-
-                visualUrl: row.visuel_produit_url || null,
-                visuel_produit_url: row.visuel_produit_url || null,
+                visualUrl: row.visuel_produit_url || null, 
+                visuel_produit_url: row.visuel_produit_url || null, 
                 visualProduitUrl: row.visuel_produit_url || null,
-
-                certificat_pdf_url: row.certificat_pdf_url || null,
+                certificat_pdf_url: row.certificat_pdf_url || null, 
                 certificatPdfUrl: row.certificat_pdf_url || null,
-
-                scan_count: currentScanCount,
+                scan_count: currentScanCount, 
                 scanCount: currentScanCount,
-
-                certified_at: formatDateOnly(
-                    row.created_at || row.date_certificat_conformite
-                ),
-
-                certDate: formatDateOnly(
-                    row.date_certificat_conformite || row.created_at
-                ),
-
-                prodDate: formatDateOnly(row.date_fabrication),
+                certified_at: formatDateOnly(row.created_at || row.date_certificat_conformite), 
+                certDate: formatDateOnly(row.date_certificat_conformite || row.created_at),
+                prodDate: formatDateOnly(row.date_fabrication), 
                 expDate: formatDateOnly(row.date_peremption),
-
-                norme: "ANOR NC-ISO",
-
-                processingTime: Date.now() - startTime,
+                norme: "ANOR NC-ISO", 
+                processingTime: Date.now() - startTime, 
                 processingTimeMs: Date.now() - startTime,
-
-                engineVersion: SERVER_VERSION,
-                visualVersion: VISUAL_VERSION,
-                verificationMode,
+                engineVersion: SERVER_VERSION, 
+                visualVersion: VISUAL_VERSION, 
+                verificationMode, 
                 serverTimestamp: Date.now()
             };
 
-            if (imageCacheKey) {
-                scanCache.set(imageCacheKey, {
-                    ...responsePayload,
-                    time: Date.now()
-                });
-            }
-
             return apiSuccess(res, responsePayload);
-
         } catch (error) {
             console.error("Erreur vérification:", error);
-
-            return apiError(
-                res,
-                500,
-                "VERIFY_ERROR",
-                isProduction
-                    ? "Erreur pendant la vérification."
-                    : error.message
-            );
+            return apiError(res, 500, "VERIFY_ERROR", isProduction ? "Erreur pendant la vérification." : error.message);
         }
     }
 );
 
-// ROUTE 404 GÉNÉRALE
 app.use((req, res) => {
-    return apiError(
-        res,
-        404,
-        "NOT_FOUND",
-        "La ressource demandée n'existe pas."
-    );
+    return apiError(res, 404, "NOT_FOUND", "La ressource demandée n'existe pas.");
 });
 
-// GESTIONNAIRE GLOBAL DES ERREURS
 app.use((err, req, res, next) => {
     console.error("[GLOBAL SERVER ERROR]", err);
-
-    return apiError(
-        res,
-        500,
-        "INTERNAL_SERVER_ERROR",
-        isProduction
-            ? "Une erreur interne du serveur est survenue."
-            : err.message
-    );
+    return apiError(res, 500, "INTERNAL_SERVER_ERROR", isProduction ? "Une erreur interne du serveur est survenue." : err.message);
 });
 
-// DÉMARRAGE DU SERVEUR
 app.listen(PORT, () => {
-    console.log(
-        `[ANOR CORE] Serveur démarré avec succès sur le port ${PORT} (v${SERVER_VERSION})`
-    );
+    console.log(`[ANOR CORE] Serveur démarré avec succès sur le port ${PORT} (v${SERVER_VERSION})`);
 });
