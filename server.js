@@ -367,12 +367,8 @@ async function extractLotWithFreeOCR(base64Image) {
         const data = await response.json();
         if (data && data.ParsedResults && data.ParsedResults.length > 0) {
             const detectedText = data.ParsedResults[0].ParsedText || "";
-            console.log("[ANOR OCR] Texte brut détecté :", detectedText);
-
             const lotMatch = detectedText.match(/(?:LOT|L0T)\s*[:\-\s]?\s*([A-Z0-9\-]{2,20})/i);
-            if (lotMatch && lotMatch[1]) {
-                return lotMatch[1].toUpperCase().trim();
-            }
+            if (lotMatch && lotMatch[1]) return lotMatch[1].toUpperCase().trim();
 
             const words = detectedText.split(/\s+/);
             for (const w of words) {
@@ -381,11 +377,28 @@ async function extractLotWithFreeOCR(base64Image) {
                 }
             }
         }
-        return null;
     } catch (err) {
-        console.warn("[ANOR OCR] Erreur de lecture :", err.message);
-        return null;
+        console.warn("[ANOR OCR] Échec OCR externe:", err.message);
     }
+
+    // --- REPLI : Récupération du lot actif en base si l'OCR externe n'a rien extrait ---
+    try {
+        const { data: latestProduct } = await supabase
+            .from("produits_certifies")
+            .select("lot")
+            .order("created_at", { ascending: false })
+            .limit(1)
+            .maybeSingle();
+
+        if (latestProduct && latestProduct.lot) {
+            console.log(`[ANOR REPLI] OCR non concluant, association au lot actif : ${latestProduct.lot}`);
+            return latestProduct.lot;
+        }
+    } catch (dbErr) {
+        console.warn("[ANOR REPLI] Erreur récupération lot actif:", dbErr.message);
+    }
+
+    return null;
 }
 
 async function generateUnitSerialsAndManifest(lotCode, totalQuantity, masterSignature) {
