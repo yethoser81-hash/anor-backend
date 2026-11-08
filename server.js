@@ -75,19 +75,6 @@ function sha256Hex(value) {
         .digest("hex");
 }
 
-function calculateHammingDistance(str1, str2) {
-    if (typeof str1 !== "string" || typeof str2 !== "string" || str1.length !== str2.length) {
-        return Infinity;
-    }
-    let distance = 0;
-    for (let i = 0; i < str1.length; i++) {
-        if (str1[i] !== str2[i]) {
-            distance++;
-        }
-    }
-    return distance;
-}
-
 function calculateGeographicDistanceKm(lat1, lon1, lat2, lon2) {
     if (!lat1 || !lon1 || !lat2 || !lon2) return 0;
     const toRad = (val) => (val * Math.PI) / 180;
@@ -344,39 +331,6 @@ const upload = multer({
     }
 });
 
-async function extractLotWithFreeOCR(base64Image) {
-    try {
-        if (!base64Image || typeof base64Image !== "string") return null;
-
-        const formData = new URLSearchParams();
-        formData.append("base64Image", base64Image.startsWith("data:") ? base64Image : `data:image/jpeg;base64,${base64Image}`);
-        formData.append("language", "fre");
-        formData.append("isOverlayRequired", "false");
-        formData.append("OCREngine", "2");
-
-        const response = await fetch("https://api.ocr.space/parse/image", {
-            method: "POST",
-            headers: {
-                "apikey": process.env.OCR_SPACE_API_KEY || "helloworld",
-                "Content-Type": "application/x-www-form-urlencoded"
-            },
-            body: formData
-        });
-
-        const data = await response.json();
-        if (data && data.ParsedResults && data.ParsedResults.length > 0) {
-            const detectedText = data.ParsedResults[0].ParsedText || "";
-            const lotMatch = detectedText.match(/LOT\s*[:\-]?\s*([A-Z0-9\-]{2,15})/i);
-            if (lotMatch && lotMatch[1]) {
-                return lotMatch[1].toUpperCase().trim();
-            }
-        }
-        return null;
-    } catch (err) {
-        return null;
-    }
-}
-
 async function generateUnitSerialsAndManifest(lotCode, totalQuantity, masterSignature) {
     const batchSize = 5000;
     let csvContent = "Index,Numero_De_Serie,Hachage_Securise\n";
@@ -441,7 +395,6 @@ app.get("/health", async (req, res) => {
         status: "ONLINE",
         engine: `ANOR Core ${SERVER_VERSION}`,
         database,
-        ocrEngine: "OCR.space (Gratuit)",
         geminiAnalytics: ai ? "CONFIGURED" : "NOT_CONFIGURED",
         uptime: process.uptime(),
         memory: process.memoryUsage().rss,
@@ -1166,7 +1119,7 @@ Système Souverain de Certification - ANOR Engine ${SERVER_VERSION}
 );
 
 /* =========================================================================
-   ROUTE DE VÉRIFICATION DES SCEAUX (VERROUILLAGE TOTAL - ZERO FAUX POSITIF)
+   ROUTE DE VÉRIFICATION DES SCEAUX (VERROUILLAGE TOTAL - STRICT LOT MATCH)
    ========================================================================= */
 app.post(
     "/api/seals/verify",
@@ -1184,6 +1137,7 @@ app.post(
                 deviceMetadata
             } = req.body;
 
+            // STRICT : On récupère uniquement le lot ou numero_lot envoyé par le client (sans fallback sur un autre lot)
             let targetLot = lot || numero_lot;
 
             const geoResolved = resolveScanCoordinates(req.body);
@@ -1204,16 +1158,10 @@ app.post(
 
             const normalizedRequestBits = normalizeVisualBits(requestVisualBits || scannedMatrix?.bits || scannedMatrix?.visualBits);
 
-            // 1. Extraction du lot via OCR si l'image redressée est fournie sans texte de lot
-            let detectedLot = targetLot;
-            if ((!detectedLot || detectedLot === "N/A" || String(detectedLot).trim() === "") && scannedMatrix && typeof scannedMatrix === "string") {
-                detectedLot = await extractLotWithFreeOCR(scannedMatrix);
-            }
-
-            // EXIGENCE ABSOLUE : Si aucun numéro de lot ni séquence de bits valide n'est présent, REJET IMMÉDIAT.
-            if ((!detectedLot || detectedLot === "N/A" || String(detectedLot).trim() === "") && !normalizedRequestBits) {
-                securityLog(req, "REJECTION_EMPTY_PAYLOAD", { ip: req.ip });
-                return apiError(res, 404, "UNKNOWN_SEAL", "Produit contrefait ou sceau non reconnu par l'ANOR.", {
+            // EXIGENCE ABSOLUE : Si aucun numéro de lot n'est fourni dans la requête, REJET IMMÉDIAT.
+            if (!targetLot || targetLot === "N/A" || String(targetLot).trim() === "") {
+                securityLog(req, "REJECTION_EMPTY_LOT", { ip: req.ip });
+                return apiError(res, 404, "UNKNOWN_SEAL", "Numéro de lot manquant ou sceau non reconnu par l'ANOR.", {
                     status: "CONTREFAÇON_REJETEE",
                     verified: false,
                     processingTime: Date.now() - startTime,
@@ -1222,32 +1170,30 @@ app.post(
             }
 
             let row = null;
-            let verificationMode = "STRICT_MATCH";
+            let verificationMode = "STRICT_LOT_MATCH";
             let matchConfidence = 1.0;
 
-            // 2. RECHERCHE STRICTE SUR LE NUMÉRO DE LOT REÇU (EQUAL MATCH UNIQUEMENT)
-            if (detectedLot && detectedLot !== "N/A" && String(detectedLot).trim() !== "") {
-                const rawLot = String(detectedLot).trim();
-                const cleanCode = rawLot.replace(/^LOT\s*[:\-]*/i, "").trim();
+            // RECHERCHE STRICTE SUR LE NUMÉRO DE LOT REÇU (EQUAL MATCH UNIQUEMENT)
+            const rawLot = String(targetLot).trim();
+            const cleanCode = rawLot.replace(/^LOT\s*[:\-]*/i, "").trim();
 
-                let query = supabase
-                    .from("produits_certifies")
-                    .select("*")
-                    .or(`lot.eq.${cleanCode},certificate_code.eq.${cleanCode}`);
+            let query = supabase
+                .from("produits_certifies")
+                .select("*")
+                .or(`lot.eq.${cleanCode},certificate_code.eq.${cleanCode}`);
 
-                if (requestSerie) {
-                    query = query.eq("serie", String(requestSerie).trim());
-                }
-
-                const { data, error } = await query.limit(1);
-
-                if (!error && data && data.length > 0) { 
-                    row = data[0]; 
-                    matchConfidence = 1.0;
-                }
+            if (requestSerie) {
+                query = query.eq("serie", String(requestSerie).trim());
             }
 
-            // 3. RECHERCHE STRICTE PAR BITS VISUELS (SI PAS TROUVÉ PAR LOT TEXTUEL)
+            const { data, error } = await query.limit(1);
+
+            if (!error && data && data.length > 0) { 
+                row = data[0]; 
+                matchConfidence = 1.0;
+            }
+
+            // VÉRIFICATION SECONDAIRE PAR BITS VISUELS UNIQUEMENT SI LE LOT TEXTUEL N'A PAS ÉTÉ TROUVÉ
             if (!row && normalizedRequestBits) {
                 const { data: glyphMatch } = await supabase
                     .from("produits_certifies")
@@ -1262,9 +1208,9 @@ app.post(
                 }
             }
 
-            // 4. VERROUILLAGE ABSOLU : AUCUNE INVENTION, AUCUN FALLBACK SUR LE DERNIER ENREGISTREMENT
+            // VERROUILLAGE ABSOLU : AUCUNE INVENTION, AUCUN RETOUR DU DERNIER ENREGISTREMENT PAR DÉFAUT
             if (!row) {
-                securityLog(req, "COUNTERFEIT_OR_UNKNOWN_SEAL", { lot: targetLot || detectedLot || "N/A" });
+                securityLog(req, "COUNTERFEIT_OR_UNKNOWN_SEAL", { lot: targetLot });
                 return apiError(res, 404, "UNKNOWN_SEAL", "Produit contrefait ou sceau non enregistré dans le registre officiel de l'ANOR.", {
                     status: "CONTREFAÇON_REJETEE",
                     verified: false,
@@ -1273,7 +1219,7 @@ app.post(
                 });
             }
 
-            // 5. VALIDATION FINALE ET MISE À JOUR DU COMPTEUR DE SCAN DU PRODUIT RECONNU
+            // MISE À JOUR DU COMPTEUR DE SCAN DU PRODUIT RECONNU
             const currentSerie = requestSerie ? String(requestSerie).trim() : (row.serie || "000000");
             const currentScanTime = new Date();
             const currentScanCount = Number(row.scan_count || 0) + 1;
