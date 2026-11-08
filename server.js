@@ -1151,17 +1151,63 @@ app.post(
                     row = data[0];
                 }
             } 
-            // 2. SI SCAN AUTONOME DE LA CAMÉRA (SANS SAISIE DE TEXTE)
+            // 2. SI SCAN AUTONOME DE LA CAMÉRA (EXTRACTION OCR DU LOT DEPUIS L'IMAGE)
             else if (scannedMatrix) {
-                // Recherche intelligente parmi les derniers produits enregistrés ou test de correspondance globale
-                const { data, error } = await supabase
-                    .from("produits_certifies")
-                    .select("*")
-                    .order("created_at", { ascending: false })
-                    .limit(1);
+                let extractedLot = null;
+                
+                try {
+                    if (ai && scannedMatrix.startsWith("data:image")) {
+                        const matches = scannedMatrix.match(/^data:(.+);base64,(.+)$/);
+                        if (matches) {
+                            const mimeType = matches[1];
+                            const base64Data = matches[2];
+                            
+                            const visionResp = await ai.models.generateContent({
+                                model: "models/gemini-3.8-flash",
+                                contents: [
+                                    {
+                                        inlineData: {
+                                            data: base64Data,
+                                            mimeType: mimeType
+                                        }
+                                    },
+                                    "Regarde cette image de sceau ANOR. Extrais exactement le numéro de lot affiché sur l'image (par exemple 'P78 540 120' ou le texte situé après 'LOT :'). Réponds UNIQUEMENT par le numéro de lot brut, sans aucune phrase ni explication."
+                                ]
+                            });
+                            
+                            if (visionResp && visionResp.text) {
+                                extractedLot = visionResp.text.trim().replace(/^LOT\s*[:\-]*/i, "").trim();
+                            }
+                        }
+                    }
+                } catch (ocrErr) {
+                    console.warn("[OCR VISION ERROR]", ocrErr.message);
+                }
 
-                if (!error && data && data.length > 0) {
-                    row = data[0]; // Validation directe du produit ciblé par le scan autonome
+                if (extractedLot) {
+                    const rawLot = extractedLot;
+                    const cleanCode = rawLot.replace(/^LOT\s*[:\-]*/i, "").trim();
+
+                    const { data, error } = await supabase
+                        .from("produits_certifies")
+                        .select("*")
+                        .or(`lot.eq.${rawLot},lot.eq.${cleanCode},certificate_code.eq.${rawLot},certificate_code.eq.${cleanCode}`)
+                        .limit(1);
+
+                    if (!error && data && data.length > 0) {
+                        row = data[0];
+                    }
+                }
+
+                // Si l'OCR n'a pas trouvé ou que le lot n'existe pas dans la base
+                if (!row) {
+                    securityLog(req, "REJECTED_UNKNOWN_SCANNED_SEAL", { extractedLot });
+                    return apiError(res, 404, "UNKNOWN_SEAL", "Sceau non reconnu ou illisible par le scanner. Le lot extrait ne correspond à aucun produit certifié.", {
+                        status: "CONTREFAÇON_REJETEE",
+                        verified: false,
+                        processingTime: Date.now() - startTime,
+                        engineVersion: SERVER_VERSION
+                    });
                 }
             }
 
