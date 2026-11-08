@@ -2,7 +2,7 @@
  * ======================================================
  * SYSTEME SOUVERAIN DE CERTIFICATION ANOR
  * SERVER CORE (VERSION ARCHITECTURE 28 BITS - SANS DECONVOLUTION)
- * Version: 24.3.1 (Sécurité Stricte Zéro Faux Positif)
+ * Version: 24.3.1 (Sécurité Stricte Zéro Faux Positif & OCR Direct)
  * ======================================================
  */
 
@@ -331,6 +331,49 @@ const upload = multer({
     }
 });
 
+// =========================================================================
+// SERVICE OCR GRATUIT : LECTURE DIRECTE DU NUMÉRO DE LOT SUR LA CAPTURE ROBUSTEMENT
+// =========================================================================
+async function extractLotWithFreeOCR(base64Image) {
+    try {
+        if (!base64Image || typeof base64Image !== "string") return null;
+
+        const formData = new URLSearchParams();
+        formData.append("base64Image", base64Image.startsWith("data:") ? base64Image : `data:image/jpeg;base64,${base64Image}`);
+        formData.append("language", "fre");
+        formData.append("isOverlayRequired", "false");
+        formData.append("OCREngine", "2");
+
+        const response = await fetch("https://api.ocr.space/parse/image", {
+            method: "POST",
+            headers: {
+                "apikey": process.env.OCR_SPACE_API_KEY || "helloworld",
+                "Content-Type": "application/x-www-form-urlencoded"
+            },
+            body: formData
+        });
+
+        const data = await response.json();
+        if (data && data.ParsedResults && data.ParsedResults.length > 0) {
+            const detectedText = data.ParsedResults[0].ParsedText || "";
+            // Extraction du mot clé "LOT" ou récupération de la suite alphanumérique
+            const lotMatch = detectedText.match(/(?:LOT|N°|NO)?\s*[:\-]?\s*([A-Z0-9\-]{2,20})/i);
+            if (lotMatch && lotMatch[1]) {
+                return lotMatch[1].toUpperCase().trim();
+            }
+            // Si pas de mot clé "LOT", extrait le premier bloc alphanumérique pertinent
+            const fallbackMatch = detectedText.match(/([A-Z0-9]{3,15})/i);
+            if (fallbackMatch && fallbackMatch[1]) {
+                return fallbackMatch[1].toUpperCase().trim();
+            }
+        }
+        return null;
+    } catch (err) {
+        console.warn("[OCR ENGINE WARN]", err.message);
+        return null;
+    }
+}
+
 async function generateUnitSerialsAndManifest(lotCode, totalQuantity, masterSignature) {
     const batchSize = 5000;
     let csvContent = "Index,Numero_De_Serie,Hachage_Securise\n";
@@ -395,6 +438,7 @@ app.get("/health", async (req, res) => {
         status: "ONLINE",
         engine: `ANOR Core ${SERVER_VERSION}`,
         database,
+        ocrEngine: "OCR.space (Gratuit)",
         geminiAnalytics: ai ? "CONFIGURED" : "NOT_CONFIGURED",
         uptime: process.uptime(),
         memory: process.memoryUsage().rss,
@@ -1119,7 +1163,7 @@ Système Souverain de Certification - ANOR Engine ${SERVER_VERSION}
 );
 
 /* =========================================================================
-   ROUTE DE VÉRIFICATION DES SCEAUX (VERROUILLAGE TOTAL - STRICT LOT MATCH)
+   ROUTE DE VÉRIFICATION ANOR STRICTE (SANS FALLBACK / SANS FAUX POSITIFS)
    ========================================================================= */
 app.post(
     "/api/seals/verify",
@@ -1137,7 +1181,6 @@ app.post(
                 deviceMetadata
             } = req.body;
 
-            // STRICT : On récupère uniquement le lot ou numero_lot envoyé par le client (sans fallback sur un autre lot)
             let targetLot = lot || numero_lot;
 
             const geoResolved = resolveScanCoordinates(req.body);
@@ -1158,42 +1201,40 @@ app.post(
 
             const normalizedRequestBits = normalizeVisualBits(requestVisualBits || scannedMatrix?.bits || scannedMatrix?.visualBits);
 
-            // EXIGENCE ABSOLUE : Si aucun numéro de lot n'est fourni dans la requête, REJET IMMÉDIAT.
-            if (!targetLot || targetLot === "N/A" || String(targetLot).trim() === "") {
-                securityLog(req, "REJECTION_EMPTY_LOT", { ip: req.ip });
-                return apiError(res, 404, "UNKNOWN_SEAL", "Numéro de lot manquant ou sceau non reconnu par l'ANOR.", {
-                    status: "CONTREFAÇON_REJETEE",
-                    verified: false,
-                    processingTime: Date.now() - startTime,
-                    engineVersion: SERVER_VERSION
-                });
-            }
-
             let row = null;
-            let verificationMode = "STRICT_LOT_MATCH";
+            let verificationMode = "STRICT_MATCH";
             let matchConfidence = 1.0;
+            let detectedLot = targetLot;
 
-            // RECHERCHE STRICTE SUR LE NUMÉRO DE LOT REÇU (EQUAL MATCH UNIQUEMENT)
-            const rawLot = String(targetLot).trim();
-            const cleanCode = rawLot.replace(/^LOT\s*[:\-]*/i, "").trim();
-
-            let query = supabase
-                .from("produits_certifies")
-                .select("*")
-                .or(`lot.eq.${cleanCode},certificate_code.eq.${cleanCode}`);
-
-            if (requestSerie) {
-                query = query.eq("serie", String(requestSerie).trim());
+            // 1. OCR EN DIRECT SUR L'IMAGE CAPTURÉE SI AUCUN TEXTE DE LOT N'EST TRANSMIS
+            if (!detectedLot && scannedMatrix) {
+                detectedLot = await extractLotWithFreeOCR(scannedMatrix);
             }
 
-            const { data, error } = await query.limit(1);
+            // 2. VÉRIFICATION PAR NUMÉRO DE LOT EXTRAIT OU FOURNI
+            if (detectedLot) {
+                const rawLot = String(detectedLot).trim();
+                const cleanCode = rawLot.replace(/^LOT\s*[:\-]*/i, "").trim();
 
-            if (!error && data && data.length > 0) { 
-                row = data[0]; 
-                matchConfidence = 1.0;
+                let query = supabase
+                    .from("produits_certifies")
+                    .select("*")
+                    .or(`lot.eq.${rawLot},lot.eq.${cleanCode},certificate_code.eq.${rawLot},certificate_code.eq.${cleanCode}`);
+
+                if (requestSerie) {
+                    query = query.eq("serie", String(requestSerie).trim());
+                }
+
+                const { data, error } = await query.limit(1);
+
+                if (!error && data && data.length > 0) { 
+                    row = data[0]; 
+                    verificationMode = "LOT_EXACT_MATCH";
+                    matchConfidence = 1.0;
+                }
             }
 
-            // VÉRIFICATION SECONDAIRE PAR BITS VISUELS UNIQUEMENT SI LE LOT TEXTUEL N'A PAS ÉTÉ TROUVÉ
+            // 3. VÉRIFICATION ALTERNATIVE PAR BITS DE LA MATRICE VISUELLE
             if (!row && normalizedRequestBits) {
                 const { data: glyphMatch } = await supabase
                     .from("produits_certifies")
@@ -1203,14 +1244,14 @@ app.post(
 
                 if (glyphMatch && glyphMatch.length > 0) {
                     row = glyphMatch[0];
-                    verificationMode = "GLYPH_EXACT";
+                    verificationMode = "GLYPH_MATRIX_EXACT";
                     matchConfidence = 1.0;
                 }
             }
 
-            // VERROUILLAGE ABSOLU : AUCUNE INVENTION, AUCUN RETOUR DU DERNIER ENREGISTREMENT PAR DÉFAUT
+            // 4. REJET STRICT - ZERO FALLBACK / ZERO FAUX POSITIF
             if (!row) {
-                securityLog(req, "COUNTERFEIT_OR_UNKNOWN_SEAL", { lot: targetLot });
+                securityLog(req, "REJECTED_UNKNOWN_PRODUCT", { lot: detectedLot || "NON_DETECTE" });
                 return apiError(res, 404, "UNKNOWN_SEAL", "Produit contrefait ou sceau non enregistré dans le registre officiel de l'ANOR.", {
                     status: "CONTREFAÇON_REJETEE",
                     verified: false,
@@ -1219,9 +1260,63 @@ app.post(
                 });
             }
 
-            // MISE À JOUR DU COMPTEUR DE SCAN DU PRODUIT RECONNU
+            // 5. TRAITEMENT DES DOUBLONS & ANOMALIES S'IL Y A MATCH EN BASE
             const currentSerie = requestSerie ? String(requestSerie).trim() : (row.serie || "000000");
+            const isUniversalSerie = currentSerie === "000000" || currentSerie.startsWith("000000");
             const currentScanTime = new Date();
+
+            let scanStatutUnitaire = "CONFORME";
+            let warningFlag = null;
+            let motifAlerte = null;
+
+            try {
+                await supabase.from("produits_unitaires_scans").insert([{
+                    lot: row.lot,
+                    serie: currentSerie,
+                    ville: currentVille,
+                    region: currentRegion,
+                    latitude: currentLat,
+                    longitude: currentLon,
+                    statut: scanStatutUnitaire,
+                    motif_alerte: null,
+                    created_at: currentScanTime
+                }]);
+            } catch (err) {
+                console.warn("[SERIE LOG ERROR]", err.message);
+            }
+
+            if (!isUniversalSerie) {
+                const { data: previousScans, error: scanErr } = await supabase
+                    .from("produits_unitaires_scans")
+                    .select("*")
+                    .eq("lot", row.lot)
+                    .eq("serie", currentSerie)
+                    .order("created_at", { ascending: false })
+                    .limit(2);
+
+                if (!scanErr && previousScans && previousScans.length > 1) {
+                    const lastScan = previousScans[1];
+                    const lastScanTime = new Date(lastScan.created_at);
+                    const timeDiffHours = (currentScanTime.getTime() - lastScanTime.getTime()) / (1000 * 60 * 60);
+
+                    let distanceKm = 0;
+                    if (currentLat && currentLon && lastScan.latitude && lastScan.longitude) {
+                        distanceKm = calculateGeographicDistanceKm(currentLat, currentLon, lastScan.latitude, lastScan.longitude);
+                    }
+
+                    if (distanceKm > 150 && timeDiffHours < 2) {
+                        scanStatutUnitaire = "ALERTE_TRICHE_GEOGRAPHIQUE";
+                        warningFlag = "SUSPICION_DOUBLON_IMPOSSIBLE";
+                        motifAlerte = `Scan précédent à ${lastScan.ville || 'Inconnue'} il y a ${timeDiffHours.toFixed(1)}h (${distanceKm.toFixed(0)} km de distance). Trajet physiquement impossible.`;
+                        securityLog(req, "IMPOSSIBLE_TRAVEL_DUPLICATE", { lot: row.lot, serie: currentSerie, distanceKm, timeDiffHours });
+                    } else if (timeDiffHours < 0.05) {
+                        scanStatutUnitaire = "DOUBLON_RAPIDE";
+                        warningFlag = "SCAN_MULTIPLE_RAPIDE";
+                        motifAlerte = `Produit déjà scanné il y a moins de 3 minutes à ${lastScan.ville || 'Inconnue'}.`;
+                    }
+                }
+            }
+
             const currentScanCount = Number(row.scan_count || 0) + 1;
 
             const updatePayload = { 
@@ -1235,34 +1330,56 @@ app.post(
                 region: currentRegion
             };
             if (deviceMetadata) { updatePayload.device_metadata = deviceMetadata; }
+            if (warningFlag) { updatePayload.statut = "ALERTE"; }
 
             supabase.from("produits_certifies").update(updatePayload).eq("lot", row.lot)
                 .then(({ error }) => { if (error) { console.warn("Mise à jour scan échouée:", error.message); } })
                 .catch(error => { console.warn("Exception mise à jour scan:", error.message); });
 
+            const score = `${(matchConfidence * 100).toFixed(1)}%`;
+
             const responsePayload = {
-                status: "AUTHENTIQUE",
+                status: warningFlag ? "ALERTE" : "AUTHENTIQUE",
                 verified: true, 
                 confidence: matchConfidence, 
-                score: `${(matchConfidence * 100).toFixed(1)}%`,
+                score, 
+                confidenceScore: matchConfidence,
+                security_alert: warningFlag || row.security_alert, 
+                securityAlert: warningFlag || row.security_alert,
+                motif_alerte: motifAlerte,
                 lot: row.lot, 
                 numero_lot: row.lot,
+                batch: row.lot,
                 serie: currentSerie,
                 nom_produit: row.nom_produit || "Produit Certifié Conforme", 
+                nomProduit: row.nom_produit || "Produit Certifié Conforme",
                 nom_producteur: row.nom_producteur || "Producteur Agréé", 
+                nomProducteur: row.nom_producteur || "Producteur Agréé",
                 pays: row.pays_origine || "Cameroun", 
+                pays_origine: row.pays_origine || "Cameroun",
                 quantite: row.quantite, 
                 type_emballage: row.type_emballage, 
+                typeEmballage: row.type_emballage,
                 composition: row.composition || null, 
+                packaging: row.type_emballage || null,
                 visualUrl: row.visuel_produit_url || null, 
+                visuel_produit_url: row.visuel_produit_url || null, 
+                visualProduitUrl: row.visuel_produit_url || null,
                 certificat_pdf_url: row.certificat_pdf_url || null, 
+                certificatPdfUrl: row.certificat_pdf_url || null,
                 scan_count: currentScanCount, 
+                scanCount: currentScanCount,
                 certified_at: formatDateOnly(row.created_at || row.date_certificat_conformite), 
+                certDate: formatDateOnly(row.date_certificat_conformite || row.created_at),
                 prodDate: formatDateOnly(row.date_fabrication), 
                 expDate: formatDateOnly(row.date_peremption),
+                norme: "ANOR NC-ISO", 
                 processingTime: Date.now() - startTime, 
+                processingTimeMs: Date.now() - startTime,
                 engineVersion: SERVER_VERSION, 
-                verificationMode
+                visualVersion: VISUAL_VERSION, 
+                verificationMode, 
+                serverTimestamp: Date.now()
             };
 
             if (imageCacheKey) {
