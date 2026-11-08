@@ -1,8 +1,8 @@
 /**
  * ======================================================
  * SYSTEME SOUVERAIN DE CERTIFICATION ANOR
- * SERVER CORE (VERSION ARCHITECTURE 28 BITS - SYNC FRONT 7)
- * Version: 24.1.0 (Synchronisé avec index_7.html - Crop ciblé & OCR)
+ * SERVER CORE (VERSION PRIORITÉ ABSOLUE AU LOT)
+ * Version: 24.2.0 (Priorité Lot & OCR renforcé)
  * ======================================================
  */
 
@@ -43,9 +43,9 @@ setInterval(() => {
     }
 }, 60000);
 
-const SERVER_VERSION = "24.1.0";
+const SERVER_VERSION = "24.2.0";
 const VISUAL_VERSION = 2; 
-const VISUAL_BITS_LENGTH = 28; // Strictement 28 bits
+const VISUAL_BITS_LENGTH = 28;
 const isProduction = process.env.NODE_ENV === "production";
 const PORT = process.env.PORT || 10000;
 
@@ -344,7 +344,7 @@ const upload = multer({
     }
 });
 
-// --- LECTURE OPTIMISÉE DU CROP CIBLÉ (OCR.space) ---
+// --- LECTURE OCR AMÉLIORÉE (PRIORITÉ NUMÉRO DE LOT) ---
 async function extractLotWithFreeOCR(base64Image) {
     try {
         if (!base64Image || typeof base64Image !== "string") return null;
@@ -367,14 +367,25 @@ async function extractLotWithFreeOCR(base64Image) {
         const data = await response.json();
         if (data && data.ParsedResults && data.ParsedResults.length > 0) {
             const detectedText = data.ParsedResults[0].ParsedText || "";
-            // Recherche universelle de la mention LOT suivie d'un code
-            const lotMatch = detectedText.match(/LOT\s*[:\-]?\s*([A-Z0-9\-]{2,15})/i);
+            console.log("[ANOR OCR] Texte brut détecté :", detectedText);
+
+            // Recherche large et robuste de la mention LOT ou d'un identifiant de lot
+            const lotMatch = detectedText.match(/(?:LOT|L0T)\s*[:\-\s]?\s*([A-Z0-9\-]{2,20})/i);
             if (lotMatch && lotMatch[1]) {
                 return lotMatch[1].toUpperCase().trim();
+            }
+
+            // Fallback : recherche d'un pattern du type H54, 54P, etc. si le mot LOT est collé ou omis
+            const words = detectedText.split(/\s+/);
+            for (const w of words) {
+                if (/^[A-Z0-9\-]{3,12}$/.test(w) && !w.includes("ANOR") && !w.includes("CERTIFIED")) {
+                    return w.toUpperCase().trim();
+                }
             }
         }
         return null;
     } catch (err) {
+        console.warn("[ANOR OCR] Erreur de lecture :", err.message);
         return null;
     }
 }
@@ -442,7 +453,7 @@ app.get("/health", async (req, res) => {
         status: "ONLINE",
         engine: `ANOR Core ${SERVER_VERSION}`,
         database,
-        ocrEngine: "OCR.space (Optimisé Crop Ciblé)",
+        ocrEngine: "OCR.space (Priorité Absolue Lot)",
         geminiAnalytics: ai ? "CONFIGURED" : "NOT_CONFIGURED",
         uptime: process.uptime(),
         memory: process.memoryUsage().rss,
@@ -883,7 +894,7 @@ app.post("/api/security/audit", (req, res) => {
         console.log("[ANOR SECURITY AUDIT] Rapport reçu :", JSON.stringify(auditData));
         return apiSuccess(res, { 
             status: "AUDIT_RECEIVED", 
-            message: "Rapport de sécurité pris en compte par le noyau 24.1.0." 
+            message: "Rapport de sécurité pris en compte par le noyau 24.2.0." 
         });
     } catch (error) {
         console.error("[SECURITY AUDIT ERROR]", error.message);
@@ -1035,7 +1046,7 @@ SYSTEME SOUVERAIN DE CERTIFICATION - NOTICE OFFICIELLE DE LOT
    [5] GRAPHIC IMPRIM S.A.R.L. (Garoua / Maroua) - Agrément ANOR N° 005/NC
 
 4. AVIS JURIDIQUE ET RÉPRESSION DES FRAUDES :
-   - Le sceau numérique ANOR (Architecture 28 bits - Anneau Unique) est protégé por les lois de la République du Cameroun. Toute contrefaçon est passible de poursuites.
+   - Le sceau numérique ANOR est protégé par les lois de la République du Cameroun. Toute contrefaçon est passible de poursuites.
 
 Fait à Yaoundé, le ${formatDateOnly(new Date())}
 Système Souverain de Certification - ANOR Engine ${SERVER_VERSION}
@@ -1104,9 +1115,8 @@ app.post(
             }
 
             const normalizedRequestBits = normalizeVisualBits(requestVisualBits || scannedMatrix?.bits || scannedMatrix?.visualBits);
-            const requestSignature = typeof requestVisualSignature === "string" ? requestVisualSignature.trim() : (typeof scannedMatrix?.signature === "string" ? scannedMatrix.signature.trim() : (normalizedRequestBits ? `ANOR28:${normalizedRequestBits}` : null));
 
-            if (!targetLot && !scannedMatrix && !normalizedRequestBits && !requestSignature) {
+            if (!targetLot && !scannedMatrix && !normalizedRequestBits) {
                 return apiError(res, 400, "MISSING_SCAN", "Données de scan insuffisantes.");
             }
 
@@ -1115,8 +1125,38 @@ app.post(
             let matchConfidence = 1.0;
             let detectedLot = targetLot;
 
-            // 1. Priorité absolue à la correspondance exacte des 28 bits visuels
-            if (normalizedRequestBits) {
+            // =========================================================================
+            // 1. PRIORITÉ ABSOLUE : Extraction et vérification directe par le Numéro de Lot
+            // =========================================================================
+            if (!detectedLot && scannedMatrix && typeof scannedMatrix === "string" && scannedMatrix.startsWith("data:image")) {
+                detectedLot = await extractLotWithFreeOCR(scannedMatrix);
+                if (detectedLot) {
+                    verificationMode = "OCR_LOT_PRIORITY_EXTRACTED";
+                }
+            }
+
+            if (detectedLot) {
+                const rawLot = String(detectedLot).trim();
+                const cleanCode = rawLot.replace(/^(LOT|L0T)\s*[:\-]*/i, "").trim();
+
+                const { data, error } = await supabase
+                    .from("produits_certifies")
+                    .select("*")
+                    .or(`lot.eq.${rawLot},lot.eq.${cleanCode},certificate_code.eq.${rawLot},certificate_code.eq.${cleanCode}`)
+                    .limit(1);
+
+                if (!error && data && data.length > 0) { 
+                    row = data[0]; 
+                    verificationMode = "STRICT_LOT_EXACT_MATCH";
+                    matchConfidence = 1.0;
+                    console.log(`[ANOR VERIFY] Lot validé avec succès : ${row.lot}`);
+                }
+            }
+
+            // =========================================================================
+            // 2. SECONDAIRE : Recherche par 28 bits exacts si le lot n'a pas été trouvé par OCR
+            // =========================================================================
+            if (!row && normalizedRequestBits) {
                 const { data: exactMatch } = await supabase
                     .from("produits_certifies")
                     .select("*")
@@ -1130,34 +1170,9 @@ app.post(
                 }
             }
 
-            // 2. Si aucun match par les bits, extraction OCR rapide sur le crop ciblé ou recherche directe par lot
-            if (!row) {
-                if (!detectedLot && scannedMatrix && typeof scannedMatrix === "string" && scannedMatrix.startsWith("data:image")) {
-                    detectedLot = await extractLotWithFreeOCR(scannedMatrix);
-                    if (detectedLot) {
-                        verificationMode = "OCR_FREE_CROP_EXTRACTED";
-                    }
-                }
-
-                if (detectedLot) {
-                    const rawLot = String(detectedLot).trim();
-                    const cleanCode = rawLot.replace(/^LOT\s*[:\-]*/i, "").trim();
-
-                    const { data, error } = await supabase
-                        .from("produits_certifies")
-                        .select("*")
-                        .or(`lot.eq.${rawLot},lot.eq.${cleanCode},certificate_code.eq.${rawLot},certificate_code.eq.${cleanCode}`)
-                        .limit(1);
-
-                    if (!error && data && data.length > 0) { 
-                        row = data[0]; 
-                        verificationMode = "STRICT_LOT_EXACT_MATCH";
-                        matchConfidence = 1.0;
-                    }
-                }
-            }
-
-            // 3. Fallback par distance de Hamming si le scan visuel présente de légers parasites
+            // =========================================================================
+            // 3. SECOURS FINAL : Tolérance Hamming sur les 28 bits
+            // =========================================================================
             if (!row && normalizedRequestBits) {
                 verificationMode = "VISUAL_HAMMING_MATCH";
                 const { data: candidates, error } = await supabase.from("produits_certifies").select("*").limit(300);
@@ -1174,7 +1189,7 @@ app.post(
                         if (distance < bestDistance) { bestDistance = distance; bestMatch = candidate; }
                     }
 
-                    if (bestMatch && bestDistance <= 4) {
+                    if (bestMatch && bestDistance <= 6) { // Tolérance élargie à 6 bits
                         row = bestMatch;
                         matchConfidence = Number((1 - bestDistance / VISUAL_BITS_LENGTH).toFixed(3));
                         verificationMode = bestDistance === 0 ? "VISUAL_BITS_EXACT" : "VISUAL_HAMMING_TOLERANCE";
