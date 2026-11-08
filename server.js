@@ -1,8 +1,8 @@
 /**
  * ======================================================
  * SYSTEME SOUVERAIN DE CERTIFICATION ANOR
- * SERVER CORE (VERSION PRIORITÉ ABSOLUE AU LOT)
- * Version: 24.2.0 (Priorité Lot & OCR renforcé)
+ * SERVER CORE (VERSION PRIORITÉ ABSOLUE AU NUMÉRO DE LOT)
+ * Version: 24.3.0 (Priorité 100% Lot)
  * ======================================================
  */
 
@@ -43,7 +43,7 @@ setInterval(() => {
     }
 }, 60000);
 
-const SERVER_VERSION = "24.2.0";
+const SERVER_VERSION = "24.3.0";
 const VISUAL_VERSION = 2; 
 const VISUAL_BITS_LENGTH = 28;
 const isProduction = process.env.NODE_ENV === "production";
@@ -344,7 +344,7 @@ const upload = multer({
     }
 });
 
-// --- LECTURE OCR AMÉLIORÉE (PRIORITÉ NUMÉRO DE LOT) ---
+// --- EXTRACTION OCR DU NUMÉRO DE LOT PAR LE SERVEUR ---
 async function extractLotWithFreeOCR(base64Image) {
     try {
         if (!base64Image || typeof base64Image !== "string") return null;
@@ -369,13 +369,11 @@ async function extractLotWithFreeOCR(base64Image) {
             const detectedText = data.ParsedResults[0].ParsedText || "";
             console.log("[ANOR OCR] Texte brut détecté :", detectedText);
 
-            // Recherche large et robuste de la mention LOT ou d'un identifiant de lot
             const lotMatch = detectedText.match(/(?:LOT|L0T)\s*[:\-\s]?\s*([A-Z0-9\-]{2,20})/i);
             if (lotMatch && lotMatch[1]) {
                 return lotMatch[1].toUpperCase().trim();
             }
 
-            // Fallback : recherche d'un pattern du type H54, 54P, etc. si le mot LOT est collé ou omis
             const words = detectedText.split(/\s+/);
             for (const w of words) {
                 if (/^[A-Z0-9\-]{3,12}$/.test(w) && !w.includes("ANOR") && !w.includes("CERTIFIED")) {
@@ -894,7 +892,7 @@ app.post("/api/security/audit", (req, res) => {
         console.log("[ANOR SECURITY AUDIT] Rapport reçu :", JSON.stringify(auditData));
         return apiSuccess(res, { 
             status: "AUDIT_RECEIVED", 
-            message: "Rapport de sécurité pris en compte par le noyau 24.2.0." 
+            message: "Rapport de sécurité pris en compte par le noyau 24.3.0." 
         });
     } catch (error) {
         console.error("[SECURITY AUDIT ERROR]", error.message);
@@ -1096,7 +1094,7 @@ app.post(
                 deviceMetadata
             } = req.body;
 
-            const targetLot = lot || numero_lot;
+            let targetLot = lot || numero_lot;
 
             const geoResolved = resolveScanCoordinates(req.body);
             const currentLat = geoResolved.latitude;
@@ -1114,29 +1112,30 @@ app.post(
                 }
             }
 
-            const normalizedRequestBits = normalizeVisualBits(requestVisualBits || scannedMatrix?.bits || scannedMatrix?.visualBits);
-
-            if (!targetLot && !scannedMatrix && !normalizedRequestBits) {
+            if (!targetLot && !scannedMatrix) {
                 return apiError(res, 400, "MISSING_SCAN", "Données de scan insuffisantes.");
             }
 
             let row = null;
             let verificationMode = "LOT";
             let matchConfidence = 1.0;
-            let detectedLot = targetLot;
 
             // =========================================================================
-            // 1. PRIORITÉ ABSOLUE : Extraction et vérification directe par le Numéro de Lot
+            // PRIORITÉ ABSOLUE N°1 : RECHERCHE DIRECTE PAR NUMÉRO DE LOT
             // =========================================================================
-            if (!detectedLot && scannedMatrix && typeof scannedMatrix === "string" && scannedMatrix.startsWith("data:image")) {
-                detectedLot = await extractLotWithFreeOCR(scannedMatrix);
-                if (detectedLot) {
-                    verificationMode = "OCR_LOT_PRIORITY_EXTRACTED";
+            
+            // Étape A : Si l'image est fournie mais pas de lot textuel, on extrait le numéro de lot via l'OCR serveur
+            if (!targetLot && scannedMatrix && typeof scannedMatrix === "string" && scannedMatrix.startsWith("data:image")) {
+                const extractedTextLot = await extractLotWithFreeOCR(scannedMatrix);
+                if (extractedTextLot) {
+                    targetLot = extractedTextLot;
+                    verificationMode = "OCR_LOT_EXTRACTED";
                 }
             }
 
-            if (detectedLot) {
-                const rawLot = String(detectedLot).trim();
+            // Étape B : Recherche souveraine dans Supabase à partir du numéro de lot obtenu
+            if (targetLot) {
+                const rawLot = String(targetLot).trim();
                 const cleanCode = rawLot.replace(/^(LOT|L0T)\s*[:\-]*/i, "").trim();
 
                 const { data, error } = await supabase
@@ -1149,32 +1148,17 @@ app.post(
                     row = data[0]; 
                     verificationMode = "STRICT_LOT_EXACT_MATCH";
                     matchConfidence = 1.0;
-                    console.log(`[ANOR VERIFY] Lot validé avec succès : ${row.lot}`);
+                    console.log(`[ANOR VERIFY] Lot validé avec succès par son numéro : ${row.lot}`);
                 }
             }
 
             // =========================================================================
-            // 2. SECONDAIRE : Recherche par 28 bits exacts si le lot n'a pas été trouvé par OCR
+            // PLAN DE SECOURS (UNIQUEMENT SI LE LOT N'A PAS PU ÊTRE TROUVÉ) : BITS VISUELS
             // =========================================================================
-            if (!row && normalizedRequestBits) {
-                const { data: exactMatch } = await supabase
-                    .from("produits_certifies")
-                    .select("*")
-                    .eq("visual_bits", normalizedRequestBits)
-                    .maybeSingle();
+            const normalizedRequestBits = normalizeVisualBits(requestVisualBits || scannedMatrix?.bits || scannedMatrix?.visualBits);
 
-                if (exactMatch) {
-                    row = exactMatch;
-                    verificationMode = "VISUAL_BITS_STRICT_EXACT";
-                    matchConfidence = 1.0;
-                }
-            }
-
-            // =========================================================================
-            // 3. SECOURS FINAL : Tolérance Hamming sur les 28 bits
-            // =========================================================================
             if (!row && normalizedRequestBits) {
-                verificationMode = "VISUAL_HAMMING_MATCH";
+                verificationMode = "VISUAL_HAMMING_FALLBACK";
                 const { data: candidates, error } = await supabase.from("produits_certifies").select("*").limit(300);
                 if (!error && Array.isArray(candidates)) {
                     let bestMatch = null;
@@ -1189,7 +1173,7 @@ app.post(
                         if (distance < bestDistance) { bestDistance = distance; bestMatch = candidate; }
                     }
 
-                    if (bestMatch && bestDistance <= 6) { // Tolérance élargie à 6 bits
+                    if (bestMatch && bestDistance <= 6) {
                         row = bestMatch;
                         matchConfidence = Number((1 - bestDistance / VISUAL_BITS_LENGTH).toFixed(3));
                         verificationMode = bestDistance === 0 ? "VISUAL_BITS_EXACT" : "VISUAL_HAMMING_TOLERANCE";
@@ -1198,8 +1182,8 @@ app.post(
             }
 
             if (!row) {
-                securityLog(req, "UNKNOWN_SEAL_ATTEMPT", { lot: targetLot || detectedLot || "N/A", verificationMode });
-                return apiError(res, 404, "UNKNOWN_SEAL", "Sceau inconnu ou non authentifié.", { status: "CONTREFAÇON_REJETEE", processingTime: Date.now() - startTime, engineVersion: SERVER_VERSION });
+                securityLog(req, "UNKNOWN_SEAL_ATTEMPT", { lot: targetLot || "N/A", verificationMode });
+                return apiError(res, 404, "UNKNOWN_SEAL", "Sceau ou numéro de lot non reconnu dans la base ANOR.", { status: "CONTREFAÇON_REJETEE", processingTime: Date.now() - startTime, engineVersion: SERVER_VERSION });
             }
 
             const currentSerie = requestSerie ? String(requestSerie).trim() : (row.serie || "000000");
