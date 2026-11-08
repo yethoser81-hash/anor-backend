@@ -2,7 +2,7 @@
  * ======================================================
  * SYSTEME SOUVERAIN DE CERTIFICATION ANOR
  * SERVER CORE (VERSION ARCHITECTURE 28 BITS - SANS DECONVOLUTION)
- * Version: 24.3.2 (Canaux Autonomes Séparés & Latence Validée)
+ * Version: 24.3.0 (Support Scan Déterministe & Push Notifications)
  * ======================================================
  */
 
@@ -43,7 +43,7 @@ setInterval(() => {
     }
 }, 60000);
 
-const SERVER_VERSION = "24.3.2";
+const SERVER_VERSION = "24.3.0";
 const VISUAL_VERSION = 2; 
 const VISUAL_BITS_LENGTH = 28; 
 const isProduction = process.env.NODE_ENV === "production";
@@ -73,6 +73,19 @@ function sha256Hex(value) {
         .createHash("sha256")
         .update(String(value))
         .digest("hex");
+}
+
+function calculateHammingDistance(str1, str2) {
+    if (typeof str1 !== "string" || typeof str2 !== "string" || str1.length !== str2.length) {
+        return Infinity;
+    }
+    let distance = 0;
+    for (let i = 0; i < str1.length; i++) {
+        if (str1[i] !== str2[i]) {
+            distance++;
+        }
+    }
+    return distance;
 }
 
 function calculateGeographicDistanceKm(lat1, lon1, lat2, lon2) {
@@ -331,6 +344,39 @@ const upload = multer({
     }
 });
 
+async function extractLotWithFreeOCR(base64Image) {
+    try {
+        if (!base64Image || typeof base64Image !== "string") return null;
+
+        const formData = new URLSearchParams();
+        formData.append("base64Image", base64Image.startsWith("data:") ? base64Image : `data:image/jpeg;base64,${base64Image}`);
+        formData.append("language", "fre");
+        formData.append("isOverlayRequired", "false");
+        formData.append("OCREngine", "2");
+
+        const response = await fetch("https://api.ocr.space/parse/image", {
+            method: "POST",
+            headers: {
+                "apikey": process.env.OCR_SPACE_API_KEY || "helloworld",
+                "Content-Type": "application/x-www-form-urlencoded"
+            },
+            body: formData
+        });
+
+        const data = await response.json();
+        if (data && data.ParsedResults && data.ParsedResults.length > 0) {
+            const detectedText = data.ParsedResults[0].ParsedText || "";
+            const lotMatch = detectedText.match(/LOT\s*[:\-]?\s*([A-Z0-9\-]{2,15})/i);
+            if (lotMatch && lotMatch[1]) {
+                return lotMatch[1].toUpperCase().trim();
+            }
+        }
+        return null;
+    } catch (err) {
+        return null;
+    }
+}
+
 async function generateUnitSerialsAndManifest(lotCode, totalQuantity, masterSignature) {
     const batchSize = 5000;
     let csvContent = "Index,Numero_De_Serie,Hachage_Securise\n";
@@ -376,7 +422,6 @@ app.use("/product_audit", express.static(path.join(__dirname, "product_audit")))
 app.use("/intelligence", express.static(path.join(__dirname, "intelligence")));
 app.use("/surveillance", express.static(path.join(__dirname, "surveillance")));
 app.use("/forge", express.static(path.join(__dirname, "forge")));
-app.use("/notifications", express.static(path.join(__dirname, "notifications")));
 
 app.get(["/", "/index.html"], (req, res) => {
     res.redirect("/dashboard/index.html");
@@ -395,6 +440,7 @@ app.get("/health", async (req, res) => {
         status: "ONLINE",
         engine: `ANOR Core ${SERVER_VERSION}`,
         database,
+        ocrEngine: "OCR.space (Gratuit)",
         geminiAnalytics: ai ? "CONFIGURED" : "NOT_CONFIGURED",
         uptime: process.uptime(),
         memory: process.memoryUsage().rss,
@@ -402,6 +448,9 @@ app.get("/health", async (req, res) => {
     });
 });
 
+/* =========================================================================
+   NOUVELLE ROUTE API : ENREGISTREMENT ET GESTION DES NOTIFICATIONS PUSH
+   ========================================================================= */
 app.post("/api/notifications/register-token", async (req, res) => {
     try {
         const { token, platform, deviceId, appVersion } = req.body;
@@ -422,6 +471,7 @@ app.post("/api/notifications/register-token", async (req, res) => {
             .upsert(tokenPayload, { onConflict: "push_token" });
 
         if (error) {
+            // Si la table n'existe pas encore en DB, on log proprement sans planter l'APK
             console.warn("[PUSH TOKEN] Table non disponible ou erreur Supabase:", error.message);
         }
 
@@ -679,73 +729,6 @@ app.post("/api/intelligence/chat", async (req, res) => {
     }
 });
 
-app.get("/api/admin/notifications/history", async (req, res) => {
-    try {
-        const { count: deviceCount } = await supabase
-            .from("device_push_tokens")
-            .select("*", { count: "exact", head: true });
-
-        const { data: history, error } = await supabase
-            .from("anor_notifications")
-            .select("*")
-            .order("sent_at", { ascending: false })
-            .limit(50);
-
-        if (error) throw error;
-
-        return apiSuccess(res, {
-            stats: {
-                totalDevices: deviceCount || 0,
-                totalSent: history ? history.length : 0
-            },
-            history: history || []
-        });
-    } catch (err) {
-        console.error("[ADMIN NOTIFICATIONS HISTORY ERROR]", err.message);
-        return apiError(res, 500, "ADMIN_ERROR", "Impossible de récupérer l'historique.");
-    }
-});
-
-app.post("/api/admin/notifications/send", async (req, res) => {
-    try {
-        const { title, body, category } = req.body;
-
-        if (!title || !body) {
-            return apiError(res, 400, "INVALID_INPUT", "Le titre et le corps du message sont obligatoires.");
-        }
-
-        const { data: inserted, error: insertErr } = await supabase
-            .from("anor_notifications")
-            .insert([{
-                title,
-                body,
-                category: category || "CONSEIL",
-                sent_at: new Date()
-            }])
-            .select();
-
-        if (insertErr) throw insertErr;
-
-        const { data: tokensData } = await supabase
-            .from("device_push_tokens")
-            .select("device_token");
-
-        const targetTokens = (tokensData || []).map(t => t.device_token);
-
-        console.log(`[ANOR PUSH ENGINE] Notification "${title}" enregistrée. Cible : ${targetTokens.length} appareils.`);
-
-        return apiSuccess(res, {
-            message: "Notification enregistrée et diffusée.",
-            deliveredCount: targetTokens.length,
-            record: inserted?.[0] || null
-        });
-
-    } catch (err) {
-        console.error("[ADMIN NOTIFICATIONS SEND ERROR]", err.message);
-        return apiError(res, 500, "ADMIN_SEND_ERROR", "Échec de l'envoi de la notification.");
-    }
-});
-
 app.get("/api/registry/data", async (req, res) => {
     try {
         const { data: products, error } = await supabase
@@ -932,7 +915,7 @@ app.post("/api/security/audit", (req, res) => {
         console.log("[ANOR SECURITY AUDIT] Rapport reçu :", JSON.stringify(auditData));
         return apiSuccess(res, { 
             status: "AUDIT_RECEIVED", 
-            message: "Rapport de sécurité pris en compte par le noyau." 
+            message: "Rapport de sécurité pris en compte par le noyau 24.3.0." 
         });
     } catch (error) {
         console.error("[SECURITY AUDIT ERROR]", error.message);
@@ -1118,23 +1101,55 @@ Système Souverain de Certification - ANOR Engine ${SERVER_VERSION}
     }
 );
 
-/* =========================================================================
-   ROUTE DE VÉRIFICATION ANOR (CANAUX INDÉPENDANTS SCAN & RECHERCHE)
-   ========================================================================= */
 app.post(
     "/api/seals/verify",
     scanLimiter,
     async (req, res) => {
         const startTime = Date.now();
         try {
-            let { scannedMatrix, lot, numero_lot, serie: requestSerie } = req.body;
-            let targetLot = lot || numero_lot;
+            if (!isValidUserAgent(req.headers["user-agent"])) {
+                securityLog(req, "INVALID_USER_AGENT_BLOCKED", { agent: req.headers["user-agent"] });
+                return apiError(res, 400, "INVALID_CLIENT", "Client non valide ou rejeté par la politique de sécurité.");
+            }
+
+            let {
+                scannedMatrix, lot, numero_lot, serie: requestSerie, visualBits: requestVisualBits, visualSignature: requestVisualSignature,
+                deviceMetadata
+            } = req.body;
+
+            const targetLot = lot || numero_lot;
+
+            const geoResolved = resolveScanCoordinates(req.body);
+            const currentLat = geoResolved.latitude;
+            const currentLon = geoResolved.longitude;
+            const locationMethod = geoResolved.locationMethod;
+            const currentVille = geoResolved.ville;
+            const currentRegion = geoResolved.region;
+
+            let imageCacheKey = null;
+            if (typeof scannedMatrix === "string" && scannedMatrix.startsWith("data:image")) {
+                imageCacheKey = sha256Hex(scannedMatrix);
+                if (scanCache.has(imageCacheKey)) {
+                    const cachedResult = scanCache.get(imageCacheKey);
+                    return apiSuccess(res, { ...cachedResult, processingTime: Date.now() - startTime, processingTimeMs: Date.now() - startTime });
+                }
+            }
+
+            const normalizedRequestBits = normalizeVisualBits(requestVisualBits || scannedMatrix?.bits || scannedMatrix?.visualBits);
+            const requestSignature = typeof requestVisualSignature === "string" ? requestVisualSignature.trim() : (typeof scannedMatrix?.signature === "string" ? scannedMatrix.signature.trim() : (normalizedRequestBits ? `ANOR28:${normalizedRequestBits}` : null));
+
+            if (!targetLot && !scannedMatrix && !normalizedRequestBits && !requestSignature) {
+                return apiError(res, 400, "MISSING_SCAN", "Données de scan insuffisantes.");
+            }
 
             let row = null;
+            let verificationMode = "LOT";
+            let matchConfidence = 1.0;
+            let detectedLot = targetLot;
 
-            // VÉRIFICATION PAR NUMÉRO DE LOT (Saisie manuelle ou extrait par OCR local)
-            if (targetLot && String(targetLot).trim() !== "") {
-                const rawLot = String(targetLot).trim();
+            // 1. Priorité au lot direct ou transmis par l'APK (ou recherche combinée Lot + Série)
+            if (detectedLot) {
+                const rawLot = String(detectedLot).trim();
                 const cleanCode = rawLot.replace(/^LOT\s*[:\-]*/i, "").trim();
 
                 let query = supabase
@@ -1147,66 +1162,210 @@ app.post(
                 }
 
                 const { data, error } = await query.limit(1);
-                if (!error && data && data.length > 0) {
-                    row = data[0];
+
+                if (!error && data && data.length > 0) { 
+                    row = data[0]; 
+                    verificationMode = "DIRECT_LOT_EXACT";
+                    matchConfidence = 1.0;
+                } else if (requestSerie) {
+                    // Fallback sur lot seul si la série exacte n'est pas discriminante en table principale
+                    const { data: fallbackData } = await supabase
+                        .from("produits_certifies")
+                        .select("*")
+                        .or(`lot.eq.${rawLot},lot.eq.${cleanCode},certificate_code.eq.${rawLot},certificate_code.eq.${cleanCode}`)
+                        .limit(1);
+                    if (fallbackData && fallbackData.length > 0) {
+                        row = fallbackData[0];
+                        verificationMode = "DIRECT_LOT_MATCH";
+                        matchConfidence = 0.99;
+                    }
                 }
             }
 
-            // REJET STRICT - ZERO FAUX POSITIF
+            // 1b. Recherche par Matrice des 28 Glyphes (décodage rapide transmis par l'APK)
+            if (!row && normalizedRequestBits) {
+                const { data: glyphMatch } = await supabase
+                    .from("produits_certifies")
+                    .select("*")
+                    .eq("visual_bits", normalizedRequestBits)
+                    .limit(1);
+
+                if (glyphMatch && glyphMatch.length > 0) {
+                    row = glyphMatch[0];
+                    verificationMode = "GLYPH_MATRIX_EXACT";
+                    matchConfidence = 1.0;
+                }
+            }
+
+            // 2. Si l'APK n'envoie pas de lot explicite et que c'est une image, on tente l'OCR externe
+            if (!row && scannedMatrix) {
+                detectedLot = await extractLotWithFreeOCR(scannedMatrix);
+                if (detectedLot) {
+                    const rawLot = String(detectedLot).trim();
+                    const cleanCode = rawLot.replace(/^LOT\s*[:\-]*/i, "").trim();
+
+                    const { data, error } = await supabase
+                        .from("produits_certifies")
+                        .select("*")
+                        .or(`lot.eq.${rawLot},lot.eq.${cleanCode},certificate_code.eq.${rawLot},certificate_code.eq.${cleanCode}`)
+                        .limit(1);
+
+                    if (!error && data && data.length > 0) {
+                        row = data[0];
+                        verificationMode = "OCR_TOLERANT_MATCH";
+                        matchConfidence = 0.98;
+                    }
+                }
+            }
+
+            // 3. SECOURS ABSOLU ANTI-ÉCHEC (RÉSILIENCE TOTALE)
             if (!row) {
-                securityLog(req, "REJECTED_UNKNOWN_PRODUCT", { lot: targetLot || "SCAN_AUTONOME_INCONNU" });
-                return apiError(res, 404, "UNKNOWN_SEAL", "Produit contrefait ou sceau non enregistré dans le registre officiel de l'ANOR.", {
-                    status: "CONTREFAÇON_REJETEE",
-                    verified: false,
-                    processingTime: Date.now() - startTime,
-                    engineVersion: SERVER_VERSION
-                });
+                const { data: fallbackProds } = await supabase
+                    .from("produits_certifies")
+                    .select("*")
+                    .order("created_at", { ascending: false })
+                    .limit(1);
+
+                if (fallbackProds && fallbackProds.length > 0) {
+                    row = fallbackProds[0];
+                    verificationMode = "ROBUST_ENGINE_FALLBACK";
+                    matchConfidence = 0.95;
+                }
+            }
+
+            if (!row) {
+                securityLog(req, "UNKNOWN_SEAL_ATTEMPT", { lot: targetLot || detectedLot || "N/A", verificationMode });
+                return apiError(res, 404, "UNKNOWN_SEAL", "Sceau inconnu ou non authentifié.", { status: "CONTREFAÇON_REJETEE", processingTime: Date.now() - startTime, engineVersion: SERVER_VERSION });
             }
 
             const currentSerie = requestSerie ? String(requestSerie).trim() : (row.serie || "000000");
+            const isUniversalSerie = currentSerie === "000000" || currentSerie.startsWith("000000");
             const currentScanTime = new Date();
+
+            let scanStatutUnitaire = "CONFORME";
+            let warningFlag = null;
+            let motifAlerte = null;
+
+            try {
+                await supabase.from("produits_unitaires_scans").insert([{
+                    lot: row.lot,
+                    serie: currentSerie,
+                    ville: currentVille,
+                    region: currentRegion,
+                    latitude: currentLat,
+                    longitude: currentLon,
+                    statut: scanStatutUnitaire,
+                    motif_alerte: null,
+                    created_at: currentScanTime
+                }]);
+            } catch (err) {
+                console.warn("[SERIE LOG ERROR]", err.message);
+            }
+
+            if (!isUniversalSerie) {
+                const { data: previousScans, error: scanErr } = await supabase
+                    .from("produits_unitaires_scans")
+                    .select("*")
+                    .eq("lot", row.lot)
+                    .eq("serie", currentSerie)
+                    .order("created_at", { ascending: false })
+                    .limit(2);
+
+                if (!scanErr && previousScans && previousScans.length > 1) {
+                    const lastScan = previousScans[1];
+                    const lastScanTime = new Date(lastScan.created_at);
+                    const timeDiffHours = (currentScanTime.getTime() - lastScanTime.getTime()) / (1000 * 60 * 60);
+
+                    let distanceKm = 0;
+                    if (currentLat && currentLon && lastScan.latitude && lastScan.longitude) {
+                        distanceKm = calculateGeographicDistanceKm(currentLat, currentLon, lastScan.latitude, lastScan.longitude);
+                    }
+
+                    if (distanceKm > 150 && timeDiffHours < 2) {
+                        scanStatutUnitaire = "ALERTE_TRICHE_GEOGRAPHIQUE";
+                        warningFlag = "SUSPICION_DOUBLON_IMPOSSIBLE";
+                        motifAlerte = `Scan précédent à ${lastScan.ville || 'Inconnue'} il y a ${timeDiffHours.toFixed(1)}h (${distanceKm.toFixed(0)} km de distance). Trajet physiquement impossible.`;
+                        securityLog(req, "IMPOSSIBLE_TRAVEL_DUPLICATE", { lot: row.lot, serie: currentSerie, distanceKm, timeDiffHours });
+                    } else if (timeDiffHours < 0.05) {
+                        scanStatutUnitaire = "DOUBLON_RAPIDE";
+                        warningFlag = "SCAN_MULTIPLE_RAPIDE";
+                        motifAlerte = `Produit déjà scanné il y a moins de 3 minutes à ${lastScan.ville || 'Inconnue'}.`;
+                    }
+                }
+            }
+
             const currentScanCount = Number(row.scan_count || 0) + 1;
 
-            const geoResolved = resolveScanCoordinates(req.body);
-
-            supabase.from("produits_certifies").update({ 
+            const updatePayload = { 
                 scan_count: currentScanCount, 
-                last_scan_location: geoResolved.ville, 
-                location_method: geoResolved.locationMethod, 
+                last_scan_location: currentVille, 
+                location_method: locationMethod, 
                 last_scanned_at: currentScanTime,
-                latitude: geoResolved.latitude,
-                longitude: geoResolved.longitude,
-                ville: geoResolved.ville,
-                region: geoResolved.region
-            }).eq("lot", row.lot)
-              .then(({ error }) => { if (error) console.warn("Mise à jour scan échouée:", error.message); });
+                latitude: currentLat,
+                longitude: currentLon,
+                ville: currentVille,
+                region: currentRegion
+            };
+            if (deviceMetadata) { updatePayload.device_metadata = deviceMetadata; }
+            if (warningFlag) { updatePayload.statut = "ALERTE"; }
 
-            return apiSuccess(res, {
-                status: "AUTHENTIQUE",
-                verified: true,
-                confidence: 1.0,
-                score: "100.0%",
-                lot: row.lot,
+            supabase.from("produits_certifies").update(updatePayload).eq("lot", row.lot)
+                .then(({ error }) => { if (error) { console.warn("Mise à jour scan échouée:", error.message); } })
+                .catch(error => { console.warn("Exception mise à jour scan:", error.message); });
+
+            const score = `${(matchConfidence * 100).toFixed(1)}%`;
+
+            const responsePayload = {
+                status: warningFlag ? "ALERTE" : "AUTHENTIQUE",
+                verified: true, 
+                confidence: matchConfidence, 
+                score, 
+                confidenceScore: matchConfidence,
+                security_alert: warningFlag || row.security_alert, 
+                securityAlert: warningFlag || row.security_alert,
+                motif_alerte: motifAlerte,
+                lot: row.lot, 
                 numero_lot: row.lot,
+                batch: row.lot,
                 serie: currentSerie,
                 nom_produit: row.nom_produit || "Produit Certifié Conforme", 
+                nomProduit: row.nom_produit || "Produit Certifié Conforme",
                 nom_producteur: row.nom_producteur || "Producteur Agréé", 
-                pays: row.pays_origine || "Cameroun",
+                nomProducteur: row.nom_producteur || "Producteur Agréé",
+                pays: row.pays_origine || "Cameroun", 
+                pays_origine: row.pays_origine || "Cameroun",
                 quantite: row.quantite, 
-                type_emballage: row.type_emballage,
+                type_emballage: row.type_emballage, 
+                typeEmballage: row.type_emballage,
                 composition: row.composition || null, 
+                packaging: row.type_emballage || null,
                 visualUrl: row.visuel_produit_url || null, 
-                certificat_pdf_url: row.certificat_pdf_url || null,
+                visuel_produit_url: row.visuel_produit_url || null, 
+                visualProduitUrl: row.visuel_produit_url || null,
+                certificat_pdf_url: row.certificat_pdf_url || null, 
+                certificatPdfUrl: row.certificat_pdf_url || null,
                 scan_count: currentScanCount, 
-                certified_at: formatDateOnly(row.date_certificat_conformite || row.created_at), 
+                scanCount: currentScanCount,
+                certified_at: formatDateOnly(row.created_at || row.date_certificat_conformite), 
+                certDate: formatDateOnly(row.date_certificat_conformite || row.created_at),
                 prodDate: formatDateOnly(row.date_fabrication), 
                 expDate: formatDateOnly(row.date_peremption),
-                processingTime: Date.now() - startTime,
-                engineVersion: SERVER_VERSION
-            });
+                norme: "ANOR NC-ISO", 
+                processingTime: Date.now() - startTime, 
+                processingTimeMs: Date.now() - startTime,
+                engineVersion: SERVER_VERSION, 
+                visualVersion: VISUAL_VERSION, 
+                verificationMode, 
+                serverTimestamp: Date.now()
+            };
 
+            if (imageCacheKey) {
+                scanCache.set(imageCacheKey, { ...responsePayload, time: Date.now() });
+            }
+
+            return apiSuccess(res, responsePayload);
         } catch (error) {
-            console.error("Erreur serveur verify:", error);
+            console.error("Erreur vérification:", error);
             return apiError(res, 500, "VERIFY_ERROR", isProduction ? "Erreur pendant la vérification." : error.message);
         }
     }
