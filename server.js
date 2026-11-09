@@ -1070,7 +1070,7 @@ app.post(
                 securityLog(req, "INVALID_USER_AGENT_BLOCKED", { agent: req.headers["user-agent"] });
                 return apiError(res, 400, "INVALID_CLIENT", "Client non valide ou rejeté par la politique de sécurité.");
             }
-
+        console.log("[DEBUG REQ.BODY]", JSON.stringify(req.body, null, 2)); 
             let {
                 scannedMatrix, lot, numero_lot, serie: requestSerie, visualBits: requestVisualBits, visualSignature: requestVisualSignature,
                 deviceMetadata
