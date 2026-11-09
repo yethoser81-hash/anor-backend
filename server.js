@@ -1,8 +1,8 @@
 /**
  * ======================================================
  * SYSTEME SOUVERAIN DE CERTIFICATION ANOR
- * SERVER CORE (VERSION VISION GROQ LLAMA 3.2 90B - 100% INTÉGRALE)
- * Version: 25.5.0 (Mise à jour Modèle Vision Actif)
+ * SERVER CORE (VERSION VISION QWEN / GROQ - 100% INTÉGRALE)
+ * Version: 25.6.0 (Modèle Vision Actif Qwen/Groq)
  * ======================================================
  */
 
@@ -35,14 +35,13 @@ if (process.env.VAPID_PRIVATE_KEY) {
     console.warn("[ANOR PUSH] Clés VAPID optionnelles non définies dans le .env.");
 }
 
-// Stockage des abonnements push des utilisateurs acceptants
 const pushSubscriptions = new Set();
 
 // Initialisation exclusive du client Groq pour l'OCR IA de vision
 let groqClient = null;
 if (process.env.GROQ_API_KEY) {
     groqClient = new Groq({ apiKey: process.env.GROQ_API_KEY });
-    console.log("[ANOR CORE] Engine IA Vision (Groq Llama 3.2 Vision) initialisé avec succès.");
+    console.log("[ANOR CORE] Engine IA Vision (Groq Multimodal) initialisé avec succès.");
 } else {
     console.warn("[ANOR CORE] Clé GROQ_API_KEY absente ! Définissez GROQ_API_KEY dans le fichier .env.");
 }
@@ -59,7 +58,7 @@ setInterval(() => {
     }
 }, 60000);
 
-const SERVER_VERSION = "25.5.0";
+const SERVER_VERSION = "25.6.0";
 const VISUAL_VERSION = 2; 
 const VISUAL_BITS_LENGTH = 28;
 const isProduction = process.env.NODE_ENV === "production";
@@ -361,7 +360,7 @@ const upload = multer({
 });
 
 /**
- * FONCTION OCR EXCLUSIVE AVEC GROQ LLAMA 3.2 VISION 90B (MODÈLE ACTIF ET PUISSANT)
+ * FONCTION OCR EXCLUSIVE AVEC MODÈLE DE VISION ACTIF (QWEN VIA GROQ)
  */
 async function extractLotWithGroqVision(base64Image) {
     if (!groqClient) {
@@ -378,10 +377,10 @@ async function extractLotWithGroqVision(base64Image) {
             ? base64Image 
             : `data:image/jpeg;base64,${base64Image}`;
 
-        console.log(`[ANOR OCR DEBUG] 📤 Envoi de l'image à Groq Vision (llama-3.2-90b-vision-preview)...`);
+        console.log(`[ANOR OCR DEBUG] 📤 Envoi de l'image à l'IA Vision (qwen/qwen3.8-27b)...`);
 
         const chatCompletion = await groqClient.chat.completions.create({
-            model: "llama-3.2-90b-vision-preview",
+            model: "qwen/qwen3.8-27b",
             messages: [
                 {
                     role: "user",
@@ -404,10 +403,10 @@ async function extractLotWithGroqVision(base64Image) {
         });
 
         let rawText = chatCompletion.choices[0]?.message?.content?.trim() || "";
-        console.log(`[ANOR OCR DEBUG] 📥 Réponse brute reçue de Groq Vision : "${rawText}"`);
+        console.log(`[ANOR OCR DEBUG] 📥 Réponse brute reçue : "${rawText}"`);
 
         if (!rawText || rawText.toUpperCase() === "NONE") {
-            console.log("[ANOR OCR DEBUG] ⚠️ Groq Vision n'a pas détecté de lot (réponse NONE).");
+            console.log("[ANOR OCR DEBUG] ⚠️ Aucun lot détecté par l'IA (réponse NONE).");
             return null;
         }
 
@@ -417,7 +416,7 @@ async function extractLotWithGroqVision(base64Image) {
 
         return cleanedLot;
     } catch (err) {
-        console.error("[ANOR OCR ERROR] ❌ Échec de l'appel à Groq Vision:", err.message);
+        console.error("[ANOR OCR ERROR] ❌ Échec de l'appel Vision:", err.message);
         return null;
     }
 }
@@ -485,7 +484,7 @@ app.get("/health", async (req, res) => {
         status: "ONLINE",
         engine: `ANOR Core ${SERVER_VERSION}`,
         database,
-        groqVisionEngine: groqClient ? "ONLINE" : "NOT_CONFIGURED",
+        visionEngine: groqClient ? "ONLINE" : "NOT_CONFIGURED",
         uptime: process.uptime(),
         memory: process.memoryUsage().rss,
         node: process.version
@@ -896,7 +895,7 @@ app.post("/api/security/audit", (req, res) => {
         console.log("[ANOR SECURITY AUDIT] Rapport reçu :", JSON.stringify(auditData));
         return apiSuccess(res, { 
             status: "AUDIT_RECEIVED", 
-            message: "Rapport de sécurité pris en compte par le noyau 25.5.0." 
+            message: "Rapport de sécurité pris en compte par le noyau 25.6.0." 
         });
     } catch (error) {
         console.error("[SECURITY AUDIT ERROR]", error.message);
@@ -1139,16 +1138,16 @@ app.post(
 
             let verificationMode = "STRICT_MATCH";
 
-            // Si pas de lot texte mais une image -> Groq Vision 90B
+            // Si pas de lot texte mais une image -> Appel au modèle de vision
             if (!targetLot && base64ImagePayload) {
-                console.log("[ANOR SCAN TRACE] 🔍 Aucun lot textuel trouvé. Lancement de Groq Vision (llama-3.2-90b-vision-preview)...");
+                console.log("[ANOR SCAN TRACE] 🔍 Aucun lot textuel trouvé. Lancement de l'OCR Vision (qwen/qwen3.8-27b)...");
                 const extractedLot = await extractLotWithGroqVision(base64ImagePayload);
                 if (extractedLot) {
                     targetLot = extractedLot;
-                    verificationMode = "GROQ_VISION_OCR_MATCH";
+                    verificationMode = "VISION_OCR_MATCH";
                     console.log(`[ANOR SCAN TRACE] ✨ SUCCÈS : L'IA a extrait le lot : "${targetLot}"`);
                 } else {
-                    console.warn("[ANOR SCAN TRACE] ⚠️ ÉCHEC : Groq Vision n'a pas pu identifier de numéro de lot.");
+                    console.warn("[ANOR SCAN TRACE] ⚠️ ÉCHEC : L'IA n'a pas pu identifier de numéro de lot.");
                 }
             } else if (targetLot) {
                 console.log(`[ANOR SCAN TRACE] ⌨️ Utilisation du lot fourni directement : "${targetLot}"`);
@@ -1174,7 +1173,7 @@ app.post(
                     console.error("[ANOR SCAN TRACE] ❌ Erreur Supabase lors de la recherche du lot :", error.message);
                 } else if (data && data.length > 0) { 
                     row = data[0]; 
-                    if (verificationMode !== "GROQ_VISION_OCR_MATCH") {
+                    if (verificationMode !== "VISION_OCR_MATCH") {
                         verificationMode = "EXACT_LOT_MATCH";
                     }
                     console.log(`[ANOR SCAN TRACE] 🎉 PRODUIT TROUVÉ EN DB ! Lot: "${row.lot}", Produit: "${row.nom_produit}", Producteur: "${row.nom_producteur}"`);
