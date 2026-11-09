@@ -360,7 +360,7 @@ const upload = multer({
 });
 
 /**
- * FONCTION OCR EXCLUSIVE AVEC MODÈLE DE VISION ACTIF (QWEN VIA GROQ)
+ * FONCTION OCR EXCLUSIVE AVEC NETTOYAGE INTELLIGENT DU NUMÉRO DE LOT
  */
 async function extractLotWithGroqVision(base64Image) {
     if (!groqClient) {
@@ -387,7 +387,7 @@ async function extractLotWithGroqVision(base64Image) {
                     content: [
                         {
                             type: "text",
-                            text: "Regarde attentivement cette image de sceau ANOR ou d'emballage. Trouve le numéro de lot ou code de lot imprimé (par exemple: LOT 54P-2026, 54P-2026, NC-2026-001, ou toute suite de lettres/chiffres identifiant le lot). Renvoie UNIQUEMENT le texte brut du numéro de lot trouvé, sans phrase, sans explication, sans markdown. Si vraiment rien n'est lisible, réponds juste NONE."
+                            text: "Regarde cette image de sceau ANOR. Trouve uniquement le numéro de lot principal situé après la mention 'LOT :'. Ignore complètement le numéro de série à 6 chiffres (comme 000000) situé en dessous. Renvoie UNIQUEMENT le texte brut du numéro de lot (par exemple: P78 540 120 ou H54), sans explication, sans markdown. Si rien n'est lisible, réponds NONE."
                         },
                         {
                             type: "image_url",
@@ -410,7 +410,13 @@ async function extractLotWithGroqVision(base64Image) {
             return null;
         }
 
+        // Nettoyage des caractères superflus
         rawText = rawText.replace(/['"`]/g, "").trim();
+
+        // SÉCURITÉ SUPPLÉMENTAIRE : Si l'IA a quand même capté la série de zéros à la fin, on la coupe proprement
+        // Ex: "P78 540 120 000000" devient "P78 540 120"
+        rawText = rawText.replace(/\s+0{4,}\d*$/, "").trim();
+
         const cleanedLot = rawText.toUpperCase();
         console.log(`[ANOR OCR DEBUG] ✅ Numéro de lot extrait et nettoyé avec succès : "${cleanedLot}"`);
 
