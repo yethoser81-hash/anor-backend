@@ -1,8 +1,8 @@
 /**
  * ======================================================
  * SYSTEME SOUVERAIN DE CERTIFICATION ANOR
- * SERVER CORE (VERSION GOOGLE AI STUDIO VISION OCR)
- * Version: 24.6.0 (Vérification Stricte & Vision IA)
+ * SERVER CORE (VERSION VISION GROQ LLAMA 3.2 - 100% EXCLUSIF)
+ * Version: 25.0.0 (Vérification Stricte & Vision Groq)
  * ======================================================
  */
 
@@ -19,17 +19,17 @@ const helmet = require("helmet");
 const { createCanvas, loadImage } = require("canvas");
 const supabase = require("./config/database");
 const SealRenderer = require("./engine/sealRenderer");
-const { GoogleGenAI } = require("@google/genai");
+const Groq = require("groq-sdk");
 
 const app = express();
 
-// Initialisation de Google AI Studio pour l'OCR visuel
-let aiClient = null;
-if (process.env.GEMINI_API_KEY) {
-    aiClient = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
-    console.log("[ANOR VISION] Google AI Studio initialisé avec succès.");
+// Initialisation exclusive du client Groq pour l'OCR IA de vision
+let groqClient = null;
+if (process.env.GROQ_API_KEY) {
+    groqClient = new Groq({ apiKey: process.env.GROQ_API_KEY });
+    console.log("[ANOR CORE] Engine IA Vision (Groq Llama 3.2 Vision) initialisé avec succès.");
 } else {
-    console.warn("[ANOR VISION] Clé GEMINI_API_KEY absente. La lecture optique par photo sera désactivée.");
+    console.warn("[ANOR CORE] Clé GROQ_API_KEY absente ! Définissez GROQ_API_KEY dans le fichier .env.");
 }
 
 const scanCache = new Map();
@@ -44,7 +44,7 @@ setInterval(() => {
     }
 }, 60000);
 
-const SERVER_VERSION = "24.6.0";
+const SERVER_VERSION = "25.0.0";
 const VISUAL_VERSION = 2; 
 const VISUAL_BITS_LENGTH = 28;
 const isProduction = process.env.NODE_ENV === "production";
@@ -346,40 +346,57 @@ const upload = multer({
 });
 
 /**
- * FONCTION OCR INTELLIGENTE AVEC GOOGLE AI STUDIO (GEMINI 2.5 FLASH)
+ * FONCTION OCR EXCLUSIVE AVEC GROQ LLAMA 3.2 VISION
  */
-async function extractLotWithGoogleAIStudio(base64Image) {
-    if (!aiClient || !base64Image || typeof base64Image !== "string") {
+async function extractLotWithGroqVision(base64Image) {
+    if (!groqClient || !base64Image || typeof base64Image !== "string") {
         return null;
     }
 
     try {
-        const base64Data = base64Image.includes(",") ? base64Image.split(",")[1] : base64Image;
+        const formattedBase64 = base64Image.startsWith("data:") 
+            ? base64Image 
+            : `data:image/jpeg;base64,${base64Image}`;
 
-        const response = await aiClient.models.generateContent({
-    model: "gemini-3.8-flash", // <--- NOUVEAU MODÈLE ACTIF ET DISPONIBLE
-    contents: [
-        {
-            inlineData: {
-                data: base64Data,
-                mimeType: "image/jpeg"
-            }
-        },
-        "Analyse cette image de sceau ou d'emballage de produit ANOR au Cameroun. Extrait uniquement et strictement le numéro de lot textuel (par exemple format LOT XXX, XX-2026, etc.). Réponds UNIQUEMENT par la chaîne du numéro de lot extrait, sans aucune phrase autour. Si tu ne vois aucun numéro de lot lisible, réponds exactement 'NONE'."
-    ]
-});
+        const chatCompletion = await groqClient.chat.completions.create({
+            model: "llama-3.2-11b-vision-preview",
+            messages: [
+                {
+                    role: "user",
+                    content: [
+                        {
+                            type: "text",
+                            text: "Analyse cette image de sceau ou d'emballage de produit certifié ANOR au Cameroun. Extrait uniquement et strictement le numéro de lot textuel (exemples: LOT 54P-2026, 54P-2026, NC-2026-001, etc.). Réponds UNIQUEMENT par la chaîne du numéro de lot extrait, sans aucun mot de politesse ni phrase autour. Si tu ne trouves aucun numéro de lot lisible, réponds uniquement 'NONE'."
+                        },
+                        {
+                            type: "image_url",
+                            image_url: {
+                                url: formattedBase64
+                            }
+                        }
+                    ]
+                }
+            ],
+            temperature: 0.1,
+            max_tokens: 50
+        });
 
-        const rawText = response.text ? response.text.trim() : "";
-        console.log(`[AI STUDIO OCR] Texte extrait : "${rawText}"`);
+        const rawText = chatCompletion.choices[0]?.message?.content?.trim() || "";
+        console.log(`[GROQ VISION OCR] Texte extrait par Groq : "${rawText}"`);
 
-        if (rawText && rawText.toUpperCase() !== "NONE" && rawText.length >= 3) {
+        if (rawText && rawText.toUpperCase() !== "NONE" && !rawText.includes(" ") && rawText.length >= 3) {
             return rawText.toUpperCase();
+        } else if (rawText && rawText.toUpperCase() !== "NONE") {
+            const cleanMatch = rawText.match(/(?:LOT|L0T)?\s*[:\-\s]?\s*([A-Z0-9\-]{3,20})/i);
+            if (cleanMatch && cleanMatch[1]) {
+                return cleanMatch[1].toUpperCase();
+            }
         }
         return null;
     } catch (err) {
-        console.warn("[AI STUDIO OCR ERROR] Échec de la lecture visuelle:", err.message);
+        console.warn("[GROQ VISION OCR ERROR] Échec de la lecture par Groq Vision:", err.message);
+        return null;
     }
-    return null;
 }
 
 async function generateUnitSerialsAndManifest(lotCode, totalQuantity, masterSignature) {
@@ -445,7 +462,7 @@ app.get("/health", async (req, res) => {
         status: "ONLINE",
         engine: `ANOR Core ${SERVER_VERSION}`,
         database,
-        aiStudioVision: aiClient ? "ONLINE" : "NOT_CONFIGURED",
+        groqVisionEngine: groqClient ? "ONLINE" : "NOT_CONFIGURED",
         uptime: process.uptime(),
         memory: process.memoryUsage().rss,
         node: process.version
@@ -660,34 +677,11 @@ app.post("/api/intelligence/chat", async (req, res) => {
 
         const { data: products } = await supabase.from("produits_certifies").select("lot, nom_produit, nom_producteur, scan_count, statut").limit(20);
         const { data: recentScans } = await supabase.from("produits_unitaires_scans").select("lot, ville, region, statut, created_at").limit(30);
-        
-        const contextSummary = JSON.stringify({
-            produits: products || [],
-            scansRecents: recentScans || []
+
+        return apiSuccess(res, {
+            success: true,
+            reply: `Synthèse analytique (Mode Local ANOR) : Analyse effectuée sur ${products ? products.length : 0} produits pour "${prompt}".`
         });
-
-        if (aiClient) {
-            let chatResponse;
-            try {
-                chatResponse = await aiClient.models.generateContent({
-                    model: "gemini-2.5-flash",
-                    contents: [
-                        `Tu es l'assistant statistique et détective de fraudes intelligent de l'ANOR. Utilise ces données pour détecter et expliquer les fraudes : ${contextSummary}`,
-                        `Question de l'inspecteur : ${prompt}`
-                    ]
-                });
-            } catch (chatErr) {
-                console.warn("[CHAT ERROR]", chatErr.message);
-            }
-
-            const replyText = chatResponse?.text ? chatResponse.text.trim() : "Analyse validée par le moteur ANOR Core.";
-            return apiSuccess(res, { success: true, reply: replyText });
-        } else {
-            return apiSuccess(res, {
-                success: true,
-                reply: `Synthèse analytique (Mode Local ANOR) : Analyse effectuée sur ${products ? products.length : 0} produits pour "${prompt}".`
-            });
-        }
     } catch (err) {
         console.error("[INTELLIGENCE CHAT ERROR]", err.message);
         return apiError(res, 500, "CHAT_ERROR", "Erreur lors du traitement de la requête.");
@@ -880,7 +874,7 @@ app.post("/api/security/audit", (req, res) => {
         console.log("[ANOR SECURITY AUDIT] Rapport reçu :", JSON.stringify(auditData));
         return apiSuccess(res, { 
             status: "AUDIT_RECEIVED", 
-            message: "Rapport de sécurité pris en compte par le noyau 24.6.0." 
+            message: "Rapport de sécurité pris en compte par le noyau 25.0.0." 
         });
     } catch (error) {
         console.error("[SECURITY AUDIT ERROR]", error.message);
@@ -1101,15 +1095,15 @@ app.post(
             }
 
             // =========================================================================
-            // ÉTAPE 0 : SI AUCUN LOT TEXTUEL N'EST FOURNI, LECTURE DE L'IMAGE PAR GOOGLE AI STUDIO
+            // ÉTAPE 0 : EXTRACTION IA PAR GROQ VISION SI AUCUN LOT TEXTUEL TRANSMIS
             // =========================================================================
             let verificationMode = "STRICT_MATCH";
 
             if (!targetLot && scannedMatrix && typeof scannedMatrix === "string" && scannedMatrix.startsWith("data:image")) {
-                const extractedLot = await extractLotWithGoogleAIStudio(scannedMatrix);
+                const extractedLot = await extractLotWithGroqVision(scannedMatrix);
                 if (extractedLot) {
                     targetLot = extractedLot;
-                    verificationMode = "AI_STUDIO_OCR_MATCH";
+                    verificationMode = "GROQ_VISION_OCR_MATCH";
                 }
             }
 
@@ -1135,14 +1129,14 @@ app.post(
 
                 if (!error && data && data.length > 0) { 
                     row = data[0]; 
-                    if (verificationMode !== "AI_STUDIO_OCR_MATCH") {
+                    if (verificationMode !== "GROQ_VISION_OCR_MATCH") {
                         verificationMode = "EXACT_LOT_MATCH";
                     }
                 }
             }
 
             // =========================================================================
-            // RECHERCHE PAR MATRICE 28 BITS (Plan de secours si l'OCR n'a pas lu le texte)
+            // RECHERCHE PAR MATRICE 28 BITS (Plan de secours si la photo n'a pas pu être lue par Groq)
             // =========================================================================
             const normalizedRequestBits = normalizeVisualBits(requestVisualBits || scannedMatrix?.bits || scannedMatrix?.visualBits);
 
