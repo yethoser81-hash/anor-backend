@@ -1094,9 +1094,7 @@ app.post(
                 }
             }
 
-            // =========================================================================
-            // DÉTECTION ET NORMALISATION DU PAYLOAD IMAGE PROVENANT DE L'APK & GROQ VISION
-            // =========================================================================
+            // 1. Normalisation de l'image reçue de l'APK
             let base64ImagePayload = null;
             if (typeof scannedMatrix === "string") {
                 base64ImagePayload = scannedMatrix;
@@ -1108,6 +1106,7 @@ app.post(
 
             let verificationMode = "STRICT_MATCH";
 
+            // 2. Si pas de lot texte mais une image -> Appel à Groq Vision
             if (!targetLot && base64ImagePayload) {
                 console.log("[ANOR] Image de scan détectée. Lancement de la lecture optique Groq Vision...");
                 const extractedLot = await extractLotWithGroqVision(base64ImagePayload);
@@ -1116,20 +1115,14 @@ app.post(
                     verificationMode = "GROQ_VISION_OCR_MATCH";
                     console.log(`[ANOR] Lot identifié par Groq Vision : ${targetLot}`);
                 } else {
-                    console.warn("[ANOR] Groq Vision n'a pas pu lire de numéro de lot valide sur l'image.");
+                    console.warn("[ANOR] Groq Vision n'a pas pu lire le lot. Bascule sur la matrice de bits visuels...");
                 }
-            }
-
-            if (!targetLot && !base64ImagePayload && !requestVisualBits) {
-                return apiError(res, 400, "MISSING_SCAN", "Données de scan insuffisantes.");
             }
 
             let row = null;
             let matchConfidence = 1.0;
 
-            // =========================================================================
-            // RECHERCHE STRICTE EN DATABASE SUPABASE PAR NUMÉRO DE LOT
-            // =========================================================================
+            // 3. Recherche par numéro de lot (trouvé par Groq ou saisi à la main)
             if (targetLot) {
                 const rawLot = String(targetLot).trim();
                 const cleanCode = rawLot.replace(/^(LOT|L0T)\s*[:\-]*/i, "").trim();
@@ -1148,10 +1141,8 @@ app.post(
                 }
             }
 
-            // =========================================================================
-            // RECHERCHE PAR MATRICE 28 BITS (Plan de secours si la photo n'a pas pu être lue)
-            // =========================================================================
-            const normalizedRequestBits = normalizeVisualBits(requestVisualBits || scannedMatrix?.bits || scannedMatrix?.visualBits);
+            // 4. PLAN DE SECOURS ABSOLU : Recherche par les 28 bits (Hamming) si le lot n'a pas été trouvé par texte
+            const normalizedRequestBits = normalizeVisualBits(requestVisualBits || (typeof scannedMatrix === "string" && !scannedMatrix.startsWith("data:") ? scannedMatrix : null));
 
             if (!row && normalizedRequestBits) {
                 verificationMode = "VISUAL_BITS_STRICT";
@@ -1181,7 +1172,7 @@ app.post(
                             }
                         }
 
-                        if (bestMatch && bestDistance <= 4) {
+                        if (bestMatch && bestDistance <= 6) {
                             row = bestMatch;
                             matchConfidence = Number((1 - bestDistance / VISUAL_BITS_LENGTH).toFixed(3));
                             verificationMode = "VISUAL_HAMMING_TOLERANCE";
@@ -1190,7 +1181,6 @@ app.post(
                 }
             }
 
-            // REJET STRICT SI AUCUN SCEAU CORRESPONDANT N'EST TROUVÉ (PAS DE LOT PAR DÉFAUT)
             if (!row) {
                 securityLog(req, "UNKNOWN_SEAL_ATTEMPT", { lot: targetLot || "N/A", verificationMode });
                 return apiError(res, 404, "UNKNOWN_SEAL", "Sceau ou numéro de lot inconnu dans la base ANOR.", { status: "CONTREFAÇON_REJETEE", processingTime: Date.now() - startTime, engineVersion: SERVER_VERSION });
