@@ -1,8 +1,8 @@
 /**
  * ======================================================
  * SYSTEME SOUVERAIN DE CERTIFICATION ANOR
- * SERVER CORE (VERSION CORRIGÉE & SOUVERAINE)
- * Version: 24.4.0 (Vérification Stricte Bits & Lot)
+ * SERVER CORE (VERSION GOOGLE AI STUDIO VISION OCR)
+ * Version: 24.6.0 (Vérification Stricte & Vision IA)
  * ======================================================
  */
 
@@ -23,12 +23,13 @@ const { GoogleGenAI } = require("@google/genai");
 
 const app = express();
 
-let ai = null;
+// Initialisation de Google AI Studio pour l'OCR visuel
+let aiClient = null;
 if (process.env.GEMINI_API_KEY) {
-    ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
-    console.log("[ANOR CORE] Module IA Conversationnel & Analytics initialisé.");
+    aiClient = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+    console.log("[ANOR VISION] Google AI Studio initialisé avec succès.");
 } else {
-    console.warn("[ANOR CORE] Clé GEMINI_API_KEY absente. Module Chat Analytics passera en mode local.");
+    console.warn("[ANOR VISION] Clé GEMINI_API_KEY absente. La lecture optique par photo sera désactivée.");
 }
 
 const scanCache = new Map();
@@ -43,7 +44,7 @@ setInterval(() => {
     }
 }, 60000);
 
-const SERVER_VERSION = "24.4.0";
+const SERVER_VERSION = "24.6.0";
 const VISUAL_VERSION = 2; 
 const VISUAL_BITS_LENGTH = 28;
 const isProduction = process.env.NODE_ENV === "production";
@@ -191,7 +192,7 @@ function apiSuccess(res, data = {}, status = 200) {
         });
 }
 
-function apiError(res, status = 500, code = "SERVER_ERROR", message = "Une erreur survenue.", details = null) {
+function apiError(res, status = 500, code = "SERVER_ERROR", message = "Une erreur est survenue.", details = null) {
     const payload = {
         success: false,
         error: { code, message },
@@ -344,6 +345,43 @@ const upload = multer({
     }
 });
 
+/**
+ * FONCTION OCR INTELLIGENTE AVEC GOOGLE AI STUDIO (GEMINI 2.5 FLASH)
+ */
+async function extractLotWithGoogleAIStudio(base64Image) {
+    if (!aiClient || !base64Image || typeof base64Image !== "string") {
+        return null;
+    }
+
+    try {
+        const base64Data = base64Image.includes(",") ? base64Image.split(",")[1] : base64Image;
+
+        const response = await aiClient.models.generateContent({
+            model: "gemini-2.5-flash",
+            contents: [
+                {
+                    inlineData: {
+                        data: base64Data,
+                        mimeType: "image/jpeg"
+                    }
+                },
+                "Analyse cette image de sceau ou d'emballage de produit ANOR au Cameroun. Extrait uniquement et strictement le numéro de lot textuel (par exemple format LOT XXX, XX-2026, etc.). Réponds UNIQUEMENT par la chaîne du numéro de lot extrait, sans aucune phrase autour. Si tu ne vois aucun numéro de lot lisible, réponds exactement 'NONE'."
+            ]
+        });
+
+        const rawText = response.text ? response.text.trim() : "";
+        console.log(`[AI STUDIO OCR] Texte extrait : "${rawText}"`);
+
+        if (rawText && rawText.toUpperCase() !== "NONE" && rawText.length >= 3) {
+            return rawText.toUpperCase();
+        }
+        return null;
+    } catch (err) {
+        console.warn("[AI STUDIO OCR ERROR] Échec de la lecture visuelle:", err.message);
+    }
+    return null;
+}
+
 async function generateUnitSerialsAndManifest(lotCode, totalQuantity, masterSignature) {
     const batchSize = 5000;
     let csvContent = "Index,Numero_De_Serie,Hachage_Securise\n";
@@ -407,6 +445,7 @@ app.get("/health", async (req, res) => {
         status: "ONLINE",
         engine: `ANOR Core ${SERVER_VERSION}`,
         database,
+        aiStudioVision: aiClient ? "ONLINE" : "NOT_CONFIGURED",
         uptime: process.uptime(),
         memory: process.memoryUsage().rss,
         node: process.version
@@ -627,27 +666,22 @@ app.post("/api/intelligence/chat", async (req, res) => {
             scansRecents: recentScans || []
         });
 
-        if (ai) {
+        if (aiClient) {
             let chatResponse;
             try {
-                chatResponse = await ai.models.generateContent({
-                    model: "models/gemini-3.8-flash",
+                chatResponse = await aiClient.models.generateContent({
+                    model: "gemini-2.5-flash",
                     contents: [
                         `Tu es l'assistant statistique et détective de fraudes intelligent de l'ANOR. Utilise ces données pour détecter et expliquer les fraudes : ${contextSummary}`,
                         `Question de l'inspecteur : ${prompt}`
                     ]
                 });
             } catch (chatErr) {
-                chatResponse = await ai.models.generateContent({
-                    model: "models/gemini-3.5-flash-lite",
-                    contents: [
-                        `Tu es l'assistant statistique de l'ANOR. Extrait de données : ${contextSummary}`,
-                        `Question de l'inspecteur : ${prompt}`
-                    ]
-                });
+                console.warn("[CHAT ERROR]", chatErr.message);
             }
 
-            return apiSuccess(res, { success: true, reply: chatResponse.text ? chatResponse.text.trim() : "Analyse validée par le moteur ANOR Core." });
+            const replyText = chatResponse?.text ? chatResponse.text.trim() : "Analyse validée par le moteur ANOR Core.";
+            return apiSuccess(res, { success: true, reply: replyText });
         } else {
             return apiSuccess(res, {
                 success: true,
@@ -846,7 +880,7 @@ app.post("/api/security/audit", (req, res) => {
         console.log("[ANOR SECURITY AUDIT] Rapport reçu :", JSON.stringify(auditData));
         return apiSuccess(res, { 
             status: "AUDIT_RECEIVED", 
-            message: "Rapport de sécurité pris en compte par le noyau 24.4.0." 
+            message: "Rapport de sécurité pris en compte par le noyau 24.6.0." 
         });
     } catch (error) {
         console.error("[SECURITY AUDIT ERROR]", error.message);
@@ -1066,16 +1100,28 @@ app.post(
                 }
             }
 
+            // =========================================================================
+            // ÉTAPE 0 : SI AUCUN LOT TEXTUEL N'EST FOURNI, LECTURE DE L'IMAGE PAR GOOGLE AI STUDIO
+            // =========================================================================
+            let verificationMode = "STRICT_MATCH";
+
+            if (!targetLot && scannedMatrix && typeof scannedMatrix === "string" && scannedMatrix.startsWith("data:image")) {
+                const extractedLot = await extractLotWithGoogleAIStudio(scannedMatrix);
+                if (extractedLot) {
+                    targetLot = extractedLot;
+                    verificationMode = "AI_STUDIO_OCR_MATCH";
+                }
+            }
+
             if (!targetLot && !scannedMatrix && !requestVisualBits) {
                 return apiError(res, 400, "MISSING_SCAN", "Données de scan insuffisantes.");
             }
 
             let row = null;
-            let verificationMode = "STRICT_MATCH";
             let matchConfidence = 1.0;
 
             // =========================================================================
-            // RECHERCHE STRICTE PAR NUMÉRO DE LOT (S'il est explicitement fourni)
+            // RECHERCHE STRICTE EN DATABASE SUPABASE PAR NUMÉRO DE LOT
             // =========================================================================
             if (targetLot) {
                 const rawLot = String(targetLot).trim();
@@ -1089,12 +1135,14 @@ app.post(
 
                 if (!error && data && data.length > 0) { 
                     row = data[0]; 
-                    verificationMode = "EXACT_LOT_MATCH";
+                    if (verificationMode !== "AI_STUDIO_OCR_MATCH") {
+                        verificationMode = "EXACT_LOT_MATCH";
+                    }
                 }
             }
 
             // =========================================================================
-            // RECHERCHE PAR MATRICE 28 BITS (Si aucun lot textuel fourni, par les bits visuels stricts)
+            // RECHERCHE PAR MATRICE 28 BITS (Plan de secours si l'OCR n'a pas lu le texte)
             // =========================================================================
             const normalizedRequestBits = normalizeVisualBits(requestVisualBits || scannedMatrix?.bits || scannedMatrix?.visualBits);
 
@@ -1110,7 +1158,6 @@ app.post(
                     row = exactMatch;
                     matchConfidence = 1.0;
                 } else {
-                    // Tolérance Hamming stricte (max 4 bits d'écart pour éviter les faux positifs)
                     const { data: candidates, error } = await supabase.from("produits_certifies").select("*").limit(300);
                     if (!error && Array.isArray(candidates)) {
                         let bestMatch = null;
@@ -1136,7 +1183,7 @@ app.post(
                 }
             }
 
-            // SI AUCUN SCEAU CORRESPONDANT N'EST TROUVÉ -> REJET STRICT (PAS DE LOT PAR DÉFAUT)
+            // REJET STRICT SI AUCUN SCEAU CORRESPONDANT N'EST TROUVÉ (PAS DE LOT PAR DÉFAUT)
             if (!row) {
                 securityLog(req, "UNKNOWN_SEAL_ATTEMPT", { lot: targetLot || "N/A", verificationMode });
                 return apiError(res, 404, "UNKNOWN_SEAL", "Sceau ou numéro de lot inconnu dans la base ANOR.", { status: "CONTREFAÇON_REJETEE", processingTime: Date.now() - startTime, engineVersion: SERVER_VERSION });
