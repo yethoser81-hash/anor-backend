@@ -346,7 +346,7 @@ const upload = multer({
 });
 
 /**
- * FONCTION OCR EXCLUSIVE AVEC GROQ LLAMA 3.2 VISION
+ * FONCTION OCR EXCLUSIVE AVEC GROQ LLAMA 3.2 VISION (OPTIMISÉE & ROBUSTE)
  */
 async function extractLotWithGroqVision(base64Image) {
     if (!groqClient || !base64Image || typeof base64Image !== "string") {
@@ -366,7 +366,7 @@ async function extractLotWithGroqVision(base64Image) {
                     content: [
                         {
                             type: "text",
-                            text: "Analyse cette image de sceau ou d'emballage de produit certifié ANOR au Cameroun. Extrait uniquement et strictement le numéro de lot textuel (exemples: LOT 54P-2026, 54P-2026, NC-2026-001, etc.). Réponds UNIQUEMENT par la chaîne du numéro de lot extrait, sans aucun mot de politesse ni phrase autour. Si tu ne trouves aucun numéro de lot lisible, réponds uniquement 'NONE'."
+                            text: "Regarde attentivement cette image de sceau ANOR ou d'emballage. Trouve le numéro de lot ou code de lot imprimé (par exemple: LOT 54P-2026, 54P-2026, NC-2026-001, ou toute suite de lettres/chiffres identifiant le lot). Renvoie UNIQUEMENT le texte brut du numéro de lot trouvé, sans phrase, sans explication, sans markdown. Si vraiment rien n'est lisible, réponds juste NONE."
                         },
                         {
                             type: "image_url",
@@ -377,24 +377,23 @@ async function extractLotWithGroqVision(base64Image) {
                     ]
                 }
             ],
-            temperature: 0.1,
-            max_tokens: 50
+            temperature: 0.0,
+            max_tokens: 30
         });
 
-        const rawText = chatCompletion.choices[0]?.message?.content?.trim() || "";
-        console.log(`[GROQ VISION OCR] Texte extrait par Groq : "${rawText}"`);
+        let rawText = chatCompletion.choices[0]?.message?.content?.trim() || "";
+        console.log(`[GROQ VISION OCR] Texte brut extrait par l'IA : "${rawText}"`);
 
-        if (rawText && rawText.toUpperCase() !== "NONE" && !rawText.includes(" ") && rawText.length >= 3) {
-            return rawText.toUpperCase();
-        } else if (rawText && rawText.toUpperCase() !== "NONE") {
-            const cleanMatch = rawText.match(/(?:LOT|L0T)?\s*[:\-\s]?\s*([A-Z0-9\-]{3,20})/i);
-            if (cleanMatch && cleanMatch[1]) {
-                return cleanMatch[1].toUpperCase();
-            }
+        if (!rawText || rawText.toUpperCase() === "NONE") {
+            return null;
         }
-        return null;
+
+        // Nettoyage de la chaîne renvoyée pour enlever les guillemets ou préfixes superflus
+        rawText = rawText.replace(/['"`]/g, "").trim();
+
+        return rawText.toUpperCase();
     } catch (err) {
-        console.warn("[GROQ VISION OCR ERROR] Échec de la lecture par Groq Vision:", err.message);
+        console.warn("[GROQ VISION OCR ERROR] Échec de l'appel à Groq Vision:", err.message);
         return null;
     }
 }
