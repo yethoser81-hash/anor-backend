@@ -1,8 +1,8 @@
 /**
  * ======================================================
  * SYSTEME SOUVERAIN DE CERTIFICATION ANOR
- * SERVER CORE (VERSION VISION GROQ LLAMA 3.2 - 100% INTÉGRALE & TRACÉE)
- * Version: 25.1.0 (Logs de Débogage OCR Avancés)
+ * SERVER CORE (VERSION VISION GROQ LLAMA 3.2 90B - 100% INTÉGRALE)
+ * Version: 25.5.0 (Mise à jour Modèle Vision Actif)
  * ======================================================
  */
 
@@ -16,12 +16,27 @@ const JSZip = require("jszip");
 const multer = require("multer");
 const rateLimit = require("express-rate-limit");
 const helmet = require("helmet");
+const webpush = require("web-push");
 const { createCanvas, loadImage } = require("canvas");
 const supabase = require("./config/database");
 const SealRenderer = require("./engine/sealRenderer");
 const Groq = require("groq-sdk");
 
 const app = express();
+
+// Configuration VAPID pour les notifications Push serveur
+const vapidPublicKey = process.env.VAPID_PUBLIC_KEY || "BEl62iUYgUivxIkv69yViEuiBIa-Ib9-SkvMeAtA3LFgDzkrxZJjSgSnfckjBJuBkr3qBUYIHBQFLXYVK5NxhFY";
+const vapidPrivateKey = process.env.VAPID_PRIVATE_KEY || "VOTRE_CLE_PRIVEE_VAPID";
+
+if (process.env.VAPID_PRIVATE_KEY) {
+    webpush.setVapidDetails("mailto:support@anor.cm", vapidPublicKey, vapidPrivateKey);
+    console.log("[ANOR PUSH] Système Web Push configuré avec succès.");
+} else {
+    console.warn("[ANOR PUSH] Clés VAPID optionnelles non définies dans le .env.");
+}
+
+// Stockage des abonnements push des utilisateurs acceptants
+const pushSubscriptions = new Set();
 
 // Initialisation exclusive du client Groq pour l'OCR IA de vision
 let groqClient = null;
@@ -44,7 +59,7 @@ setInterval(() => {
     }
 }, 60000);
 
-const SERVER_VERSION = "25.1.0";
+const SERVER_VERSION = "25.5.0";
 const VISUAL_VERSION = 2; 
 const VISUAL_BITS_LENGTH = 28;
 const isProduction = process.env.NODE_ENV === "production";
@@ -346,7 +361,7 @@ const upload = multer({
 });
 
 /**
- * FONCTION OCR EXCLUSIVE AVEC GROQ LLAMA 3.2 VISION (AVEC LOGS DE TRAÇAGE COMPLETS)
+ * FONCTION OCR EXCLUSIVE AVEC GROQ LLAMA 3.2 VISION 90B (MODÈLE ACTIF ET PUISSANT)
  */
 async function extractLotWithGroqVision(base64Image) {
     if (!groqClient) {
@@ -363,10 +378,10 @@ async function extractLotWithGroqVision(base64Image) {
             ? base64Image 
             : `data:image/jpeg;base64,${base64Image}`;
 
-        console.log(`[ANOR OCR DEBUG] 📤 Envoi de l'image à Groq Vision (taille: ~${Math.round(formattedBase64.length / 1024)} Ko)...`);
+        console.log(`[ANOR OCR DEBUG] 📤 Envoi de l'image à Groq Vision (llama-3.2-90b-vision-preview)...`);
 
         const chatCompletion = await groqClient.chat.completions.create({
-            model: "llama-3.2-11b-vision-preview",
+            model: "llama-3.2-90b-vision-preview",
             messages: [
                 {
                     role: "user",
@@ -396,7 +411,6 @@ async function extractLotWithGroqVision(base64Image) {
             return null;
         }
 
-        // Nettoyage de la chaîne renvoyée pour enlever les guillemets ou préfixes superflus
         rawText = rawText.replace(/['"`]/g, "").trim();
         const cleanedLot = rawText.toUpperCase();
         console.log(`[ANOR OCR DEBUG] ✅ Numéro de lot extrait et nettoyé avec succès : "${cleanedLot}"`);
@@ -685,7 +699,6 @@ app.post("/api/intelligence/chat", async (req, res) => {
         }
 
         const { data: products } = await supabase.from("produits_certifies").select("lot, nom_produit, nom_producteur, scan_count, statut").limit(20);
-        const { data: recentScans } = await supabase.from("produits_unitaires_scans").select("lot, ville, region, statut, created_at").limit(30);
 
         return apiSuccess(res, {
             success: true,
@@ -883,7 +896,7 @@ app.post("/api/security/audit", (req, res) => {
         console.log("[ANOR SECURITY AUDIT] Rapport reçu :", JSON.stringify(auditData));
         return apiSuccess(res, { 
             status: "AUDIT_RECEIVED", 
-            message: "Rapport de sécurité pris en compte par le noyau 25.1.0." 
+            message: "Rapport de sécurité pris en compte par le noyau 25.5.0." 
         });
     } catch (error) {
         console.error("[SECURITY AUDIT ERROR]", error.message);
@@ -1112,7 +1125,7 @@ app.post(
                 }
             }
 
-            // 1. Normalisation de l'image reçue de l'APK
+            // Normalisation de l'image reçue de l'APK
             let base64ImagePayload = null;
             if (typeof scannedMatrix === "string") {
                 base64ImagePayload = scannedMatrix;
@@ -1122,13 +1135,13 @@ app.post(
                 base64ImagePayload = req.body.image || req.body.photo || req.body.base64;
             }
 
-            console.log(`[ANOR SCAN TRACE] 🖼️ Présence d'une image/matrice image dans le payload : ${base64ImagePayload ? 'OUI (' + Math.round(base64ImagePayload.length/1024) + ' Ko)' : 'NON'}`);
+            console.log(`[ANOR SCAN TRACE] 🖼️ Présence d'une image dans le payload : ${base64ImagePayload ? 'OUI (' + Math.round(base64ImagePayload.length/1024) + ' Ko)' : 'NON'}`);
 
             let verificationMode = "STRICT_MATCH";
 
-            // 2. Si pas de lot texte mais une image -> Appel à Groq Vision
+            // Si pas de lot texte mais une image -> Groq Vision 90B
             if (!targetLot && base64ImagePayload) {
-                console.log("[ANOR SCAN TRACE] 🔍 Aucun lot textuel trouvé. Lancement de l'OCR Groq Vision...");
+                console.log("[ANOR SCAN TRACE] 🔍 Aucun lot textuel trouvé. Lancement de Groq Vision (llama-3.2-90b-vision-preview)...");
                 const extractedLot = await extractLotWithGroqVision(base64ImagePayload);
                 if (extractedLot) {
                     targetLot = extractedLot;
@@ -1144,7 +1157,7 @@ app.post(
             let row = null;
             let matchConfidence = 1.0;
 
-            // 3. Recherche par numéro de lot en base de données Supabase
+            // Recherche par numéro de lot en base de données Supabase
             if (targetLot) {
                 const rawLot = String(targetLot).trim();
                 const cleanCode = rawLot.replace(/^(LOT|L0T)\s*[:\-]*/i, "").trim();
@@ -1170,7 +1183,7 @@ app.post(
                 }
             }
 
-            // 4. PLAN DE SECOURS PAR LES 28 BITS (HAMMING)
+            // PLAN DE SECOURS PAR LES 28 BITS (HAMMING)
             const normalizedRequestBits = normalizeVisualBits(requestVisualBits || (typeof scannedMatrix === "string" && !scannedMatrix.startsWith("data:") ? scannedMatrix : null));
 
             if (!row && normalizedRequestBits) {
