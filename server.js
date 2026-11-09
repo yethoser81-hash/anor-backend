@@ -357,17 +357,17 @@ async function extractLotWithGoogleAIStudio(base64Image) {
         const base64Data = base64Image.includes(",") ? base64Image.split(",")[1] : base64Image;
 
         const response = await aiClient.models.generateContent({
-            model: "gemini-2.5-flash",
-            contents: [
-                {
-                    inlineData: {
-                        data: base64Data,
-                        mimeType: "image/jpeg"
-                    }
-                },
-                "Analyse cette image de sceau ou d'emballage de produit ANOR au Cameroun. Extrait uniquement et strictement le numéro de lot textuel (par exemple format LOT XXX, XX-2026, etc.). Réponds UNIQUEMENT par la chaîne du numéro de lot extrait, sans aucune phrase autour. Si tu ne vois aucun numéro de lot lisible, réponds exactement 'NONE'."
-            ]
-        });
+    model: "gemini-3.8-flash", // <--- NOUVEAU MODÈLE ACTIF ET DISPONIBLE
+    contents: [
+        {
+            inlineData: {
+                data: base64Data,
+                mimeType: "image/jpeg"
+            }
+        },
+        "Analyse cette image de sceau ou d'emballage de produit ANOR au Cameroun. Extrait uniquement et strictement le numéro de lot textuel (par exemple format LOT XXX, XX-2026, etc.). Réponds UNIQUEMENT par la chaîne du numéro de lot extrait, sans aucune phrase autour. Si tu ne vois aucun numéro de lot lisible, réponds exactement 'NONE'."
+    ]
+});
 
         const rawText = response.text ? response.text.trim() : "";
         console.log(`[AI STUDIO OCR] Texte extrait : "${rawText}"`);
