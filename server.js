@@ -1,8 +1,8 @@
 /**
  * ======================================================
  * SYSTEME SOUVERAIN DE CERTIFICATION ANOR
- * SERVER CORE (VERSION VISION GROQ LLAMA 3.2 - 100% EXCLUSIF)
- * Version: 25.0.0 (Vérification Stricte & Vision Groq)
+ * SERVER CORE (VERSION VISION GROQ LLAMA 3.2 - 100% INTÉGRALE & TRACÉE)
+ * Version: 25.1.0 (Logs de Débogage OCR Avancés)
  * ======================================================
  */
 
@@ -44,7 +44,7 @@ setInterval(() => {
     }
 }, 60000);
 
-const SERVER_VERSION = "25.0.0";
+const SERVER_VERSION = "25.1.0";
 const VISUAL_VERSION = 2; 
 const VISUAL_BITS_LENGTH = 28;
 const isProduction = process.env.NODE_ENV === "production";
@@ -346,10 +346,15 @@ const upload = multer({
 });
 
 /**
- * FONCTION OCR EXCLUSIVE AVEC GROQ LLAMA 3.2 VISION (OPTIMISÉE & ROBUSTE)
+ * FONCTION OCR EXCLUSIVE AVEC GROQ LLAMA 3.2 VISION (AVEC LOGS DE TRAÇAGE COMPLETS)
  */
 async function extractLotWithGroqVision(base64Image) {
-    if (!groqClient || !base64Image || typeof base64Image !== "string") {
+    if (!groqClient) {
+        console.warn("[ANOR OCR DEBUG] ❌ groqClient non initialisé (clé API absente).");
+        return null;
+    }
+    if (!base64Image || typeof base64Image !== "string") {
+        console.warn("[ANOR OCR DEBUG] ❌ base64Image vide ou invalide.");
         return null;
     }
 
@@ -357,6 +362,8 @@ async function extractLotWithGroqVision(base64Image) {
         const formattedBase64 = base64Image.startsWith("data:") 
             ? base64Image 
             : `data:image/jpeg;base64,${base64Image}`;
+
+        console.log(`[ANOR OCR DEBUG] 📤 Envoi de l'image à Groq Vision (taille: ~${Math.round(formattedBase64.length / 1024)} Ko)...`);
 
         const chatCompletion = await groqClient.chat.completions.create({
             model: "llama-3.2-11b-vision-preview",
@@ -382,18 +389,21 @@ async function extractLotWithGroqVision(base64Image) {
         });
 
         let rawText = chatCompletion.choices[0]?.message?.content?.trim() || "";
-        console.log(`[GROQ VISION OCR] Texte brut extrait par l'IA : "${rawText}"`);
+        console.log(`[ANOR OCR DEBUG] 📥 Réponse brute reçue de Groq Vision : "${rawText}"`);
 
         if (!rawText || rawText.toUpperCase() === "NONE") {
+            console.log("[ANOR OCR DEBUG] ⚠️ Groq Vision n'a pas détecté de lot (réponse NONE).");
             return null;
         }
 
         // Nettoyage de la chaîne renvoyée pour enlever les guillemets ou préfixes superflus
         rawText = rawText.replace(/['"`]/g, "").trim();
+        const cleanedLot = rawText.toUpperCase();
+        console.log(`[ANOR OCR DEBUG] ✅ Numéro de lot extrait et nettoyé avec succès : "${cleanedLot}"`);
 
-        return rawText.toUpperCase();
+        return cleanedLot;
     } catch (err) {
-        console.warn("[GROQ VISION OCR ERROR] Échec de l'appel à Groq Vision:", err.message);
+        console.error("[ANOR OCR ERROR] ❌ Échec de l'appel à Groq Vision:", err.message);
         return null;
     }
 }
@@ -873,7 +883,7 @@ app.post("/api/security/audit", (req, res) => {
         console.log("[ANOR SECURITY AUDIT] Rapport reçu :", JSON.stringify(auditData));
         return apiSuccess(res, { 
             status: "AUDIT_RECEIVED", 
-            message: "Rapport de sécurité pris en compte par le noyau 25.0.0." 
+            message: "Rapport de sécurité pris en compte par le noyau 25.1.0." 
         });
     } catch (error) {
         console.error("[SECURITY AUDIT ERROR]", error.message);
@@ -1059,6 +1069,9 @@ Système Souverain de Certification - ANOR Engine ${SERVER_VERSION}
     }
 );
 
+/**
+ * ROUTE DE VÉRIFICATION AVEC TRACAGE COMPLET DANS LES LOGS
+ */
 app.post(
     "/api/seals/verify",
     scanLimiter,
@@ -1069,13 +1082,18 @@ app.post(
                 securityLog(req, "INVALID_USER_AGENT_BLOCKED", { agent: req.headers["user-agent"] });
                 return apiError(res, 400, "INVALID_CLIENT", "Client non valide ou rejeté par la politique de sécurité.");
             }
-        console.log("[DEBUG REQ.BODY]", JSON.stringify(req.body, null, 2)); 
+
+            console.log("\n==================================================");
+            console.log("[ANOR SCAN TRACE] 📥 Requête reçue sur /api/seals/verify");
+            console.log("[ANOR SCAN TRACE] Corps de la requête reçu (clés) :", Object.keys(req.body));
+
             let {
                 scannedMatrix, lot, numero_lot, serie: requestSerie, visualBits: requestVisualBits, visualSignature: requestVisualSignature,
                 deviceMetadata
             } = req.body;
 
             let targetLot = lot || numero_lot;
+            console.log(`[ANOR SCAN TRACE] 🏷️ Lot textuel initial fourni : "${targetLot || 'AUCUN'}"`);
 
             const geoResolved = resolveScanCoordinates(req.body);
             const currentLat = geoResolved.latitude;
@@ -1088,6 +1106,7 @@ app.post(
             if (typeof scannedMatrix === "string" && scannedMatrix.startsWith("data:image")) {
                 imageCacheKey = sha256Hex(scannedMatrix);
                 if (scanCache.has(imageCacheKey)) {
+                    console.log("[ANOR SCAN TRACE] ⚡ Résultat servi depuis le cache.");
                     const cachedResult = scanCache.get(imageCacheKey);
                     return apiSuccess(res, { ...cachedResult, processingTime: Date.now() - startTime, processingTimeMs: Date.now() - startTime });
                 }
@@ -1103,28 +1122,34 @@ app.post(
                 base64ImagePayload = req.body.image || req.body.photo || req.body.base64;
             }
 
+            console.log(`[ANOR SCAN TRACE] 🖼️ Présence d'une image/matrice image dans le payload : ${base64ImagePayload ? 'OUI (' + Math.round(base64ImagePayload.length/1024) + ' Ko)' : 'NON'}`);
+
             let verificationMode = "STRICT_MATCH";
 
             // 2. Si pas de lot texte mais une image -> Appel à Groq Vision
             if (!targetLot && base64ImagePayload) {
-                console.log("[ANOR] Image de scan détectée. Lancement de la lecture optique Groq Vision...");
+                console.log("[ANOR SCAN TRACE] 🔍 Aucun lot textuel trouvé. Lancement de l'OCR Groq Vision...");
                 const extractedLot = await extractLotWithGroqVision(base64ImagePayload);
                 if (extractedLot) {
                     targetLot = extractedLot;
                     verificationMode = "GROQ_VISION_OCR_MATCH";
-                    console.log(`[ANOR] Lot identifié par Groq Vision : ${targetLot}`);
+                    console.log(`[ANOR SCAN TRACE] ✨ SUCCÈS : L'IA a extrait le lot : "${targetLot}"`);
                 } else {
-                    console.warn("[ANOR] Groq Vision n'a pas pu lire le lot. Bascule sur la matrice de bits visuels...");
+                    console.warn("[ANOR SCAN TRACE] ⚠️ ÉCHEC : Groq Vision n'a pas pu identifier de numéro de lot.");
                 }
+            } else if (targetLot) {
+                console.log(`[ANOR SCAN TRACE] ⌨️ Utilisation du lot fourni directement : "${targetLot}"`);
             }
 
             let row = null;
             let matchConfidence = 1.0;
 
-            // 3. Recherche par numéro de lot (trouvé par Groq ou saisi à la main)
+            // 3. Recherche par numéro de lot en base de données Supabase
             if (targetLot) {
                 const rawLot = String(targetLot).trim();
                 const cleanCode = rawLot.replace(/^(LOT|L0T)\s*[:\-]*/i, "").trim();
+
+                console.log(`[ANOR SCAN TRACE] 🗄️ Recherche Supabase pour le lot brut: "${rawLot}" ou nettoyé: "${cleanCode}"`);
 
                 const { data, error } = await supabase
                     .from("produits_certifies")
@@ -1132,18 +1157,24 @@ app.post(
                     .or(`lot.eq.${rawLot},lot.eq.${cleanCode},certificate_code.eq.${rawLot},certificate_code.eq.${cleanCode}`)
                     .limit(1);
 
-                if (!error && data && data.length > 0) { 
+                if (error) {
+                    console.error("[ANOR SCAN TRACE] ❌ Erreur Supabase lors de la recherche du lot :", error.message);
+                } else if (data && data.length > 0) { 
                     row = data[0]; 
                     if (verificationMode !== "GROQ_VISION_OCR_MATCH") {
                         verificationMode = "EXACT_LOT_MATCH";
                     }
+                    console.log(`[ANOR SCAN TRACE] 🎉 PRODUIT TROUVÉ EN DB ! Lot: "${row.lot}", Produit: "${row.nom_produit}", Producteur: "${row.nom_producteur}"`);
+                } else {
+                    console.warn(`[ANOR SCAN TRACE] ⚠️ Aucun enregistrement trouvé en base pour le lot "${targetLot}".`);
                 }
             }
 
-            // 4. PLAN DE SECOURS ABSOLU : Recherche par les 28 bits (Hamming) si le lot n'a pas été trouvé par texte
+            // 4. PLAN DE SECOURS PAR LES 28 BITS (HAMMING)
             const normalizedRequestBits = normalizeVisualBits(requestVisualBits || (typeof scannedMatrix === "string" && !scannedMatrix.startsWith("data:") ? scannedMatrix : null));
 
             if (!row && normalizedRequestBits) {
+                console.log(`[ANOR SCAN TRACE] 🧬 Tentative de secours par bits visuels (Hamming) avec : "${normalizedRequestBits}"`);
                 verificationMode = "VISUAL_BITS_STRICT";
                 const { data: exactMatch } = await supabase
                     .from("produits_certifies")
@@ -1154,6 +1185,7 @@ app.post(
                 if (exactMatch) {
                     row = exactMatch;
                     matchConfidence = 1.0;
+                    console.log(`[ANOR SCAN TRACE] 🎉 Correspondance exacte par bits trouvée pour le lot : "${row.lot}"`);
                 } else {
                     const { data: candidates, error } = await supabase.from("produits_certifies").select("*").limit(300);
                     if (!error && Array.isArray(candidates)) {
@@ -1175,12 +1207,15 @@ app.post(
                             row = bestMatch;
                             matchConfidence = Number((1 - bestDistance / VISUAL_BITS_LENGTH).toFixed(3));
                             verificationMode = "VISUAL_HAMMING_TOLERANCE";
+                            console.log(`[ANOR SCAN TRACE] 🎉 Correspondance Hamming (distance ${bestDistance}) pour le lot : "${row.lot}"`);
                         }
                     }
                 }
             }
 
             if (!row) {
+                console.log("[ANOR SCAN TRACE] ❌ REJET : Sceau / Lot introuvable en base.");
+                console.log("==================================================\n");
                 securityLog(req, "UNKNOWN_SEAL_ATTEMPT", { lot: targetLot || "N/A", verificationMode });
                 return apiError(res, 404, "UNKNOWN_SEAL", "Sceau ou numéro de lot inconnu dans la base ANOR.", { status: "CONTREFAÇON_REJETEE", processingTime: Date.now() - startTime, engineVersion: SERVER_VERSION });
             }
@@ -1261,6 +1296,9 @@ app.post(
                 .catch(error => { console.warn("Exception mise à jour scan:", error.message); });
 
             const score = `${(matchConfidence * 100).toFixed(1)}%`;
+
+            console.log(`[ANOR SCAN TRACE] ✅ SUCCÈS VALIDATION : Lot "${row.lot}" validé (Mode: ${verificationMode}, Scans totaux: ${currentScanCount})`);
+            console.log("==================================================\n");
 
             const responsePayload = {
                 status: warningFlag ? "ALERTE" : "AUTHENTIQUE",
