@@ -1095,19 +1095,32 @@ app.post(
             }
 
             // =========================================================================
-            // ÉTAPE 0 : EXTRACTION IA PAR GROQ VISION SI AUCUN LOT TEXTUEL TRANSMIS
+            // DÉTECTION ET NORMALISATION DU PAYLOAD IMAGE PROVENANT DE L'APK & GROQ VISION
             // =========================================================================
+            let base64ImagePayload = null;
+            if (typeof scannedMatrix === "string") {
+                base64ImagePayload = scannedMatrix;
+            } else if (scannedMatrix && typeof scannedMatrix === "object") {
+                base64ImagePayload = scannedMatrix.base64 || scannedMatrix.image || scannedMatrix.data || null;
+            } else if (req.body.image || req.body.photo || req.body.base64) {
+                base64ImagePayload = req.body.image || req.body.photo || req.body.base64;
+            }
+
             let verificationMode = "STRICT_MATCH";
 
-            if (!targetLot && scannedMatrix && typeof scannedMatrix === "string" && scannedMatrix.startsWith("data:image")) {
-                const extractedLot = await extractLotWithGroqVision(scannedMatrix);
+            if (!targetLot && base64ImagePayload) {
+                console.log("[ANOR] Image de scan détectée. Lancement de la lecture optique Groq Vision...");
+                const extractedLot = await extractLotWithGroqVision(base64ImagePayload);
                 if (extractedLot) {
                     targetLot = extractedLot;
                     verificationMode = "GROQ_VISION_OCR_MATCH";
+                    console.log(`[ANOR] Lot identifié par Groq Vision : ${targetLot}`);
+                } else {
+                    console.warn("[ANOR] Groq Vision n'a pas pu lire de numéro de lot valide sur l'image.");
                 }
             }
 
-            if (!targetLot && !scannedMatrix && !requestVisualBits) {
+            if (!targetLot && !base64ImagePayload && !requestVisualBits) {
                 return apiError(res, 400, "MISSING_SCAN", "Données de scan insuffisantes.");
             }
 
@@ -1136,7 +1149,7 @@ app.post(
             }
 
             // =========================================================================
-            // RECHERCHE PAR MATRICE 28 BITS (Plan de secours si la photo n'a pas pu être lue par Groq)
+            // RECHERCHE PAR MATRICE 28 BITS (Plan de secours si la photo n'a pas pu être lue)
             // =========================================================================
             const normalizedRequestBits = normalizeVisualBits(requestVisualBits || scannedMatrix?.bits || scannedMatrix?.visualBits);
 
