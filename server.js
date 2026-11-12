@@ -924,7 +924,7 @@ app.post(
             const {
                 nom_produit, nom_producteur, lot, quantite, type_emballage,
                 composition, pays_origine, date_certificat_conformite,
-                date_fabrication, date_peremption, serie
+                numero_droit_usage, date_fabrication, date_peremption, serie
             } = req.body;
 
             if (!lot || !quantite || !type_emballage) {
@@ -999,12 +999,14 @@ app.post(
             const cleanCertDate = formatDateOnly(date_certificat_conformite);
             const cleanFabDate = formatDateOnly(date_fabrication);
             const cleanExpDate = formatDateOnly(date_peremption);
+            const cleanDroitUsage = numero_droit_usage ? String(numero_droit_usage).trim() : null;
 
             const payloadDB = {
                 certificate_code: certificateCode, lot: certificateCode, serie: productSerie, quantite: parsedQuantite, type_emballage,
                 nom_produit: nom_produit || null, nom_producteur: nom_producteur || null,
                 composition: composition || null, pays_origine: pays_origine || null,
                 date_certificat_conformite: cleanCertDate !== "N/A" ? cleanCertDate : null,
+                numero_droit_usage: cleanDroitUsage,
                 date_fabrication: cleanFabDate !== "N/A" ? cleanFabDate : null, 
                 date_peremption: cleanExpDate !== "N/A" ? cleanExpDate : null,
                 certificat_pdf_url: pdfUrl, visuel_produit_url: visuelUrl,
@@ -1034,6 +1036,8 @@ SYSTEME SOUVERAIN DE CERTIFICATION - NOTICE OFFICIELLE DE LOT
    - Série Initiale/Plage   : ${productSerie}
    - Nom du Produit         : ${nom_produit || "N/A"}
    - Producteur             : ${nom_producteur || "N/A"}
+   - Numéro de Droit d'Usage: ${cleanDroitUsage || "N/A"}
+   - Validité Certificat    : ${cleanCertDate}
    - Quantité certifiée     : ${parsedQuantite.toLocaleString("fr-FR")} unités
    - Type d'emballage       : ${type_emballage}
 
@@ -1062,7 +1066,7 @@ Système Souverain de Certification - ANOR Engine ${SERVER_VERSION}
             const zip = new JSZip();
             zip.file("NOTICE_DIMPRESSION_ET_INSTRUCTIONS.txt", printNoticeContent);
             zip.file("manifeste_serialisation_unitaire.csv", csvManifestContent);
-            zip.file("certification.json", JSON.stringify({ lot: certificateCode, numero_lot: certificateCode, serie: productSerie, nom_produit, nom_producteur, quantite: parsedQuantite, visualVersion: VISUAL_VERSION, visualBits, visualSignature, signature_ia: secureSignature, created_at: new Date().toISOString() }, null, 4));
+            zip.file("certification.json", JSON.stringify({ lot: certificateCode, numero_lot: certificateCode, serie: productSerie, nom_produit, nom_producteur, numero_droit_usage: cleanDroitUsage, quantite: parsedQuantite, visualVersion: VISUAL_VERSION, visualBits, visualSignature, signature_ia: secureSignature, created_at: new Date().toISOString() }, null, 4));
             zip.file("sceau_ANOR_MASTER.png", imageBuffer);
             const zipBuffer = await zip.generateAsync({ type: "nodebuffer", compression: "DEFLATE", compressionOptions: { level: 9 } });
 
@@ -1342,6 +1346,7 @@ app.post(
                 typeEmballage: row.type_emballage,
                 composition: row.composition || null, 
                 packaging: row.type_emballage || null,
+                numero_droit_usage: row.numero_droit_usage || null,
                 visualUrl: row.visuel_produit_url || null, 
                 visuel_produit_url: row.visuel_produit_url || null, 
                 visualProduitUrl: row.visuel_produit_url || null,
