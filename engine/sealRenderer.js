@@ -1,7 +1,7 @@
 /**
  * ====================================================================
  * ANOR CHECK
- * SEAL RENDERER V43.5 - POSITIONNEMENT CORRECT AU-DESSUS DU LOGO
+ * SEAL RENDERER V43.2 - INTÉGRATION DU NUMÉRO DE DROIT D'USAGE AU-DESSUS DU LOGO
  * ====================================================================
  */
 
@@ -56,8 +56,7 @@ const sealRenderer = {
         const centerX = width / 2;
         const centerY = height / 2;
         
-        // Logo ajusté pour laisser un bel espace en haut pour le droit d'usage
-        const logoSize = 300; 
+        const logoSize = 390; 
         const logoRadius = logoSize / 2;
 
         const outerRingRadius = outerRadius - 20;
@@ -149,6 +148,7 @@ const sealRenderer = {
         const cleanLotValue = normalizedBatchName.replace(/^LOT\s*[:\-]*/i, '');
         const batchText = `LOT : ${cleanLotValue}`;
 
+        // Récupération du Numéro de Droit d'Usage transmis dans le payload ou les options
         const rawDroitUsage =
             payload.numero_droit_usage ||
             payload.numeroDroitUsage ||
@@ -204,8 +204,7 @@ const sealRenderer = {
             payload.logoPath ||
             path.join(__dirname, '../assets/logo_anor_master.png');
 
-        // Logo légèrement descendu pour libérer de l'espace net entre lui et les glyphes du haut
-        const logoCenterY = centerY + 10 * scale;
+        const logoCenterY = centerY - 55 * scale;
 
         if (fs.existsSync(logoPath)) {
             try {
@@ -220,6 +219,19 @@ const sealRenderer = {
             } catch (error) {
                 console.error('[sealRenderer] Erreur lors du chargement du logo :', error);
             }
+        }
+
+        // AFFICHAGE DU NUMÉRO DE DROIT D'USAGE AU-DESSUS DU LOGO (Espace dédié)
+        if (droitUsageText) {
+            ctx.save();
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            // Positionné au-dessus du sommet du logo pour une clarté optimale même en petite taille (1.5 - 2 cm)
+            const droitUsageY = logoCenterY - logoRadius - 28 * scale;
+            ctx.font = `800 ${Math.max(18, Math.round(24 * scale))}px sans-serif`;
+            ctx.fillStyle = '#006633'; // Vert institutionnel ANOR pour le droit d'usage
+            ctx.fillText(droitUsageText, centerX, droitUsageY);
+            ctx.restore();
         }
 
         const finderAngles = this.getFinderAngles();
@@ -297,31 +309,21 @@ const sealRenderer = {
         }
         ctx.restore();
 
-        // BLOC DE TEXTE CENTRAL (Droit d'usage au-dessus du logo, Lot et Série en bas)
         ctx.save();
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
 
-        // 1. Numéro de Droit d'Usage positionné DANS LE VIDE EXACT ENTRE LE HAUT DU LOGO ET LES GLYPHES
-        if (droitUsageText) {
-            // Calculé pour se situer entre le sommet du logo et l'anneau des glyphes du haut
-            const droitUsageY = centerY - 110 * scale;
-            ctx.font = `800 ${Math.max(24, Math.round(32 * scale))}px sans-serif`;
-            ctx.fillStyle = '#006633'; // Vert institutionnel ANOR
-            ctx.fillText(droitUsageText, centerX, droitUsageY);
-        }
+        const textY = centerY + 155 * scale;
 
-        // 2. Affichage du Lot (en bas du logo)
-        const lotY = centerY + 105 * scale;
+        // Affichage du Lot avec son préfixe bien aligné sous le logo
         ctx.font = `900 ${Math.max(26, Math.round(36 * scale))}px sans-serif`;
         ctx.fillStyle = TEXT_PRIMARY_COLOR;
-        ctx.fillText(batchText, centerX, lotY);
+        ctx.fillText(batchText, centerX, textY - 14 * scale);
 
-        // 3. Affichage de la série / index unitaire en dessous
-        const serialY = centerY + 150 * scale;
+        // Affichage de la série / index unitaire en dessous
         ctx.font = `900 ${Math.max(24, Math.round(34 * scale))}px sans-serif`;
         ctx.fillStyle = TEXT_SECONDARY_COLOR;
-        ctx.fillText(itemText, centerX, serialY);
+        ctx.fillText(itemText, centerX, textY + 30 * scale);
 
         ctx.restore();
 
