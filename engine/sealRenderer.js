@@ -1,7 +1,7 @@
 /**
  * ====================================================================
  * ANOR CHECK
- * SEAL RENDERER V43.2 - INTÉGRATION DU NUMÉRO DE DROIT D'USAGE AU-DESSUS DU LOGO
+ * SEAL RENDERER V43.3 - CORRECTION DU POSITIONNEMENT DU DROIT D'USAGE
  * ====================================================================
  */
 
@@ -56,7 +56,8 @@ const sealRenderer = {
         const centerX = width / 2;
         const centerY = height / 2;
         
-        const logoSize = 390; 
+        // Logo légèrement réduit pour laisser respirer le centre
+        const logoSize = 320; 
         const logoRadius = logoSize / 2;
 
         const outerRingRadius = outerRadius - 20;
@@ -148,7 +149,6 @@ const sealRenderer = {
         const cleanLotValue = normalizedBatchName.replace(/^LOT\s*[:\-]*/i, '');
         const batchText = `LOT : ${cleanLotValue}`;
 
-        // Récupération du Numéro de Droit d'Usage transmis dans le payload ou les options
         const rawDroitUsage =
             payload.numero_droit_usage ||
             payload.numeroDroitUsage ||
@@ -204,7 +204,8 @@ const sealRenderer = {
             payload.logoPath ||
             path.join(__dirname, '../assets/logo_anor_master.png');
 
-        const logoCenterY = centerY - 55 * scale;
+        // Logo légèrement décalé vers le haut pour laisser de l'espace au texte central
+        const logoCenterY = centerY - 75 * scale;
 
         if (fs.existsSync(logoPath)) {
             try {
@@ -219,19 +220,6 @@ const sealRenderer = {
             } catch (error) {
                 console.error('[sealRenderer] Erreur lors du chargement du logo :', error);
             }
-        }
-
-        // AFFICHAGE DU NUMÉRO DE DROIT D'USAGE AU-DESSUS DU LOGO (Espace dédié)
-        if (droitUsageText) {
-            ctx.save();
-            ctx.textAlign = 'center';
-            ctx.textBaseline = 'middle';
-            // Positionné au-dessus du sommet du logo pour une clarté optimale même en petite taille (1.5 - 2 cm)
-            const droitUsageY = logoCenterY - logoRadius - 28 * scale;
-            ctx.font = `800 ${Math.max(18, Math.round(24 * scale))}px sans-serif`;
-            ctx.fillStyle = '#006633'; // Vert institutionnel ANOR pour le droit d'usage
-            ctx.fillText(droitUsageText, centerX, droitUsageY);
-            ctx.restore();
         }
 
         const finderAngles = this.getFinderAngles();
@@ -309,21 +297,30 @@ const sealRenderer = {
         }
         ctx.restore();
 
+        // BLOC DE TEXTE CENTRAL (Droit d'usage, Lot et Série)
         ctx.save();
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
 
-        const textY = centerY + 155 * scale;
+        // 1. Numéro de Droit d'Usage positionné proprement sous le logo et au-dessus du lot
+        if (droitUsageText) {
+            const droitUsageY = centerY + 35 * scale;
+            ctx.font = `800 ${Math.max(20, Math.round(28 * scale))}px sans-serif`;
+            ctx.fillStyle = '#006633'; // Vert institutionnel ANOR
+            ctx.fillText(droitUsageText, centerX, droitUsageY);
+        }
 
-        // Affichage du Lot avec son préfixe bien aligné sous le logo
+        // 2. Affichage du Lot
+        const lotY = centerY + 85 * scale;
         ctx.font = `900 ${Math.max(26, Math.round(36 * scale))}px sans-serif`;
         ctx.fillStyle = TEXT_PRIMARY_COLOR;
-        ctx.fillText(batchText, centerX, textY - 14 * scale);
+        ctx.fillText(batchText, centerX, lotY);
 
-        // Affichage de la série / index unitaire en dessous
+        // 3. Affichage de la série / index unitaire en dessous
+        const serialY = centerY + 130 * scale;
         ctx.font = `900 ${Math.max(24, Math.round(34 * scale))}px sans-serif`;
         ctx.fillStyle = TEXT_SECONDARY_COLOR;
-        ctx.fillText(itemText, centerX, textY + 30 * scale);
+        ctx.fillText(itemText, centerX, serialY);
 
         ctx.restore();
 
