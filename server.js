@@ -410,11 +410,7 @@ async function extractLotWithGroqVision(base64Image) {
             return null;
         }
 
-        // Nettoyage des caractères superflus
         rawText = rawText.replace(/['"`]/g, "").trim();
-
-        // SÉCURITÉ SUPPLÉMENTAIRE : Si l'IA a quand même capté la série de zéros à la fin, on la coupe proprement
-        // Ex: "P78 540 120 000000" devient "P78 540 120"
         rawText = rawText.replace(/\s+0{4,}\d*$/, "").trim();
 
         const cleanedLot = rawText.toUpperCase();
@@ -945,6 +941,7 @@ app.post(
 
             const certificateCode = String(lot).trim();
             const productSerie = serie ? String(serie).trim() : "000000";
+            const cleanDroitUsage = numero_droit_usage ? String(numero_droit_usage).trim() : null;
 
             const secureSignature = crypto.createHash("sha256").update(`${certificateCode}-${productSerie}-${Date.now()}-${crypto.randomUUID()}`).digest("hex");
             const visualBits = normalizeVisualBits(SealRenderer.deriveVisualBits(secureSignature));
@@ -955,11 +952,13 @@ app.post(
 
             const visualSignature = `ANOR28:${visualBits}`;
 
+            // PASSAGE DU NUMÉRO DE DROIT D'USAGE AU RENDERER DU SCEAU
             const imageBuffer = await SealRenderer.renderSealToBuffer(
-                { secureSignature, visualBits },
+                { secureSignature, visualBits, numero_droit_usage: cleanDroitUsage },
                 {
                     lot: certificateCode, quantite: parsedQuantite, type_emballage,
                     productName: nom_produit, nom_produit, nom_producteur,
+                    numero_droit_usage: cleanDroitUsage,
                     isMasterSeal: true,
                     masterSerialLabel: `${productSerie} / ${parsedQuantite.toLocaleString("fr-FR")}`
                 }
@@ -999,7 +998,6 @@ app.post(
             const cleanCertDate = formatDateOnly(date_certificat_conformite);
             const cleanFabDate = formatDateOnly(date_fabrication);
             const cleanExpDate = formatDateOnly(date_peremption);
-            const cleanDroitUsage = numero_droit_usage ? String(numero_droit_usage).trim() : null;
 
             const payloadDB = {
                 certificate_code: certificateCode, lot: certificateCode, serie: productSerie, quantite: parsedQuantite, type_emballage,
@@ -1010,7 +1008,7 @@ app.post(
                 date_fabrication: cleanFabDate !== "N/A" ? cleanFabDate : null, 
                 date_peremption: cleanExpDate !== "N/A" ? cleanExpDate : null,
                 certificat_pdf_url: pdfUrl, visuel_produit_url: visuelUrl,
-                glyph_payload: { visualVersion: VISUAL_VERSION, secureSignature, lot: certificateCode, serie: productSerie, visualBits, visualSignature },
+                glyph_payload: { visualVersion: VISUAL_VERSION, secureSignature, lot: certificateCode, serie: productSerie, visualBits, visualSignature, numero_droit_usage: cleanDroitUsage },
                 visual_bits: visualBits, visual_signature: visualSignature,
                 matrix_hash: sha256Hex(visualBits), ai_signature_hash: secureSignature,
                 sha256_hash: secureSignature, signature_ia: secureSignature,
@@ -1134,7 +1132,6 @@ app.post(
                 }
             }
 
-            // Normalisation de l'image reçue de l'APK
             let base64ImagePayload = null;
             if (typeof scannedMatrix === "string") {
                 base64ImagePayload = scannedMatrix;
@@ -1148,7 +1145,6 @@ app.post(
 
             let verificationMode = "STRICT_MATCH";
 
-            // Si pas de lot texte mais une image -> Appel au modèle de vision
             if (!targetLot && base64ImagePayload) {
                 console.log("[ANOR SCAN TRACE] 🔍 Aucun lot textuel trouvé. Lancement de l'OCR Vision (qwen/qwen3.8-27b)...");
                 const extractedLot = await extractLotWithGroqVision(base64ImagePayload);
@@ -1166,7 +1162,6 @@ app.post(
             let row = null;
             let matchConfidence = 1.0;
 
-            // Recherche par numéro de lot en base de données Supabase
             if (targetLot) {
                 const rawLot = String(targetLot).trim();
                 const cleanCode = rawLot.replace(/^(LOT|L0T)\s*[:\-]*/i, "").trim();
@@ -1192,7 +1187,6 @@ app.post(
                 }
             }
 
-            // PLAN DE SECOURS PAR LES 28 BITS (HAMMING)
             const normalizedRequestBits = normalizeVisualBits(requestVisualBits || (typeof scannedMatrix === "string" && !scannedMatrix.startsWith("data:") ? scannedMatrix : null));
 
             if (!row && normalizedRequestBits) {
