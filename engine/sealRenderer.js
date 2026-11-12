@@ -1,7 +1,7 @@
 /**
  * ====================================================================
  * ANOR CHECK
- * SEAL RENDERER V43.3 - CORRECTION DU POSITIONNEMENT DU DROIT D'USAGE
+ * SEAL RENDERER V43.5 - POSITIONNEMENT CORRECT AU-DESSUS DU LOGO
  * ====================================================================
  */
 
@@ -56,8 +56,8 @@ const sealRenderer = {
         const centerX = width / 2;
         const centerY = height / 2;
         
-        // Logo légèrement réduit pour laisser respirer le centre
-        const logoSize = 320; 
+        // Logo ajusté pour laisser un bel espace en haut pour le droit d'usage
+        const logoSize = 300; 
         const logoRadius = logoSize / 2;
 
         const outerRingRadius = outerRadius - 20;
@@ -204,8 +204,8 @@ const sealRenderer = {
             payload.logoPath ||
             path.join(__dirname, '../assets/logo_anor_master.png');
 
-        // Logo légèrement décalé vers le haut pour laisser de l'espace au texte central
-        const logoCenterY = centerY - 75 * scale;
+        // Logo légèrement descendu pour libérer de l'espace net entre lui et les glyphes du haut
+        const logoCenterY = centerY + 10 * scale;
 
         if (fs.existsSync(logoPath)) {
             try {
@@ -297,27 +297,28 @@ const sealRenderer = {
         }
         ctx.restore();
 
-        // BLOC DE TEXTE CENTRAL (Droit d'usage, Lot et Série)
+        // BLOC DE TEXTE CENTRAL (Droit d'usage au-dessus du logo, Lot et Série en bas)
         ctx.save();
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
 
-        // 1. Numéro de Droit d'Usage positionné proprement sous le logo et au-dessus du lot
+        // 1. Numéro de Droit d'Usage positionné DANS LE VIDE EXACT ENTRE LE HAUT DU LOGO ET LES GLYPHES
         if (droitUsageText) {
-            const droitUsageY = centerY + 35 * scale;
-            ctx.font = `800 ${Math.max(20, Math.round(28 * scale))}px sans-serif`;
+            // Calculé pour se situer entre le sommet du logo et l'anneau des glyphes du haut
+            const droitUsageY = centerY - 110 * scale;
+            ctx.font = `800 ${Math.max(24, Math.round(32 * scale))}px sans-serif`;
             ctx.fillStyle = '#006633'; // Vert institutionnel ANOR
             ctx.fillText(droitUsageText, centerX, droitUsageY);
         }
 
-        // 2. Affichage du Lot
-        const lotY = centerY + 85 * scale;
+        // 2. Affichage du Lot (en bas du logo)
+        const lotY = centerY + 105 * scale;
         ctx.font = `900 ${Math.max(26, Math.round(36 * scale))}px sans-serif`;
         ctx.fillStyle = TEXT_PRIMARY_COLOR;
         ctx.fillText(batchText, centerX, lotY);
 
         // 3. Affichage de la série / index unitaire en dessous
-        const serialY = centerY + 130 * scale;
+        const serialY = centerY + 150 * scale;
         ctx.font = `900 ${Math.max(24, Math.round(34 * scale))}px sans-serif`;
         ctx.fillStyle = TEXT_SECONDARY_COLOR;
         ctx.fillText(itemText, centerX, serialY);
