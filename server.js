@@ -2,7 +2,7 @@
  * ======================================================
  * SYSTEME SOUVERAIN DE CERTIFICATION ANOR
  * SERVER CORE (VERSION VISION QWEN / GROQ - 100% INTÉGRALE)
- * Version: 25.6.0 (Modèle Vision Actif Qwen/Groq)
+ * Version: 25.6.1 (Support Push & Droit d'Usage Actif)
  * ======================================================
  */
 
@@ -58,7 +58,7 @@ setInterval(() => {
     }
 }, 60000);
 
-const SERVER_VERSION = "25.6.0";
+const SERVER_VERSION = "25.6.1";
 const VISUAL_VERSION = 2; 
 const VISUAL_BITS_LENGTH = 28;
 const isProduction = process.env.NODE_ENV === "production";
@@ -356,6 +356,24 @@ const upload = multer({
         if (allowedMimes.includes(file.mimetype)) { return cb(null, true); }
         securityLog(req, "INVALID_FILE_TYPE_ATTEMPT", { mimetype: file.mimetype });
         return cb(new Error("INVALID_FILE_TYPE"));
+    }
+});
+
+/**
+ * ROUTE D'ENREGISTREMENT DES NOTIFICATIONS PUSH (WEB & APK)
+ */
+app.post("/api/push/subscribe", (req, res) => {
+    try {
+        const subscription = req.body;
+        if (!subscription || !subscription.endpoint) {
+            return apiError(res, 400, "INVALID_SUBSCRIPTION", "Objet d'abonnement push invalide.");
+        }
+        pushSubscriptions.add(JSON.stringify(subscription));
+        console.log("[ANOR PUSH] Nouvel abonnement push enregistré. Total abonnés actifs:", pushSubscriptions.size);
+        return apiSuccess(res, { message: "Abonnement push enregistré avec succès." });
+    } catch (err) {
+        console.error("[PUSH SUBSCRIBE ERROR]", err.message);
+        return apiError(res, 500, "PUSH_ERROR", "Impossible d'enregistrer l'abonnement push.");
     }
 });
 
@@ -715,7 +733,7 @@ app.get("/api/registry/data", async (req, res) => {
     try {
         const { data: products, error } = await supabase
             .from("produits_certifies")
-            .select("lot, certificate_code, nom_produit, nom_producteur, quantite, created_at, statut")
+            .select("lot, certificate_code, nom_produit, nom_producteur, numero_droit_usage, quantite, created_at, statut")
             .order("created_at", { ascending: false })
             .limit(200);
 
@@ -724,6 +742,7 @@ app.get("/api/registry/data", async (req, res) => {
         const items = (products || []).map(p => ({
             lot: p.lot || p.certificate_code || "N/A",
             numero_lot: p.lot || p.certificate_code || "N/A",
+            numero_droit_usage: p.numero_droit_usage || "N/A",
             entreprise: p.nom_producteur || "Producteur Agréé",
             produit: p.nom_produit || "Produit Certifié",
             quantite: p.quantite ? Number(p.quantite).toLocaleString("fr-FR") : "0",
@@ -897,7 +916,7 @@ app.post("/api/security/audit", (req, res) => {
         console.log("[ANOR SECURITY AUDIT] Rapport reçu :", JSON.stringify(auditData));
         return apiSuccess(res, { 
             status: "AUDIT_RECEIVED", 
-            message: "Rapport de sécurité pris en compte par le noyau 25.6.0." 
+            message: "Rapport de sécurité pris en compte par le noyau 25.6.1." 
         });
     } catch (error) {
         console.error("[SECURITY AUDIT ERROR]", error.message);
@@ -952,7 +971,6 @@ app.post(
 
             const visualSignature = `ANOR28:${visualBits}`;
 
-            // PASSAGE DU NUMÉRO DE DROIT D'USAGE AU RENDERER DU SCEAU
             const imageBuffer = await SealRenderer.renderSealToBuffer(
                 { secureSignature, visualBits, numero_droit_usage: cleanDroitUsage },
                 {
@@ -1072,6 +1090,7 @@ Système Souverain de Certification - ANOR Engine ${SERVER_VERSION}
                 message: "Sceau et sérialisation unitaire générés avec succès.", 
                 lot: certificateCode, 
                 numero_lot: certificateCode, 
+                numero_droit_usage: cleanDroitUsage,
                 serie: productSerie, 
                 sha256_hash: secureSignature, 
                 visualVersion: VISUAL_VERSION, 
@@ -1090,7 +1109,7 @@ Système Souverain de Certification - ANOR Engine ${SERVER_VERSION}
 );
 
 /**
- * ROUTE DE VÉRIFICATION AVEC TRACAGE COMPLET DANS LES LOGS
+ * ROUTE DE VÉRIFICATION AVEC RETOUR COMPLET DU NUMÉRO DE DROIT D'USAGE
  */
 app.post(
     "/api/seals/verify",
@@ -1341,6 +1360,7 @@ app.post(
                 composition: row.composition || null, 
                 packaging: row.type_emballage || null,
                 numero_droit_usage: row.numero_droit_usage || null,
+                numeroDroitUsage: row.numero_droit_usage || null,
                 visualUrl: row.visuel_produit_url || null, 
                 visuel_produit_url: row.visuel_produit_url || null, 
                 visualProduitUrl: row.visuel_produit_url || null,
