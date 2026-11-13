@@ -1,7 +1,7 @@
 /**
  * ====================================================================
  * ANOR CHECK
- * SEAL RENDERER V43.2 - INTÉGRATION DU NUMÉRO DE DROIT D'USAGE AU-DESSUS DU LOGO
+ * SEAL RENDERER V43.1 - INTEGRATION DU PREFIXE "LOT" SOUS LE LOGO
  * ====================================================================
  */
 
@@ -145,17 +145,9 @@ const sealRenderer = {
         }
 
         const normalizedBatchName = String(rawBatchName).trim().toUpperCase();
+        // Intégration propre du préfixe "LOT :" pour que l'OCR et l'humain le lisent instantanément
         const cleanLotValue = normalizedBatchName.replace(/^LOT\s*[:\-]*/i, '');
         const batchText = `LOT : ${cleanLotValue}`;
-
-        // Récupération du Numéro de Droit d'Usage transmis dans le payload ou les options
-        const rawDroitUsage =
-            payload.numero_droit_usage ||
-            payload.numeroDroitUsage ||
-            options.numero_droit_usage ||
-            options.numeroDroitUsage ||
-            '';
-        const droitUsageText = rawDroitUsage ? String(rawDroitUsage).trim() : '';
 
         const rawMasterLabel = options.masterSerialLabel || '000000';
         const cleanSerialNum = rawMasterLabel.split('/')[0].trim();
@@ -219,19 +211,6 @@ const sealRenderer = {
             } catch (error) {
                 console.error('[sealRenderer] Erreur lors du chargement du logo :', error);
             }
-        }
-
-        // AFFICHAGE DU NUMÉRO DE DROIT D'USAGE AU-DESSUS DU LOGO (Espace dédié)
-        if (droitUsageText) {
-            ctx.save();
-            ctx.textAlign = 'center';
-            ctx.textBaseline = 'middle';
-            // Positionné au-dessus du sommet du logo pour une clarté optimale même en petite taille (1.5 - 2 cm)
-            const droitUsageY = logoCenterY - logoRadius - 28 * scale;
-            ctx.font = `800 ${Math.max(18, Math.round(24 * scale))}px sans-serif`;
-            ctx.fillStyle = '#006633'; // Vert institutionnel ANOR pour le droit d'usage
-            ctx.fillText(droitUsageText, centerX, droitUsageY);
-            ctx.restore();
         }
 
         const finderAngles = this.getFinderAngles();
